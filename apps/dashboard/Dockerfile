@@ -32,8 +32,12 @@ COPY --from=builder --chown=nextjs:nodejs /app/apps/dashboard/.next/static ./.ne
 COPY --from=builder --chown=nextjs:nodejs /app/apps/dashboard/package.json ./apps/dashboard/package.json
 COPY --from=builder --chown=nextjs:nodejs /app/packages/shared ./packages/shared
 
-RUN sed -i '/"@bitalih\/shared": "workspace:[*]"/d' /app/apps/dashboard/package.json && \
-    npm install --legacy-peer-deps
+RUN node -e "
+const fs = require('fs');
+const pkg = JSON.parse(fs.readFileSync('/app/apps/dashboard/package.json', 'utf8'));
+delete pkg.dependencies['@bitalih/shared'];
+fs.writeFileSync('/app/apps/dashboard/package.json', JSON.stringify(pkg, null, 2) + '\n');
+" && npm install --legacy-peer-deps
 
 USER nextjs
 EXPOSE 3000
