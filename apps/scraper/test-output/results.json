@@ -1,0 +1,122 @@
+[
+  {
+    "site": "4nala",
+    "urlWorks": true,
+    "loginRequired": true,
+    "selectorsFound": [],
+    "campaignsExtracted": 0,
+    "pageTitle": "4NALA.COM",
+    "bodyText": "BAHİS YAP\nPROGRAM\nSONUÇLAR\nTJK TV\nHAZIR KUPONLAR\nYORUMLAR\nKAMPANYALAR\nŞANS OYUNLARI\nGİRİŞ YAP\nÜYE OL\n\n\nÜZGÜNÜZ,\nBU SAYFAYA ŞU AN ULAŞILAMIYOR :(\n\n\n\nTıkladığın bağlantı bozuk olabilir veya sayfa kaldır",
+    "error": "Login required",
+    "screenshotPath": "test-output/4nala-login.png"
+  },
+  {
+    "site": "altiliganyan",
+    "urlWorks": true,
+    "loginRequired": true,
+    "selectorsFound": [],
+    "campaignsExtracted": 0,
+    "pageTitle": "AltılıGanyan.com",
+    "bodyText": "Yardım\nÜye Ol\nGiriş Yap\nTJK At Yarışı\nKazı Kazan\nSanal Bahis\nŞans Oyunları\nSayısal Oyunlar\nSanal Yarış\nKampanyalar\nÜzgünüz, bu sayfaya şu an ulaşılamıyor.\nTıkladığın bağlantı bozuk olabilir veya sayfa",
+    "error": "Login required",
+    "screenshotPath": "test-output/altiliganyan-login.png"
+  },
+  {
+    "site": "atyarisi",
+    "urlWorks": true,
+    "loginRequired": true,
+    "selectorsFound": [],
+    "campaignsExtracted": 0,
+    "pageTitle": "",
+    "bodyText": "atyarisi.com\nYARDIM\nUnuttum\nBeni Hatırla\nGİRİŞ\nHEMEN ÜYE OL\nAT YARIŞI\nYeni\nSANAL YARIŞLAR\nSANAL OYUNLAR\nKAZI KAZAN\nŞANS OYUNLARI\nSAYISAL OYUNLAR\nKAMPANYALAR\nAradığınız sayfa bulunamadı\nAnasayfaya git\n",
+    "error": "Login required",
+    "screenshotPath": "test-output/atyarisi-login.png"
+  },
+  {
+    "site": "bilyoner",
+    "urlWorks": true,
+    "loginRequired": true,
+    "selectorsFound": [],
+    "campaignsExtracted": 0,
+    "pageTitle": "",
+    "bodyText": "{\"code\":40319,\"message\":\"Giriş yapmak için Müşteri Hizmetleri'ni arayabilirsin.\",\"domain\":\"users-api\",\"extras\":{\"location\":\"login\",\"locationType\":\"modalbox\"}}",
+    "error": "Login required",
+    "screenshotPath": "test-output/bilyoner-login.png"
+  },
+  {
+    "site": "birebin",
+    "urlWorks": true,
+    "loginRequired": false,
+    "selectorsFound": [],
+    "campaignsExtracted": 4,
+    "pageTitle": "Hata - Birebin | Yasal Bahis Sitesi | İddaa|Bahis | İddaa Oyna | Spor Toto | Canli Skor | İddaa tahminleri",
+    "bodyText": "\t\n \nCanlı Bahis\n\t\nİddaa\n\t\nSosyal\n\tŞans Oyunları\t\n\t\nGiriş Yap Üye Ol\n\t\nKuponum\n0\n16:28\n2 saniye içinde yönlendirileceksiniz.\nBizi takip edin.\nBizimle iletişime geçin.\n0216 630 63 83\ndestek@birebin.com\n",
+    "screenshotPath": "test-output/birebin-campaigns.png",
+    "htmlDump": "test-output/birebin-dump.html"
+  },
+  {
+    "site": "ekuri",
+    "urlWorks": true,
+    "loginRequired": false,
+    "selectorsFound": [
+      "[class*=\"kampanya\"] (1 found)"
+    ],
+    "campaignsExtracted": 1,
+    "pageTitle": "TJK At Yarışı Oyna | Yeni Nesil Ganyan | Eküri.com",
+    "bodyText": "Bahis Yap\nSabit İhtimalli Bahis\nKuponlarım\nSonuçlar\nTJK TV\nMuhtemeller\nProgram\nYazar Yorumları\nKampanyalar\n\nGİRİŞ YAP\n\nÜYE OL\n\n404\nAradığınız sayfa bulunamadı.\nAna Sayfaya Dön\n+18\nResmi sanal bayi ola",
+    "screenshotPath": "test-output/ekuri-campaigns.png",
+    "htmlDump": "test-output/ekuri-dump.html"
+  },
+  {
+    "site": "hipodrom",
+    "urlWorks": true,
+    "loginRequired": true,
+    "selectorsFound": [],
+    "campaignsExtracted": 0,
+    "pageTitle": "",
+    "bodyText": "GİRİŞ YAP\nHEMEN ÜYE OL\nAT YARIŞI\nKAZI KAZAN\nSANAL AT & TAZI YARIŞI\nSANAL BAHİS\nSAYISAL OYUNLAR\n404\nAradığınız sayfa bulunamadı\nAnasayfaya Dön\nBAHİS\nMüşterek Bahis Oyna\nSabit İhtimalli Bahis Oyna\nProgr",
+    "error": "Login required",
+    "screenshotPath": "test-output/hipodrom-login.png"
+  },
+  {
+    "site": "misli",
+    "urlWorks": true,
+    "loginRequired": true,
+    "selectorsFound": [],
+    "campaignsExtracted": 0,
+    "pageTitle": "",
+    "bodyText": "İDDAA\nKAZI KAZAN\nSAYISAL OYUNLAR\nSANAL OYUNLAR\nŞANS OYUNLARI\nSPOR TOTO\nGİRİŞ YAP\nÜYE OL\n32\nCanlı (605)\nFutbol (550)\nBasketbol (195)\nE-Futbol (25)\nE-Basketbol (6)\nTenis (37)\nVoleybol (50)\nHentbol (104)",
+    "error": "Login required",
+    "screenshotPath": "test-output/misli-login.png"
+  },
+  {
+    "site": "nesine",
+    "urlWorks": true,
+    "loginRequired": true,
+    "selectorsFound": [],
+    "campaignsExtracted": 0,
+    "pageTitle": "",
+    "bodyText": "Nesine\nYARDIM\nUnuttum\nBeni Hatırla\nGİRİŞ\nHEMEN ÜYE OL\n0\nOran:\n0,00\nBülten\nKupondaş\nCanlı Sonuçlar\nDakika Bahis\nPopüler Kuponlar\nKazanan 10\nEditörler\nSpor Toto\nSanal Oyunlar\nŞans Oyunları\nYENİ\nSayısal ",
+    "error": "Login required",
+    "screenshotPath": "test-output/nesine-login.png"
+  },
+  {
+    "site": "oley",
+    "urlWorks": true,
+    "loginRequired": true,
+    "selectorsFound": [],
+    "campaignsExtracted": 0,
+    "pageTitle": "Canlı İddaa | Spor Toto | Oley.com",
+    "bodyText": "485\n565\n204\n31\n7\n42\n53\n113\n114\n3\n39\nUV : 45\nUV : 6\nUV : 7\nUV : 6\nUV : 2\nUV : 6\nİDDAA\nSOSYOLEY\nŞANS OYUNLARI\nSPOR TOTO\nKAMPANYALAR\nDUYURULAR\nGİRİŞ YAPÜYE OL\nBugün\n22:45\nCanlı\n\nHazırlık Maçları\nİngilter",
+    "error": "Login required",
+    "screenshotPath": "test-output/oley-login.png"
+  },
+  {
+    "site": "sundzulyuk",
+    "urlWorks": false,
+    "loginRequired": false,
+    "selectorsFound": [],
+    "campaignsExtracted": 0,
+    "error": "net::ERR_NAME_NOT_RESOLVED at https://www.sondzulyuk.com/bonus"
+  }
+]

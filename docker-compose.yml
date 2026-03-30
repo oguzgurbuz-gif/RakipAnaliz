@@ -1,0 +1,83 @@
+services:
+  db:
+    image: postgres:15-alpine
+    container_name: bitalih-db
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: postgres
+      POSTGRES_DB: campaigns
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    ports:
+      - "5433:5432"
+    networks:
+      - bitalih-network
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres -d campaigns"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 10s
+
+  dashboard:
+    build:
+      context: .
+      dockerfile: apps/dashboard/Dockerfile
+    container_name: bitalih-dashboard
+    restart: unless-stopped
+    environment:
+      NODE_ENV: production
+      PORT: ${PORT:-3000}
+      DATABASE_URL: ${DATABASE_URL:-postgresql://postgres:postgres@db:5432/campaigns}
+      PNPM_HOME: /pnpm
+      npm_config_shamefully_hoist: "true"
+    ports:
+      - "3001:3000"
+    depends_on:
+      db:
+        condition: service_healthy
+    networks:
+      - bitalih-network
+
+  scraper:
+    build:
+      context: .
+      dockerfile: apps/scraper/Dockerfile
+    container_name: bitalih-scraper
+    restart: unless-stopped
+    environment:
+      NODE_ENV: ${NODE_ENV:-development}
+      DATABASE_URL: ${DATABASE_URL:-postgresql://postgres:postgres@db:5432/campaigns}
+      PNPM_HOME: /pnpm
+      npm_config_shamefully_hoist: "true"
+      PUPPETEER_EXECUTABLE_PATH: /usr/bin/chromium
+      DEEPSEEK_API_URL: ${DEEPSEEK_API_URL:-https://api.deepseek.com/chat/completions}
+      DEEPSEEK_API_KEY: ${DEEPSEEK_API_KEY:-your_key_here}
+      DEEPSEEK_MODEL: ${DEEPSEEK_MODEL:-deepseek-chat}
+      SSE_HEARTBEAT_MS: ${SSE_HEARTBEAT_MS:-15000}
+      AI_JOB_POLL_MS: ${AI_JOB_POLL_MS:-5000}
+      LOG_LEVEL: ${LOG_LEVEL:-info}
+      SCRAPER_CONCURRENCY: ${SCRAPER_CONCURRENCY:-2}
+      SCRAPER_HEADLESS: ${SCRAPER_HEADLESS:-true}
+      SCRAPER_TIMEOUT_MS: ${SCRAPER_TIMEOUT_MS:-45000}
+      SCRAPER_EXPAND_MAX_CLICKS: ${SCRAPER_EXPAND_MAX_CLICKS:-20}
+      SCRAPER_EXPAND_WAIT_MS: ${SCRAPER_EXPAND_WAIT_MS:-1200}
+    depends_on:
+      db:
+        condition: service_healthy
+    networks:
+      - bitalih-network
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres -h db -d campaigns || exit 1"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 30s
+
+networks:
+  bitalih-network:
+    driver: bridge
+
+volumes:
+  postgres_data:

@@ -1,0 +1,24 @@
+{
+  "compilerOptions": {
+    "target": "ES2022",
+    "lib": ["ES2022"],
+    "module": "ESNext",
+    "moduleResolution": "bundler",
+    "resolveJsonModule": true,
+    "strict": true,
+    "esModuleInterop": true,
+    "skipLibCheck": true,
+    "forceConsistentCasingInFileNames": true,
+    "declaration": true,
+    "declarationMap": true,
+    "sourceMap": true,
+    "baseUrl": ".",
+    "paths": {
+      "@bitalih/shared": ["packages/shared/src"],
+      "@bitalih/shared/*": ["packages/shared/src/*"],
+      "@bitalih/dashboard/*": ["apps/dashboard/*"],
+      "@bitalih/scraper/*": ["apps/scraper/*"]
+    }
+  },
+  "exclude": ["node_modules", "dist", ".next"]
+}

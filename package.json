@@ -1,0 +1,32 @@
+{
+  "name": "bitalih",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Turkish betting campaign aggregation and analysis platform",
+  "scripts": {
+    "dev:dashboard": "pnpm --filter dashboard dev",
+    "dev:scraper": "pnpm --filter scraper dev",
+    "build": "pnpm -r build",
+    "build:dashboard": "pnpm --filter dashboard build",
+    "build:scraper": "pnpm --filter scraper build",
+    "docker:up": "docker-compose up -d",
+    "docker:down": "docker-compose down",
+    "docker:build": "docker-compose build",
+    "db:migrate": "pnpm --filter scraper migrate",
+    "db:seed": "pnpm --filter scraper seed",
+    "lint": "pnpm -r lint",
+    "typecheck": "pnpm -r typecheck",
+    "clean": "pnpm -r clean"
+  },
+  "devDependencies": {
+    "typescript": "^5.4.0"
+  },
+  "engines": {
+    "node": ">=20.0.0",
+    "pnpm": ">=8.0.0"
+  },
+  "packageManager": "pnpm@8.15.0",
+  "dependencies": {
+    "esbuild": "^0.27.4"
+  }
+}

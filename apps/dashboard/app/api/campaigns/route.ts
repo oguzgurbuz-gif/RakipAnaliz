@@ -1,0 +1,236 @@
+import { NextRequest, NextResponse } from 'next/server';
+import { z } from 'zod';
+import { query } from '@/lib/db';
+import { successResponse, handleApiError, getCorsHeaders } from '@/lib/response';
+
+const querySchema = z.object({
+  page: z.coerce.number().int().positive().default(1),
+  pageSize: z.coerce.number().int().positive().max(100).default(20),
+  siteId: z.string().optional(),
+  status: z.string().optional(),
+  category: z.string().optional(),
+  sentiment: z.string().optional(),
+  dateMode: z.enum([
+    'started_in_range',
+    'ended_in_range',
+    'active_during_range',
+    'changed_in_range',
+    'passive_in_range',
+    'seen_in_range'
+  ]).optional(),
+  from: z.string().optional(),
+  to: z.string().optional(),
+  search: z.string().optional(),
+  sort: z.string().optional(),
+});
+
+type CampaignRow = {
+  id: string;
+  site_id: string;
+  title: string;
+  body: string | null;
+  status: string;
+  valid_from: Date | null;
+  valid_to: Date | null;
+  first_seen_at: Date;
+  last_seen_at: Date;
+  primary_image_url: string | null;
+  fingerprint: string;
+  site_name: string;
+  site_code: string;
+  ai_sentiment_label: string | null;
+  ai_category_code: string | null;
+  ai_summary_text: string | null;
+  ai_key_points: unknown | null;
+  ai_risk_flags: unknown | null;
+};
+
+function buildDateClause(dateMode?: string, from?: string, to?: string): { clause: string; params: unknown[] } {
+  if (!dateMode || !from || !to) {
+    return { clause: '', params: [] };
+  }
+
+  const dateFrom = new Date(from);
+  const dateTo = new Date(to);
+
+  switch (dateMode) {
+    case 'started_in_range':
+      return {
+        clause: 'AND c.valid_from >= $1 AND c.valid_from <= $2',
+        params: [dateFrom, dateTo]
+      };
+    case 'ended_in_range':
+      return {
+        clause: 'AND c.valid_to >= $1 AND c.valid_to <= $2',
+        params: [dateFrom, dateTo]
+      };
+    case 'active_during_range':
+      return {
+        clause: 'AND c.valid_from <= $2 AND (c.valid_to IS NULL OR c.valid_to >= $1)',
+        params: [dateFrom, dateTo]
+      };
+    case 'changed_in_range':
+      return {
+        clause: 'AND c.updated_at >= $1 AND c.updated_at <= $2',
+        params: [dateFrom, dateTo]
+      };
+    case 'seen_in_range':
+      return {
+        clause: 'AND c.last_seen_at >= $1 AND c.last_seen_at <= $2',
+        params: [dateFrom, dateTo]
+      };
+    default:
+      return { clause: '', params: [] };
+  }
+}
+
+export async function GET(request: NextRequest) {
+  try {
+    const searchParams = Object.fromEntries(new URLSearchParams(request.nextUrl.search));
+    const params = querySchema.parse(searchParams);
+
+    const { page, pageSize, siteId, status, search, sort } = params;
+    const offset = (page - 1) * pageSize;
+
+    const dateFilter = buildDateClause(params.dateMode, params.from, params.to);
+    const filterParams: unknown[] = [...dateFilter.params];
+    let paramIndex = filterParams.length + 1;
+
+    let whereClause = 'WHERE 1=1';
+    
+    if (siteId) {
+      whereClause += ` AND c.site_id = $${paramIndex}`;
+      filterParams.push(siteId);
+      paramIndex++;
+    }
+
+    if (status) {
+      whereClause += ` AND c.status = $${paramIndex}`;
+      filterParams.push(status);
+      paramIndex++;
+    }
+
+    if (params.category) {
+      whereClause += ` AND ai.category_code = $${paramIndex}`;
+      filterParams.push(params.category);
+      paramIndex++;
+    }
+
+    if (params.sentiment) {
+      whereClause += ` AND ai.sentiment_label = $${paramIndex}`;
+      filterParams.push(params.sentiment);
+      paramIndex++;
+    }
+
+    if (search) {
+      whereClause += ` AND (c.title ILIKE $${paramIndex} OR c.body ILIKE $${paramIndex})`;
+      filterParams.push(`%${search}%`);
+      paramIndex++;
+    }
+
+    whereClause += dateFilter.clause;
+
+    const validSortColumns = ['created_at', 'updated_at', 'valid_from', 'valid_to', 'title', 'status'];
+    const sortColumn = validSortColumns.includes(sort || '') ? sort : 'last_seen_at';
+    const sortDirection = sort?.startsWith('-') ? 'ASC' : 'DESC';
+    const sortCol = sort?.startsWith('-') ? sort.slice(1) : sortColumn;
+
+    const countQuery = `
+      SELECT COUNT(DISTINCT c.id) as total
+      FROM campaigns c
+      LEFT JOIN sites s ON s.id = c.site_id
+      LEFT JOIN LATERAL (
+        SELECT ai.sentiment_label, ai.category_code
+        FROM campaign_ai_analyses ai
+        WHERE ai.campaign_id = c.id
+        ORDER BY ai.created_at DESC
+        LIMIT 1
+      ) ai ON true
+      ${whereClause}
+    `;
+
+    const countResult = await query<{ total: string }>(countQuery, filterParams);
+    const total = parseInt(countResult[0]?.total || '0', 10);
+
+    const dataQuery = `
+      SELECT 
+        c.id,
+        c.site_id,
+        c.title,
+        c.body,
+        c.status,
+        c.valid_from,
+        c.valid_to,
+        c.first_seen_at,
+        c.last_seen_at,
+        c.primary_image_url,
+        c.fingerprint,
+        s.name as site_name,
+        s.code as site_code,
+        ai.sentiment_label as ai_sentiment_label,
+        ai.category_code as ai_category_code,
+        ai.summary_text as ai_summary_text,
+        ai.key_points as ai_key_points,
+        ai.risk_flags as ai_risk_flags
+      FROM campaigns c
+      JOIN sites s ON s.id = c.site_id
+      LEFT JOIN LATERAL (
+        SELECT ai2.sentiment_label, ai2.category_code, ai2.summary_text, ai2.key_points, ai2.risk_flags
+        FROM campaign_ai_analyses ai2
+        WHERE ai2.campaign_id = c.id
+        ORDER BY ai2.created_at DESC
+        LIMIT 1
+      ) ai ON true
+      ${whereClause}
+      ORDER BY c.${sortCol || 'last_seen_at'} ${sortDirection}
+      LIMIT $${paramIndex} OFFSET $${paramIndex + 1}
+    `;
+
+    filterParams.push(pageSize, offset);
+    const rows = await query<CampaignRow>(dataQuery, filterParams);
+
+    const campaigns = rows.map((row: CampaignRow) => ({
+      id: row.id,
+      siteId: row.site_id,
+      title: row.title,
+      body: row.body,
+      status: row.status,
+      validFrom: row.valid_from ? row.valid_from.toISOString() : null,
+      validTo: row.valid_to ? row.valid_to.toISOString() : null,
+      firstSeen: row.first_seen_at ? row.first_seen_at.toISOString() : null,
+      lastSeen: row.last_seen_at ? row.last_seen_at.toISOString() : null,
+      primaryImage: row.primary_image_url,
+      fingerprint: row.fingerprint,
+      site: {
+        id: row.site_id,
+        name: row.site_name,
+        code: row.site_code,
+      },
+      sentiment: row.ai_sentiment_label,
+      category: row.ai_category_code,
+      aiSummary: row.ai_summary_text,
+      aiKeyPoints: row.ai_key_points,
+      aiRiskFlags: row.ai_risk_flags,
+    }));
+
+    return NextResponse.json(
+      {
+        success: true,
+        data: campaigns,
+        meta: {
+          page,
+          pageSize,
+          total,
+          totalPages: Math.ceil(total / pageSize),
+        },
+      },
+      { headers: getCorsHeaders() }
+    );
+  } catch (error) {
+    return handleApiError(error);
+  }
+}
+
+export async function OPTIONS() {
+  return new NextResponse(null, { status: 204, headers: getCorsHeaders() });
+}
