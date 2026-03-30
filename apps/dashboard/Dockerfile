@@ -32,7 +32,7 @@ COPY --from=builder --chown=nextjs:nodejs /app/apps/dashboard/.next/static ./.ne
 COPY --from=builder --chown=nextjs:nodejs /app/apps/dashboard/package.json ./apps/dashboard/package.json
 COPY --from=builder --chown=nextjs:nodejs /app/packages/shared ./packages/shared
 
-RUN perl -i -pe 's|"workspace:"[*]"|"file:./packages/shared"|' /app/apps/dashboard/package.json && \
+RUN sed -i "s|\"workspace:\\\\*\"|\"file:./packages/shared\"|" /app/apps/dashboard/package.json && \
     npm install --legacy-peer-deps
 
 USER nextjs
