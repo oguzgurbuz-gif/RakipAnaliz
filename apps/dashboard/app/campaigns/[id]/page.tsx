@@ -17,6 +17,7 @@ import {
   addCampaignNote,
   updateCampaign,
 } from '@/lib/api'
+import type { Campaign } from '@/types'
 import { formatDate, formatDateTime, formatDateRange, getSentimentColor } from '@/lib/utils'
 import { ArrowLeft, Calendar, AlertTriangle, CheckCircle, MessageSquare, Plus, Pencil, X, Save } from 'lucide-react'
 import { useState, useEffect } from 'react'
@@ -503,7 +504,24 @@ export default function CampaignDetailPage({ params }: { params: { id: string } 
                       <CardTitle>Benzer Kampanyalar</CardTitle>
                     </CardHeader>
                     <CardContent>
-                      <CampaignTable campaigns={campaign.similarCampaigns.slice(0, 5)} />
+                      <CampaignTable campaigns={(campaign.similarCampaigns ?? []).slice(0, 5).map(s => ({
+                        ...s,
+                        siteId: s.site.code,
+                        site: { id: s.site.code, name: s.site.name, code: s.site.code },
+                        body: null,
+                        firstSeen: '',
+                        lastSeen: '',
+                        fingerprint: '',
+                        metadata: {},
+                        createdAt: '',
+                        updatedAt: '',
+                        primaryImage: s.primaryImage,
+                        sentiment: null,
+                        aiSentiment: null,
+                        category: null,
+                        aiKeyPoints: null,
+                        aiRiskFlags: null,
+                      })) as Campaign[]} />
                     </CardContent>
                   </Card>
                 )}

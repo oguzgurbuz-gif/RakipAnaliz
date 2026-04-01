@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { z } from 'zod';
 import { query } from '@/lib/db';
-import { getCorsHeaders } from '@/lib/response';
+import { handleApiError, getCorsHeaders } from '@/lib/response';
 
 const querySchema = z.object({
   days: z.coerce.number().int().positive().max(90).default(30),
@@ -201,16 +201,7 @@ export async function GET(request: NextRequest) {
       { headers: getCorsHeaders() }
     );
   } catch (error) {
-    if (error instanceof Error) {
-      return NextResponse.json(
-        { success: false, error: { code: 'INTERNAL_ERROR', message: error.message } },
-        { status: 500, headers: getCorsHeaders() }
-      );
-    }
-    return NextResponse.json(
-      { success: false, error: { code: 'INTERNAL_ERROR', message: 'Unknown error' } },
-      { status: 500, headers: getCorsHeaders() }
-    );
+    return handleApiError(error);
   }
 }
 

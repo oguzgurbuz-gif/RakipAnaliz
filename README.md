@@ -132,9 +132,10 @@ See `.env.example` for all available configuration options.
 ### Scraper (Node.js)
 - Puppeteer for browser automation
 - Cheerio for HTML parsing
-- Redis for job queuing
+- PostgreSQL for job queuing
 - PostgreSQL for data storage
-- OpenAI for AI features
+- DeepSeek for AI features
+- SSE uses in-memory storage (not Redis pub/sub)
 
 ### Shared Package
 - Zod schemas for validation

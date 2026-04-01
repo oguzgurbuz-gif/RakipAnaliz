@@ -90,6 +90,7 @@ export class NesineAdapter extends BaseAdapter {
     ];
 
     let cardElements: ElementHandle<Element>[] = [];
+    let fallbackCards: RawCampaignCard[] = [];
     for (const selector of cardSelectors) {
       try {
         cardElements = await page.$$(selector);
@@ -103,83 +104,87 @@ export class NesineAdapter extends BaseAdapter {
     }
 
     if (cardElements.length === 0) {
-      cardElements = await this.fallbackCardDiscovery(page, seenUrls);
+      fallbackCards = await this.fallbackCardDiscovery(page, seenUrls);
+    } else {
+      for (const cardEl of cardElements) {
+        try {
+          const rawId = await page.evaluate((el) => el.getAttribute('data-id') || el.getAttribute('id') || `nesine-${Date.now()}`, cardEl);
+
+          const title = await cardEl.$eval(this.selectors.campaignTitle, (el: Element) => el.textContent?.trim() ?? '').catch(() => '');
+
+          const description = await cardEl.$eval(this.selectors.campaignDescription, (el: Element) => el.textContent?.trim() ?? null).catch(() => null);
+
+          const bonusAmountText = await cardEl.$eval(this.selectors.bonusAmount, (el: Element) => el.textContent?.trim() ?? null).catch(() => null);
+
+          const bonusPercentageText = await cardEl.$eval(this.selectors.bonusPercentage, (el: Element) => el.textContent?.trim() ?? null).catch(() => null);
+
+          const minDepositText = await cardEl.$eval(this.selectors.minDeposit, (el: Element) => el.textContent?.trim() ?? null).catch(() => null);
+
+          const code = await cardEl.$eval(this.selectors.code, (el: Element) => el.textContent?.trim() ?? null).catch(() => null);
+
+          const campaignUrl = await cardEl.$eval(this.selectors.campaignUrl, (el: Element) => {
+            const href = el.getAttribute('href');
+            if (href && (href.includes('kampanya') || href.includes('bonus') || href.startsWith('/'))) {
+              return href;
+            }
+            return '';
+          }).catch(() => '');
+
+          if (campaignUrl && seenUrls.has(campaignUrl)) {
+            continue;
+          }
+          if (campaignUrl) {
+            seenUrls.add(campaignUrl);
+          }
+
+          const imageUrl = await cardEl.$eval(this.selectors.campaignImage, (el: Element) => el.getAttribute('src') ?? el.getAttribute('data-src') ?? null).catch(() => null);
+
+          const startDateText = await cardEl.$eval(this.selectors.startDate, (el: Element) => el.textContent?.trim() ?? null).catch(() => null);
+
+          const endDateText = await cardEl.$eval(this.selectors.endDate, (el: Element) => el.textContent?.trim() ?? null).catch(() => null);
+
+          const termsUrl = await cardEl.$eval(this.selectors.termsUrl, (el: Element) => el.getAttribute('href') ?? null).catch(() => null);
+
+          const category = await cardEl.$eval(this.selectors.category, (el: Element) => el.textContent?.trim() ?? null).catch(() => null);
+
+          const badge = await cardEl.$eval(this.selectors.badge, (el: Element) => el.textContent?.trim() ?? null).catch(() => null);
+
+          const isFeatured = await cardEl.$(this.selectors.featured).then((el: ElementHandle | null) => el !== null).catch(() => false);
+
+          const isExclusive = await cardEl.$(this.selectors.exclusive).then((el: ElementHandle | null) => el !== null).catch(() => false);
+
+          const card: RawCampaignCard = {
+            siteCode: this.siteCode,
+            rawId,
+            title,
+            description,
+            bonusAmount: bonusAmountText,
+            bonusPercentage: extractNumericValue(bonusPercentageText),
+            minDeposit: minDepositText,
+            maxBonus: null,
+            code: code?.replace(/KOD:|KUPON:?/gi, '').trim() ?? null,
+            url: this.buildCampaignUrl(campaignUrl),
+            imageUrl: normalizeImageUrl(this.baseUrl, imageUrl),
+            startDate: startDateText,
+            endDate: endDateText,
+            termsUrl,
+            category,
+            badge,
+            isFeatured,
+            isExclusive,
+            rawData: {},
+            scrapedAt: new Date(),
+          };
+
+          cards.push(card);
+        } catch (error) {
+          console.error(`Error extracting card: ${error}`);
+        }
+      }
     }
 
-    for (const cardEl of cardElements) {
-      try {
-        const rawId = await page.evaluate((el) => el.getAttribute('data-id') || el.getAttribute('id') || `nesine-${Date.now()}`, cardEl);
-
-        const title = await cardEl.$eval(this.selectors.campaignTitle, (el: Element) => el.textContent?.trim() ?? '').catch(() => '');
-
-        const description = await cardEl.$eval(this.selectors.campaignDescription, (el: Element) => el.textContent?.trim() ?? null).catch(() => null);
-
-        const bonusAmountText = await cardEl.$eval(this.selectors.bonusAmount, (el: Element) => el.textContent?.trim() ?? null).catch(() => null);
-
-        const bonusPercentageText = await cardEl.$eval(this.selectors.bonusPercentage, (el: Element) => el.textContent?.trim() ?? null).catch(() => null);
-
-        const minDepositText = await cardEl.$eval(this.selectors.minDeposit, (el: Element) => el.textContent?.trim() ?? null).catch(() => null);
-
-        const code = await cardEl.$eval(this.selectors.code, (el: Element) => el.textContent?.trim() ?? null).catch(() => null);
-
-        const campaignUrl = await cardEl.$eval(this.selectors.campaignUrl, (el: Element) => {
-          const href = el.getAttribute('href');
-          if (href && (href.includes('kampanya') || href.includes('bonus') || href.startsWith('/'))) {
-            return href;
-          }
-          return '';
-        }).catch(() => '');
-
-        if (campaignUrl && seenUrls.has(campaignUrl)) {
-          continue;
-        }
-        if (campaignUrl) {
-          seenUrls.add(campaignUrl);
-        }
-
-        const imageUrl = await cardEl.$eval(this.selectors.campaignImage, (el: Element) => el.getAttribute('src') ?? el.getAttribute('data-src') ?? null).catch(() => null);
-
-        const startDateText = await cardEl.$eval(this.selectors.startDate, (el: Element) => el.textContent?.trim() ?? null).catch(() => null);
-
-        const endDateText = await cardEl.$eval(this.selectors.endDate, (el: Element) => el.textContent?.trim() ?? null).catch(() => null);
-
-        const termsUrl = await cardEl.$eval(this.selectors.termsUrl, (el: Element) => el.getAttribute('href') ?? null).catch(() => null);
-
-        const category = await cardEl.$eval(this.selectors.category, (el: Element) => el.textContent?.trim() ?? null).catch(() => null);
-
-        const badge = await cardEl.$eval(this.selectors.badge, (el: Element) => el.textContent?.trim() ?? null).catch(() => null);
-
-        const isFeatured = await cardEl.$(this.selectors.featured).then((el: ElementHandle | null) => el !== null).catch(() => false);
-
-        const isExclusive = await cardEl.$(this.selectors.exclusive).then((el: ElementHandle | null) => el !== null).catch(() => false);
-
-        const card: RawCampaignCard = {
-          siteCode: this.siteCode,
-          rawId,
-          title,
-          description,
-          bonusAmount: bonusAmountText,
-          bonusPercentage: extractNumericValue(bonusPercentageText),
-          minDeposit: minDepositText,
-          maxBonus: null,
-          code: code?.replace(/KOD:|KUPON:?/gi, '').trim() ?? null,
-          url: this.buildCampaignUrl(campaignUrl),
-          imageUrl: normalizeImageUrl(this.baseUrl, imageUrl),
-          startDate: startDateText,
-          endDate: endDateText,
-          termsUrl,
-          category,
-          badge,
-          isFeatured,
-          isExclusive,
-          rawData: {},
-          scrapedAt: new Date(),
-        };
-
-        cards.push(card);
-      } catch (error) {
-        console.error(`Error extracting card: ${error}`);
-      }
+    if (fallbackCards.length > 0) {
+      cards.push(...fallbackCards);
     }
 
     const listingUrl = page.url();
@@ -227,8 +232,8 @@ export class NesineAdapter extends BaseAdapter {
     }
   }
 
-  private async fallbackCardDiscovery(page: Page, seenUrls: Set<string>): Promise<any[]> {
-    const cards: any[] = [];
+  private async fallbackCardDiscovery(page: Page, seenUrls: Set<string>): Promise<RawCampaignCard[]> {
+    const cards: RawCampaignCard[] = [];
     try {
       const result = await page.evaluate(() => {
         const links = Array.from(document.querySelectorAll('a[href*="kampanya"], a[href*="bonus"]'));
@@ -239,11 +244,47 @@ export class NesineAdapter extends BaseAdapter {
       });
       const campaignLinks = Array.isArray(result) ? result : [];
 
-      for (const cardData of campaignLinks) {
-        const href = cardData.querySelector?.('a')?.getAttribute('href') || cardData.getAttribute?.('href');
+      for (const cardEl of campaignLinks) {
+        const href = cardEl.querySelector?.('a')?.getAttribute('href') || cardEl.getAttribute?.('href');
         if (href && !seenUrls.has(href)) {
           seenUrls.add(href);
-          cards.push(cardData);
+          const titleEl = cardEl.querySelector('[class*="title"], [class*="ns-title"], h1, h2, h3, h4');
+          const descEl = cardEl.querySelector('[class*="desc"], [class*="info"], [class*="detail"], p');
+          const amountEl = cardEl.querySelector('[class*="amount"], [class*="value"], [class*="ns-amount"]');
+          const percentEl = cardEl.querySelector('[class*="percent"], [class*="rate"], [class*="ns-rate"]');
+          const minEl = cardEl.querySelector('[class*="min"], [class*="deposit"]');
+          const codeEl = cardEl.querySelector('[class*="code"], [class*="coupon"], [class*="ns-code"]');
+          const imgEl = cardEl.querySelector('img');
+          const startEl = cardEl.querySelector('[class*="start"], [class*="from"]');
+          const endEl = cardEl.querySelector('[class*="end"], [class*="to"]');
+          const termsEl = cardEl.querySelector('a[href*="sartlar"], a[href*="kosul"], a[href*="terms"]');
+          const catEl = cardEl.querySelector('[class*="type"], [class*="category"]');
+          const badgeEl = cardEl.querySelector('[class*="badge"], [class*="tag"], [class*="ns-badge"]');
+          const featuredEl = cardEl.querySelector('[class*="featured"], [class*="highlight"]');
+          const exclusiveEl = cardEl.querySelector('[class*="exclusive"], [class*="special"]');
+
+          cards.push({
+            siteCode: 'nesine',
+            rawId: cardEl.getAttribute('data-id') || cardEl.getAttribute('id') || `nesine-${Date.now()}`,
+            title: titleEl?.textContent?.trim() ?? '',
+            description: descEl?.textContent?.trim() ?? null,
+            bonusAmount: amountEl?.textContent?.trim() ?? null,
+            bonusPercentage: null,
+            minDeposit: minEl?.textContent?.trim() ?? null,
+            maxBonus: null,
+            code: codeEl?.textContent?.replace(/KOD:|KUPON:?/gi, '').trim() ?? null,
+            url: href.startsWith('http') ? href : `https://www.nesine.com${href}`,
+            imageUrl: imgEl?.getAttribute('src') ?? imgEl?.getAttribute('data-src') ?? null,
+            startDate: startEl?.textContent?.trim() ?? null,
+            endDate: endEl?.textContent?.trim() ?? null,
+            termsUrl: termsEl?.getAttribute('href') ?? null,
+            category: catEl?.textContent?.trim() ?? null,
+            badge: badgeEl?.textContent?.trim() ?? null,
+            isFeatured: featuredEl !== null,
+            isExclusive: exclusiveEl !== null,
+            rawData: {},
+            scrapedAt: new Date(),
+          });
         }
       }
     } catch (e) {

@@ -1,6 +1,6 @@
 import { NextResponse } from 'next/server';
 import { query } from '@/lib/db';
-import { getCorsHeaders } from '@/lib/response';
+import { handleApiError, getCorsHeaders } from '@/lib/response';
 
 export async function GET() {
   try {
@@ -16,10 +16,7 @@ export async function GET() {
       { headers: getCorsHeaders() }
     );
   } catch (error) {
-    return NextResponse.json(
-      { success: false, error: { message: 'Failed to fetch sites' } },
-      { status: 500, headers: getCorsHeaders() }
-    );
+    return handleApiError(error);
   }
 }
 

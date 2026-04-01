@@ -43,11 +43,29 @@ async function getWeeklyReportData(id: string) {
   const oneJan = new Date(startDate.getFullYear(), 0, 1)
   const weekNumber = Math.ceil(((startDate.getTime() - oneJan.getTime()) / 86400000 + oneJan.getDay() + 1) / 7)
 
-  const summary = JSON.parse(report.summary || '{}')
-  const bySite = JSON.parse(report.by_site || '[]')
-  const topBonuses = JSON.parse(report.top_bonuses || '[]')
+  let summary: Record<string, unknown> = {};
+  let bySite: unknown[] = [];
+  let topBonuses: unknown[] = [];
 
-  const topSites = bySite.map((site: Record<string, unknown>) => ({
+  try {
+    summary = JSON.parse(report.summary || '{}');
+  } catch {
+    // Use empty object as fallback
+  }
+
+  try {
+    bySite = JSON.parse(report.by_site || '[]');
+  } catch {
+    bySite = [];
+  }
+
+  try {
+    topBonuses = JSON.parse(report.top_bonuses || '[]');
+  } catch {
+    topBonuses = [];
+  }
+
+  const topSites = (bySite as Record<string, unknown>[]).map((site: Record<string, unknown>) => ({
     siteName: site.siteCode as string,
     count: site.totalCampaigns as number,
   }))
@@ -61,12 +79,12 @@ async function getWeeklyReportData(id: string) {
     title: `Haftalık Rapor - ${startDate.toLocaleDateString('tr-TR')}`,
     executiveSummary: null,
     status: report.status,
-    siteCoverageCount: summary.activeSites || 0,
-    campaignCount: summary.totalCampaigns || 0,
-    startedCount: summary.newCampaigns || 0,
-    endedCount: summary.expiredCampaigns || 0,
-    activeOverlapCount: summary.totalCampaigns || 0,
-    changedCount: summary.updatedCampaigns || 0,
+    siteCoverageCount: (summary.activeSites as number) || 0,
+    campaignCount: (summary.totalCampaigns as number) || 0,
+    startedCount: (summary.newCampaigns as number) || 0,
+    endedCount: (summary.expiredCampaigns as number) || 0,
+    activeOverlapCount: (summary.totalCampaigns as number) || 0,
+    changedCount: (summary.updatedCampaigns as number) || 0,
     passiveCount: 0,
     topCategories: [],
     topSites,
@@ -74,7 +92,7 @@ async function getWeeklyReportData(id: string) {
     recommendations: [],
     createdAt: report.generated_at.toISOString(),
     updatedAt: report.generated_at.toISOString(),
-    items: topBonuses.map((bonus: Record<string, unknown>, index: number) => ({
+    items: (topBonuses as Record<string, unknown>[]).map((bonus: Record<string, unknown>, index: number) => ({
       id: String(index),
       type: 'top_bonus',
       order: index,

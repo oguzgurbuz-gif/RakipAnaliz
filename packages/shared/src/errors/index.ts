@@ -6,6 +6,7 @@ export class AppError extends Error {
     public readonly context?: Record<string, unknown>
   ) {
     super(message);
+    Object.setPrototypeOf(this, AppError.prototype);
     this.name = 'AppError';
   }
 }

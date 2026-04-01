@@ -1,3 +1,5 @@
+import { Category } from './categories';
+
 export const SITES = {
   FOURNALA: '4nala',
   ALTILIGANYAN: 'altiliganyan',
@@ -19,7 +21,7 @@ export interface SiteInfo {
   name: string;
   baseUrl: string;
   enabled: boolean;
-  category: string;
+  category: Category;
 }
 
 export const SITE_CONFIG: Record<SiteId, SiteInfo> = {

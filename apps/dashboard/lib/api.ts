@@ -75,12 +75,12 @@ export async function fetchCampaigns(
     params.append('category', filters.category)
   }
   if (filters.campaign_type !== undefined && filters.campaign_type !== '') {
-    params.append('category', filters.campaign_type)
+    params.append('campaign_type', filters.campaign_type)
   }
   if (filters.sentiment !== undefined && filters.sentiment !== '') {
     params.append('sentiment', filters.sentiment)
   }
-  if (filters.dateMode !== undefined && filters.dateMode !== '') {
+  if (filters.dateMode !== undefined) {
     params.append('dateMode', filters.dateMode)
   }
   if (filters.dateFrom !== undefined && filters.dateFrom !== '') {
@@ -251,6 +251,14 @@ export interface CompetitionData {
     status: string
     valid_to: Date | null
   }[]
+  siteMatrix: Record<string, Record<string, {
+    category: string
+    site_name: string
+    site_code: string
+    campaign_count: number
+    avg_score: number
+    is_winner: boolean
+  }>>
 }
 
 export async function fetchCompetition(category?: string): Promise<CompetitionData> {

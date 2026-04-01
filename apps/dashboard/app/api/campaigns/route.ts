@@ -79,6 +79,16 @@ function buildDateClause(dateMode?: string, from?: string, to?: string): { claus
         clause: 'AND c.last_seen_at >= $1 AND c.last_seen_at <= $2',
         params: [dateFrom, dateTo]
       };
+    case 'passive_in_range':
+      return {
+        clause: `AND EXISTS (
+      SELECT 1 FROM campaign_status_history h 
+      WHERE h.campaign_id = c.id 
+      AND h.new_status = 'passive' 
+      AND h.changed_at >= $1 AND h.changed_at <= $2
+    )`,
+        params: [dateFrom, dateTo]
+      };
     default:
       return { clause: '', params: [] };
   }

@@ -15,10 +15,11 @@ export function Header({ children }: HeaderProps) {
   const pathname = usePathname()
   
   const getPageTitle = () => {
-    if (pathname === '/') return 'Dashboard'
-    if (pathname.startsWith('/campaigns')) return 'Kampanyalar'
-    if (pathname.startsWith('/reports')) return 'Raporlar'
-    if (pathname.startsWith('/runs')) return 'Scrape İşlemleri'
+    const path = pathname ?? ''
+    if (path === '/') return 'Dashboard'
+    if (path.startsWith('/campaigns')) return 'Kampanyalar'
+    if (path.startsWith('/reports')) return 'Raporlar'
+    if (path.startsWith('/runs')) return 'Scrape İşlemleri'
     return 'Bitalih'
   }
 

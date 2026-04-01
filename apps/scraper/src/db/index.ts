@@ -1,4 +1,4 @@
-import { Pool } from 'pg';
+import { Pool, PoolClient } from 'pg';
 import { logger } from '../utils/logger';
 import { NormalizedCampaignInput, Campaign, CampaignVersion, CampaignDiff, SiteRecord } from '../types';
 import * as queries from './queries';
@@ -36,6 +36,23 @@ export async function closeDb(): Promise<void> {
   }
 }
 
+export async function getTransaction() {
+  const db = getDb();
+  const client = await db.connect();
+  await client.query('BEGIN');
+  return {
+    client: client as unknown as Pool,
+    async commit() {
+      await client.query('COMMIT');
+      client.release();
+    },
+    async rollback() {
+      await client.query('ROLLBACK');
+      client.release();
+    }
+  };
+}
+
 export async function findExistingCampaign(fingerprint: string): Promise<Campaign | null> {
   const db = getDb();
   const row = await queries.findExistingCampaign(db, fingerprint);
@@ -43,7 +60,6 @@ export async function findExistingCampaign(fingerprint: string): Promise<Campaig
 }
 
 export async function insertCampaign(normalized: NormalizedCampaignInput): Promise<string> {
-  const db = getDb();
   const now = new Date();
 
   const siteRow = await queryOne<{ id: string }>(
@@ -54,7 +70,9 @@ export async function insertCampaign(normalized: NormalizedCampaignInput): Promi
     throw new Error(`Site not found: ${normalized.siteCode}`);
   }
 
-    const campaignId = await queries.insertCampaign(db, {
+  const tx = await getTransaction();
+  try {
+    const campaignId = await queries.insertCampaign(tx.client, {
       siteId: siteRow.id,
       externalId: null,
       sourceUrl: normalized.url,
@@ -62,38 +80,43 @@ export async function insertCampaign(normalized: NormalizedCampaignInput): Promi
       title: normalized.title,
       body: normalized.description,
       normalizedText: '',
-    fingerprint: normalized.fingerprint,
-    contentVersion: 1,
-    primaryImageUrl: normalized.imageUrl,
-    validFrom: normalized.startDate,
-    validTo: normalized.endDate,
-    validFromSource: null,
-    validToSource: null,
-    validFromConfidence: null,
-    validToConfidence: null,
-    rawDateText: null,
+      fingerprint: normalized.fingerprint,
+      contentVersion: 1,
+      primaryImageUrl: normalized.imageUrl,
+      validFrom: normalized.startDate,
+      validTo: normalized.endDate,
+      validFromSource: null,
+      validToSource: null,
+      validFromConfidence: null,
+      validToConfidence: null,
+      rawDateText: null,
       status: 'active',
       statusReason: null,
       tags: [],
       metadata: { visibility: normalized.visibility, rawFingerprint: normalized.rawFingerprint },
-  });
+    });
 
-  await queries.insertCampaignVersion(db, {
-    campaignId,
-    title: normalized.title,
-    body: normalized.description,
-    normalizedText: '',
-    fingerprint: normalized.fingerprint,
-    primaryImageUrl: normalized.imageUrl,
-    validFrom: normalized.startDate,
-    validTo: normalized.endDate,
-    validFromSource: null,
-    validToSource: null,
-    rawDateText: null,
-    versionNo: 1,
-  });
+    await queries.insertCampaignVersion(tx.client, {
+      campaignId,
+      title: normalized.title,
+      body: normalized.description,
+      normalizedText: '',
+      fingerprint: normalized.fingerprint,
+      primaryImageUrl: normalized.imageUrl,
+      validFrom: normalized.startDate,
+      validTo: normalized.endDate,
+      validFromSource: null,
+      validToSource: null,
+      rawDateText: null,
+      versionNo: 1,
+    });
 
-  return campaignId;
+    await tx.commit();
+    return campaignId;
+  } catch (error) {
+    await tx.rollback();
+    throw error;
+  }
 }
 
 export async function insertCampaignVersion(
