@@ -27,11 +27,14 @@ ENV NODE_ENV=production
 RUN addgroup --system --gid 1001 nodejs
 RUN adduser --system --uid 1001 nextjs
 
-COPY --from=deps /app/node_modules ./node_modules
 COPY --from=builder --chown=nextjs:nodejs /app/apps/dashboard/.next/standalone ./
 COPY --from=builder --chown=nextjs:nodejs /app/apps/dashboard/.next/static ./.next/static
 COPY --from=builder --chown=nextjs:nodejs /app/apps/dashboard/package.json ./package.json
 COPY --from=builder --chown=nextjs:nodejs /app/packages/shared ./packages/shared
+
+# Fix workspace protocol and install production dependencies
+RUN sed -i 's|"@bitalih/shared": "workspace:\*"|"@bitalih/shared": "file:./packages/shared"|g' ./package.json && \
+    npm install --legacy-peer-deps --omit=dev
 
 USER nextjs
 EXPOSE 3000
