@@ -112,6 +112,30 @@ export async function insertCampaign(normalized: NormalizedCampaignInput): Promi
     });
 
     await tx.commit();
+
+    // Schedule AI analysis for new campaign
+    try {
+      const { jobScheduler } = await import('../jobs/scheduler');
+      await jobScheduler.scheduleJob(
+        'ai-analysis',
+        {
+          campaignId,
+          title: normalized.title,
+          description: normalized.description,
+          termsUrl: null,
+          termsText: null,
+          priority: 'medium',
+        },
+        { priority: 50 }
+      );
+      logger.info(`Scheduled AI analysis job for new campaign ${campaignId}`);
+    } catch (jobError) {
+      // Non-fatal: log but don't fail campaign insertion
+      logger.error(`Failed to schedule AI analysis job for campaign ${campaignId}`, {
+        error: jobError instanceof Error ? jobError.message : 'Unknown error'
+      });
+    }
+
     return campaignId;
   } catch (error) {
     await tx.rollback();
