@@ -9,7 +9,9 @@ const querySchema = z.object({
   siteId: z.string().optional(),
   status: z.string().optional(),
   category: z.string().optional(),
+  campaign_type: z.string().optional(),
   sentiment: z.string().optional(),
+  dateCompleteness: z.enum(['complete', 'missing_start', 'missing_end', 'missing_any']).optional(),
   dateMode: z.enum([
     'started_in_range',
     'ended_in_range',
@@ -32,10 +34,13 @@ type CampaignRow = {
   status: string;
   valid_from: Date | null;
   valid_to: Date | null;
+  ai_valid_from: string | null;
+  ai_valid_to: string | null;
   first_seen_at: Date;
   last_seen_at: Date;
   primary_image_url: string | null;
   fingerprint: string;
+  metadata: Record<string, unknown> | null;
   site_name: string;
   site_code: string;
   ai_sentiment_label: string | null;
@@ -121,15 +126,41 @@ export async function GET(request: NextRequest) {
     }
 
     if (params.category) {
-      whereClause += ` AND ai.category_code = $${paramIndex}`;
+      whereClause += ` AND COALESCE(ai.category_code, c.metadata->'ai_analysis'->>'category', c.metadata->'ai_analysis'->>'campaign_type') = $${paramIndex}`;
       filterParams.push(params.category);
       paramIndex++;
     }
 
+    if (params.campaign_type) {
+      whereClause += ` AND c.metadata->'ai_analysis'->>'campaign_type' = $${paramIndex}`;
+      filterParams.push(params.campaign_type);
+      paramIndex++;
+    }
+
     if (params.sentiment) {
-      whereClause += ` AND ai.sentiment_label = $${paramIndex}`;
+      whereClause += ` AND COALESCE(ai.sentiment_label, c.metadata->'ai_analysis'->>'sentiment') = $${paramIndex}`;
       filterParams.push(params.sentiment);
       paramIndex++;
+    }
+
+    if (params.dateCompleteness) {
+      const hasStartDateExpr = `(c.valid_from IS NOT NULL OR NULLIF(c.metadata->'ai_analysis'->>'valid_from', '') IS NOT NULL)`;
+      const hasEndDateExpr = `(c.valid_to IS NOT NULL OR NULLIF(c.metadata->'ai_analysis'->>'valid_to', '') IS NOT NULL)`;
+
+      switch (params.dateCompleteness) {
+        case 'complete':
+          whereClause += ` AND ${hasStartDateExpr} AND ${hasEndDateExpr}`;
+          break;
+        case 'missing_start':
+          whereClause += ` AND NOT ${hasStartDateExpr}`;
+          break;
+        case 'missing_end':
+          whereClause += ` AND NOT ${hasEndDateExpr}`;
+          break;
+        case 'missing_any':
+          whereClause += ` AND (NOT ${hasStartDateExpr} OR NOT ${hasEndDateExpr})`;
+          break;
+      }
     }
 
     if (search) {
@@ -171,17 +202,20 @@ export async function GET(request: NextRequest) {
         c.status,
         c.valid_from,
         c.valid_to,
+        c.metadata->'ai_analysis'->>'valid_from' as ai_valid_from,
+        c.metadata->'ai_analysis'->>'valid_to' as ai_valid_to,
         c.first_seen_at,
         c.last_seen_at,
         c.primary_image_url,
         c.fingerprint,
+        c.metadata,
         s.name as site_name,
         s.code as site_code,
-        ai.sentiment_label as ai_sentiment_label,
-        ai.category_code as ai_category_code,
-        ai.summary_text as ai_summary_text,
-        ai.key_points as ai_key_points,
-        ai.risk_flags as ai_risk_flags
+        COALESCE(ai.sentiment_label, c.metadata->'ai_analysis'->>'sentiment') as ai_sentiment_label,
+        COALESCE(ai.category_code, c.metadata->'ai_analysis'->>'category', c.metadata->'ai_analysis'->>'campaign_type') as ai_category_code,
+        COALESCE(ai.summary_text, c.metadata->'ai_analysis'->>'summary') as ai_summary_text,
+        COALESCE(ai.key_points, c.metadata->'ai_analysis'->'key_points', c.metadata->'ai_analysis'->'keyPoints') as ai_key_points,
+        COALESCE(ai.risk_flags, c.metadata->'ai_analysis'->'risk_flags', c.metadata->'ai_analysis'->'riskFlags') as ai_risk_flags
       FROM campaigns c
       JOIN sites s ON s.id = c.site_id
       LEFT JOIN LATERAL (
@@ -205,12 +239,13 @@ export async function GET(request: NextRequest) {
       title: row.title,
       body: row.body,
       status: row.status,
-      validFrom: row.valid_from ? row.valid_from.toISOString() : null,
-      validTo: row.valid_to ? row.valid_to.toISOString() : null,
+      validFrom: row.valid_from ? row.valid_from.toISOString() : row.ai_valid_from,
+      validTo: row.valid_to ? row.valid_to.toISOString() : row.ai_valid_to,
       firstSeen: row.first_seen_at ? row.first_seen_at.toISOString() : null,
       lastSeen: row.last_seen_at ? row.last_seen_at.toISOString() : null,
       primaryImage: row.primary_image_url,
       fingerprint: row.fingerprint,
+      metadata: row.metadata || {},
       site: {
         id: row.site_id,
         name: row.site_name,

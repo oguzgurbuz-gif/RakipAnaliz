@@ -236,6 +236,11 @@ export interface ComprehensiveExtractionResult {
     freebet_amount: number | null;
     cashback_percentage: number | null;
     turnover: string | null;
+    promo_code: string | null;
+    eligible_products: string[];
+    deposit_methods: string[];
+    target_segment: string[];
+    max_uses_per_user: string | null;
     required_actions: string[];
     excluded_games: string[];
     time_restrictions: string | null;
@@ -255,10 +260,50 @@ export function isValidComprehensiveExtractionResult(obj: unknown): obj is Compr
   if (typeof r.valid_from !== 'string' && r.valid_from !== null) return false;
   if (typeof r.valid_to !== 'string' && r.valid_to !== null) return false;
   if (typeof r.date_confidence !== 'number') return false;
+  if (typeof r.date_reasoning !== 'string') return false;
   if (typeof r.campaign_type !== 'string') return false;
+  if (typeof r.type_confidence !== 'number') return false;
+  if (typeof r.type_reasoning !== 'string') return false;
   if (typeof r.conditions !== 'object' || r.conditions === null) return false;
   if (!Array.isArray(r.key_points)) return false;
+  if (!r.key_points.every((value) => typeof value === 'string')) return false;
+  if (typeof r.summary !== 'string') return false;
   if (!['positive', 'neutral', 'negative'].includes(r.sentiment as string)) return false;
+  if (!Array.isArray(r.risk_flags)) return false;
+  if (!r.risk_flags.every((value) => typeof value === 'string')) return false;
+  if (typeof r.extraction_confidence !== 'number') return false;
+
+  const conditions = r.conditions as Record<string, unknown>;
+  const numericFields = [
+    'min_deposit',
+    'min_bet',
+    'max_bet',
+    'max_bonus',
+    'bonus_percentage',
+    'freebet_amount',
+    'cashback_percentage',
+  ];
+  for (const field of numericFields) {
+    if (conditions[field] !== null && typeof conditions[field] !== 'number') return false;
+  }
+
+  const stringFields = ['turnover', 'promo_code', 'max_uses_per_user', 'time_restrictions'];
+  for (const field of stringFields) {
+    if (conditions[field] !== null && typeof conditions[field] !== 'string') return false;
+  }
+
+  const arrayFields = [
+    'eligible_products',
+    'deposit_methods',
+    'target_segment',
+    'required_actions',
+    'excluded_games',
+    'membership_requirements',
+  ];
+  for (const field of arrayFields) {
+    if (!Array.isArray(conditions[field])) return false;
+    if (!(conditions[field] as unknown[]).every((value) => typeof value === 'string')) return false;
+  }
   
   return true;
 }

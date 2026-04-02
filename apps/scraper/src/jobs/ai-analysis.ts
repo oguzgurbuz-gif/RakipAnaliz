@@ -1,10 +1,10 @@
 import { logger } from '../utils/logger';
-import { getDb, recalculateCampaignStatus } from '../db';
+import { applyAiExtractedDates, getDb, recalculateCampaignStatus } from '../db';
 import { publishCampaignEvent } from '../publish/sse';
 import { Campaign } from '../types';
 import * as queries from '../db/queries';
 import { analyzeContent } from '../ai/content-analysis';
-import { extractComprehensiveCampaignData, ComprehensiveExtractionResponse } from '../ai/comprehensive-extraction';
+import { extractComprehensiveCampaignData } from '../ai/comprehensive-extraction';
 
 export interface AiAnalysisPayload {
   campaignId: string;
@@ -69,6 +69,11 @@ export interface ComprehensiveAiAnalysisResult {
     freebetAmount: number | null;
     cashbackPercentage: number | null;
     turnover: string | null;
+    promoCode: string | null;
+    eligibleProducts: string[];
+    depositMethods: string[];
+    targetSegment: string[];
+    maxUsesPerUser: string | null;
     requiredActions: string[];
     excludedGames: string[];
     timeRestrictions: string | null;
@@ -119,6 +124,24 @@ export async function processAiAnalysisJob(
   });
 
   await storeAiAnalysis(campaignId, analysis);
+
+  if (description && description.length >= 20) {
+    const comprehensiveResult = await processComprehensiveAiAnalysisJob({
+      campaignId,
+      title,
+      description,
+      rawDateText: [validFrom, validTo].filter(Boolean).join(' - ') || null,
+      priority,
+    });
+
+    if (comprehensiveResult) {
+      await applyComprehensiveDatesIfMissing(
+        campaignId,
+        { validFrom: validFrom ?? null, validTo: validTo ?? null },
+        comprehensiveResult
+      );
+    }
+  }
 
   if (priority === 'high') {
     await triggerDateExtractionIfNeeded(campaignId, analysis);
@@ -188,6 +211,11 @@ export async function processComprehensiveAiAnalysisJob(
       freebetAmount: data.conditions.freebet_amount,
       cashbackPercentage: data.conditions.cashback_percentage,
       turnover: data.conditions.turnover,
+      promoCode: data.conditions.promo_code,
+      eligibleProducts: data.conditions.eligible_products,
+      depositMethods: data.conditions.deposit_methods,
+      targetSegment: data.conditions.target_segment,
+      maxUsesPerUser: data.conditions.max_uses_per_user,
       requiredActions: data.conditions.required_actions,
       excludedGames: data.conditions.excluded_games,
       timeRestrictions: data.conditions.time_restrictions,
@@ -572,9 +600,12 @@ async function storeAiAnalysis(
       targetAudience: analysis.targetAudience,
       valueScore: analysis.valueScore,
       keyPoints: analysis.keyBenefits,
+      key_points: analysis.keyBenefits,
       summary: analysis.summary,
       expirationRisk: analysis.expirationRisk,
       extractedTags: analysis.extractedTags as Record<string, unknown>,
+      riskFlags: [],
+      risk_flags: [],
     });
 
     logger.debug(`Stored AI analysis for campaign ${campaignId}`);
@@ -590,6 +621,45 @@ async function storeComprehensiveAiAnalysis(
   analysis: ComprehensiveAiAnalysisResult
 ): Promise<void> {
   const db = getDb();
+  const extractedTags = {
+    min_deposit: analysis.conditions.minDeposit,
+    min_bet: analysis.conditions.minBet,
+    max_bet: analysis.conditions.maxBet,
+    max_bonus: analysis.conditions.maxBonus,
+    bonus_percentage: analysis.conditions.bonusPercentage,
+    free_bet_amount: analysis.conditions.freebetAmount,
+    freebet_amount: analysis.conditions.freebetAmount,
+    cashback_percent: analysis.conditions.cashbackPercentage,
+    turnover: analysis.conditions.turnover,
+    promo_code: analysis.conditions.promoCode,
+    eligible_products: analysis.conditions.eligibleProducts,
+    deposit_methods: analysis.conditions.depositMethods,
+    target_segment: analysis.conditions.targetSegment,
+    max_uses_per_user: analysis.conditions.maxUsesPerUser,
+    required_actions: analysis.conditions.requiredActions,
+    excluded_games: analysis.conditions.excludedGames,
+    time_restrictions: analysis.conditions.timeRestrictions,
+    membership_requirements: analysis.conditions.membershipRequirements,
+  };
+  const conditions = {
+    min_deposit: analysis.conditions.minDeposit,
+    min_bet: analysis.conditions.minBet,
+    max_bet: analysis.conditions.maxBet,
+    max_bonus: analysis.conditions.maxBonus,
+    bonus_percentage: analysis.conditions.bonusPercentage,
+    freebet_amount: analysis.conditions.freebetAmount,
+    cashback_percentage: analysis.conditions.cashbackPercentage,
+    turnover: analysis.conditions.turnover,
+    promo_code: analysis.conditions.promoCode,
+    eligible_products: analysis.conditions.eligibleProducts,
+    deposit_methods: analysis.conditions.depositMethods,
+    target_segment: analysis.conditions.targetSegment,
+    max_uses_per_user: analysis.conditions.maxUsesPerUser,
+    required_actions: analysis.conditions.requiredActions,
+    excluded_games: analysis.conditions.excludedGames,
+    time_restrictions: analysis.conditions.timeRestrictions,
+    membership_requirements: analysis.conditions.membershipRequirements,
+  };
 
   try {
     await queries.updateCampaignAiAnalysis(db, campaignId, {
@@ -598,26 +668,15 @@ async function storeComprehensiveAiAnalysis(
       sentiment: analysis.sentiment,
       summary: analysis.summary,
       keyPoints: analysis.keyPoints,
+      key_points: analysis.keyPoints,
       expirationRisk: 'medium',
-      extractedTags: {
-        min_deposit: analysis.conditions.minDeposit,
-        min_bet: analysis.conditions.minBet,
-        max_bet: analysis.conditions.maxBet,
-        max_bonus: analysis.conditions.maxBonus,
-        bonus_percentage: analysis.conditions.bonusPercentage,
-        freebet_amount: analysis.conditions.freebetAmount,
-        cashback_percent: analysis.conditions.cashbackPercentage,
-        turnover: analysis.conditions.turnover,
-        required_actions: analysis.conditions.requiredActions,
-        excluded_games: analysis.conditions.excludedGames,
-        time_restrictions: analysis.conditions.timeRestrictions,
-        membership_requirements: analysis.conditions.membershipRequirements,
-      } as Record<string, unknown>,
+      extractedTags: extractedTags as Record<string, unknown>,
       campaign_type: analysis.campaignType,
       type_confidence: analysis.typeConfidence,
       type_reasoning: analysis.typeReasoning,
-      conditions: analysis.conditions,
+      conditions,
       risk_flags: analysis.riskFlags,
+      riskFlags: analysis.riskFlags,
       valid_from: analysis.validFrom,
       valid_to: analysis.validTo,
       date_confidence: analysis.dateConfidence,
@@ -630,6 +689,28 @@ async function storeComprehensiveAiAnalysis(
       error: error instanceof Error ? error.message : 'Unknown error',
     });
   }
+}
+
+async function applyComprehensiveDatesIfMissing(
+  campaignId: string,
+  currentDates: { validFrom: string | null; validTo: string | null },
+  analysis: ComprehensiveAiAnalysisResult
+): Promise<void> {
+  const nextStart = !currentDates.validFrom && analysis.validFrom ? new Date(analysis.validFrom) : null;
+  const nextEnd = !currentDates.validTo && analysis.validTo ? new Date(analysis.validTo) : null;
+
+  if (!nextStart && !nextEnd) {
+    return;
+  }
+
+  await applyAiExtractedDates(
+    campaignId,
+    nextStart,
+    nextEnd,
+    analysis.dateConfidence
+  );
+
+  await recalculateCampaignStatus(campaignId);
 }
 
 async function triggerDateExtractionIfNeeded(

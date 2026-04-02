@@ -10,6 +10,20 @@ export function normalizeCampaignText(text: string | null | undefined): string {
     .trim();
 }
 
+const INVALID_CAMPAIGN_TITLES = new Set([
+  'kampanyalar',
+  'güncel kampanyalar',
+]);
+
+const INVALID_CAMPAIGN_PATTERNS = [
+  /tarayıcı sürümü/i,
+  /desteklenmemektedir/i,
+  /güncel kampanya bulunmamaktadır/i,
+  /giriş yapmak için müşteri hizmetleri/i,
+  /"location":"login"/i,
+  /users-api/i,
+];
+
 export function normalizeWhitespace(text: string): string {
   return text
     .replace(/\s+/g, ' ')
@@ -97,4 +111,29 @@ export function normalizeBooleanField(value: unknown): boolean {
     return lower === 'true' || lower === '1' || lower === 'yes' || lower === 'evet';
   }
   return false;
+}
+
+export function getInvalidCampaignReason(
+  title: string | null | undefined,
+  description: string | null | undefined
+): string | null {
+  const normalizedTitle = normalizeCampaignText(title);
+  const normalizedDescription = normalizeCampaignText(description);
+  const combinedText = `${normalizedTitle} ${normalizedDescription}`.trim();
+
+  if (!normalizedTitle) {
+    return 'missing_title';
+  }
+
+  if (INVALID_CAMPAIGN_TITLES.has(normalizedTitle)) {
+    return 'generic_listing_title';
+  }
+
+  for (const pattern of INVALID_CAMPAIGN_PATTERNS) {
+    if (pattern.test(combinedText)) {
+      return `matched_pattern:${pattern.source}`;
+    }
+  }
+
+  return null;
 }

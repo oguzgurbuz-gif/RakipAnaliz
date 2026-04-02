@@ -83,6 +83,9 @@ export async function fetchCampaigns(
   if (filters.dateMode !== undefined) {
     params.append('dateMode', filters.dateMode)
   }
+  if (filters.dateCompleteness !== undefined) {
+    params.append('dateCompleteness', filters.dateCompleteness)
+  }
   if (filters.dateFrom !== undefined && filters.dateFrom !== '') {
     params.append('from', filters.dateFrom)
   }

@@ -354,7 +354,7 @@ export async function updateCampaignAiAnalysis(
   await db.query(
     `UPDATE campaigns SET
       metadata = JSONB_SET(COALESCE(metadata, '{}'), '{ai_analysis}',
-        to_jsonb($2::jsonb)),
+        COALESCE(metadata->'ai_analysis', '{}'::jsonb) || $2::jsonb),
       updated_at = NOW()
     WHERE id = $1`,
     [campaignId, JSON.stringify(analysis)]

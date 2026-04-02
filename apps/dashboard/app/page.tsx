@@ -180,9 +180,24 @@ export default function DashboardPage() {
               ) : (
                 <div className="space-y-2">
                   {data?.topCategories?.slice(0, 10).map((item, index) => (
-                    <div key={index} className="flex items-center justify-between text-sm">
-                      <span>{item.category}</span>
-                      <span className="text-muted-foreground">{item.count}</span>
+                    <div key={index} className="rounded-lg border p-3">
+                      <div className="flex items-center justify-between gap-3 text-sm">
+                        <span className="font-medium">{item.label || item.category}</span>
+                        <div className="text-right">
+                          <div>{item.count}</div>
+                          {item.share !== undefined && (
+                            <div className="text-xs text-muted-foreground">
+                              %{Math.round(item.share * 100)}
+                            </div>
+                          )}
+                        </div>
+                      </div>
+                      <div className="mt-2 h-2 rounded-full bg-muted">
+                        <div
+                          className="h-2 rounded-full bg-primary"
+                          style={{ width: `${Math.max(8, Math.round((item.share || 0) * 100))}%` }}
+                        />
+                      </div>
                     </div>
                   ))}
                   {(!data?.topCategories || data.topCategories.length === 0) && (

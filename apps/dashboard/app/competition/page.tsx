@@ -66,6 +66,10 @@ export default function CompetitionPage() {
 
   const allCategories = data?.categories || []
   const siteCodes = data?.sites.map(s => s.site_code) || []
+  const siteRankingsByCampaigns = data?.siteRankings || []
+  const siteRankingsByBonus = [...siteRankingsByCampaigns].sort((a, b) => Number(b.avg_bonus) - Number(a.avg_bonus))
+  const topCampaignSite = siteRankingsByCampaigns[0]
+  const topBonusSite = siteRankingsByBonus[0]
 
   return (
     <div className="min-h-screen bg-background">
@@ -102,15 +106,15 @@ export default function CompetitionPage() {
               <StatCard
                 icon={Trophy}
                 label="En Çok Kampanya"
-                value={data?.siteRankings[0]?.site_name || '-'}
-                subValue={`${data?.siteRankings[0]?.total_campaigns || 0} kampanya`}
+                value={topCampaignSite?.site_name || '-'}
+                subValue={`${topCampaignSite?.total_campaigns || 0} kampanya`}
                 highlight
               />
               <StatCard
                 icon={Target}
-                label="En Yüksek Bonus"
-                value={data?.siteRankings[0]?.site_name || '-'}
-                subValue={`${(Number(data?.siteRankings[0]?.avg_bonus) || 0).toFixed(2)} ortalama`}
+                label="En Yüksek Ort. Bonus"
+                value={topBonusSite?.site_name || '-'}
+                subValue={`₺${(Number(topBonusSite?.avg_bonus) || 0).toFixed(2)} ortalama`}
               />
               <StatCard
                 icon={TrendingUp}
@@ -178,7 +182,7 @@ export default function CompetitionPage() {
                       </TableRow>
                     </TableHeader>
                     <TableBody>
-                      {data?.siteRankings.slice(0, 10).map((site, idx) => (
+                      {siteRankingsByCampaigns.slice(0, 10).map((site, idx) => (
                         <TableRow key={site.site_id}>
                           <TableCell className="font-medium">{idx + 1}</TableCell>
                           <TableCell>
@@ -303,16 +307,16 @@ export default function CompetitionPage() {
                       </TableRow>
                     </TableHeader>
                     <TableBody>
-                      {data?.siteRankings.slice(0, 8).map(site => (
+                      {siteRankingsByCampaigns.slice(0, 8).map(site => (
                         <TableRow key={site.site_id}>
                           <TableCell className="font-medium">
                             <div className="flex items-center gap-2">
                               {site.site_name}
-                              {site.total_campaigns === data?.siteRankings[0]?.total_campaigns && <WinnerBadge />}
+                              {site.total_campaigns === topCampaignSite?.total_campaigns && <WinnerBadge />}
                             </div>
                           </TableCell>
                           <TableCell className="text-right">{site.total_campaigns}</TableCell>
-                          <TableCell className="text-right font-mono">{Number(site.avg_bonus).toFixed(2)}</TableCell>
+                          <TableCell className="text-right font-mono">₺{Number(site.avg_bonus).toFixed(2)}</TableCell>
                         </TableRow>
                       ))}
                     </TableBody>
@@ -336,8 +340,7 @@ export default function CompetitionPage() {
                       </TableRow>
                     </TableHeader>
                     <TableBody>
-                      {data?.siteRankings
-                        .sort((a, b) => b.avg_bonus - a.avg_bonus)
+                      {siteRankingsByBonus
                         .slice(0, 8)
                         .map(site => (
                           <TableRow key={site.site_id}>
