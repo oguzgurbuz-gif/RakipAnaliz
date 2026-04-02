@@ -32,26 +32,26 @@ export default function DashboardPage() {
   const bitalihData = competitionData?.siteRankings?.find(s => s.site_code === 'bitalih')
   const otherSites = competitionData?.siteRankings?.filter(s => s.site_code !== 'bitalih') || []
   const avgCompetitorCampaigns = otherSites.length > 0
-    ? otherSites.reduce((sum, s) => sum + s.total_campaigns, 0) / otherSites.length
+    ? otherSites.reduce((sum, s) => sum + Number(s.total_campaigns), 0) / otherSites.length
     : 0
   const bestCompetitor = otherSites.length > 0
-    ? otherSites.reduce((best, s) => (s.avg_bonus > (best?.avg_bonus || 0) ? s : best), otherSites[0])
+    ? otherSites.reduce((best, s) => (Number(s.avg_bonus || 0) > Number(best?.avg_bonus || 0) ? s : best), otherSites[0])
     : null
 
   const bitalihComparisonCards = [
     {
       title: 'Bitalih vs Ortalama',
       subtitle: 'Kampanya Sayısı',
-      bitalihValue: bitalihData?.total_campaigns ?? 0,
-      competitorValue: Math.round(avgCompetitorCampaigns),
+      bitalihValue: Number(bitalihData?.total_campaigns ?? 0),
+      competitorValue: Math.round(Number(avgCompetitorCampaigns)),
       better: (bitalihData?.total_campaigns ?? 0) > avgCompetitorCampaigns ? 'bitalih' : 'competitor',
       suffix: 'kampanya',
     },
     {
       title: 'Bitalih vs En İyi',
       subtitle: 'Bonus Değeri',
-      bitalihValue: bitalihData?.avg_bonus ?? 0,
-      competitorValue: bestCompetitor?.avg_bonus ?? 0,
+      bitalihValue: Number(bitalihData?.avg_bonus ?? 0),
+      competitorValue: Number(bestCompetitor?.avg_bonus ?? 0),
       better: (bitalihData?.avg_bonus ?? 0) > (bestCompetitor?.avg_bonus ?? 0) ? 'bitalih' : 'competitor',
       suffix: '₺',
       prefix: '₺',
@@ -288,8 +288,9 @@ export default function DashboardPage() {
                     <CardContent>
                       <div className="space-y-3">
                         {competitionData?.siteRankings?.slice(0, 6).map((site) => {
-                          const maxCampaigns = Math.max(...(competitionData?.siteRankings?.map(s => s.total_campaigns) || [1]))
-                          const width = (site.total_campaigns / maxCampaigns) * 100
+                          const totalCamp = Number(site.total_campaigns) || 0
+                          const maxCampaigns = Math.max(...(competitionData?.siteRankings?.map(s => Number(s.total_campaigns)) || [1]))
+                          const width = maxCampaigns > 0 ? (totalCamp / maxCampaigns) * 100 : 0
                           const isBitalih = site.site_code === 'bitalih'
                           return (
                             <div key={site.site_id} className="flex items-center gap-3">
@@ -384,29 +385,29 @@ export default function DashboardPage() {
                         <div className="flex items-start gap-2">
                           <span className="font-medium min-w-20">Kampanya:</span>
                           <span>
-                            Bitalih <strong>{bitalihData.total_campaigns}</strong> kampanya ile{' '}
-                            {bitalihData.total_campaigns > avgCompetitorCampaigns
+                            Bitalih <strong>{Number(bitalihData?.total_campaigns ?? 0)}</strong> kampanya ile{' '}
+                            {Number(bitalihData?.total_campaigns ?? 0) > avgCompetitorCampaigns
                               ? 'ortalama rakipten'
                               : 'ortalama rakipten'}{' '}
-                            <strong>{Math.abs(Math.round(bitalihData.total_campaigns - avgCompetitorCampaigns))}</strong> {' '}
-                            {bitalihData.total_campaigns > avgCompetitorCampaigns ? 'daha fazla' : 'daha az'} kampanya sunuyor.
+                            <strong>{Math.abs(Math.round(Number(bitalihData?.total_campaigns ?? 0) - avgCompetitorCampaigns))}</strong> {' '}
+                            {Number(bitalihData?.total_campaigns ?? 0) > avgCompetitorCampaigns ? 'daha fazla' : 'daha az'} kampanya sunuyor.
                           </span>
                         </div>
                         <div className="flex items-start gap-2">
                           <span className="font-medium min-w-20">Bonus:</span>
                           <span>
-                            Bitalih&apos;in ortalama bonus değeri <strong>₺{Math.round(bitalihData.avg_bonus || 0)}</strong>.
-                            {bestCompetitor && bitalihData.avg_bonus > bestCompetitor.avg_bonus
-                              ? ` ${bestCompetitor.site_name} (₺${Math.round(bestCompetitor.avg_bonus)}) rakibinden daha yüksek.`
+                            Bitalih&apos;in ortalama bonus değeri <strong>₺{Math.round(Number(bitalihData?.avg_bonus || 0))}</strong>.
+                            {bestCompetitor && Number(bitalihData?.avg_bonus || 0) > Number(bestCompetitor.avg_bonus || 0)
+                              ? ` ${bestCompetitor.site_name} (₺${Math.round(Number(bestCompetitor.avg_bonus || 0))}) rakibinden daha yüksek.`
                               : bestCompetitor
-                              ? ` En yüksek bonus ${bestCompetitor.site_name} (₺${Math.round(bestCompetitor.avg_bonus)}).`
+                              ? ` En yüksek bonus ${bestCompetitor.site_name} (₺${Math.round(Number(bestCompetitor.avg_bonus || 0))}).`
                               : ''}
                           </span>
                         </div>
                         <div className="flex items-start gap-2">
                           <span className="font-medium min-w-20">Tür:</span>
                           <span>
-                            Bitalih <strong>{bitalihData.categories_count}</strong> farklı kategoride kampanya sunuyor.
+                            Bitalih <strong>{Number(bitalihData?.categories_count || 0)}</strong> farklı kategoride kampanya sunuyor.
                             Toplam <strong>{competitionData?.categories?.length || 0}</strong> kategori mevcut.
                           </span>
                         </div>
