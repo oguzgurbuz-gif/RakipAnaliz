@@ -11,6 +11,8 @@ services:
       - ./db/init.sql:/docker-entrypoint-initdb.d/init.sql:ro
     ports:
       - "${DB_PORT:-5432}:5432"
+    networks:
+      - app-network
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-postgres} -d ${POSTGRES_DB:-campaigns}"]
       interval: 10s
@@ -29,9 +31,17 @@ services:
       DATABASE_URL: ${DATABASE_URL}
     ports:
       - "3000:3000"
+    networks:
+      - app-network
     depends_on:
       db:
         condition: service_healthy
+    healthcheck:
+      test: ["CMD-SHELL", "wget --no-verbose --tries=1 --spider http://localhost:3000 || exit 1"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 10s
 
   scraper:
     build:
@@ -53,9 +63,21 @@ services:
       SCRAPER_TIMEOUT_MS: ${SCRAPER_TIMEOUT_MS:-45000}
       SCRAPER_EXPAND_MAX_CLICKS: ${SCRAPER_EXPAND_MAX_CLICKS:-20}
       SCRAPER_EXPAND_WAIT_MS: ${SCRAPER_EXPAND_WAIT_MS:-1200}
+    networks:
+      - app-network
     depends_on:
       db:
         condition: service_healthy
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -h db -U ${POSTGRES_USER:-postgres} -d ${POSTGRES_DB:-campaigns} || exit 1"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 30s
+
+networks:
+  app-network:
+    driver: bridge
 
 volumes:
   postgres_data:
