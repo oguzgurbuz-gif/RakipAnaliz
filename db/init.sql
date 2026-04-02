@@ -1,16 +1,8 @@
 -- Combined init script for Coolify deployment
 -- Includes all migrations + fixes for scraper columns
 
--- ============================================================================
--- Create postgres role (if not exists) - must be done first
--- ============================================================================
-DO $$
-BEGIN
-    IF NOT EXISTS (SELECT FROM pg_catalog.pg_roles WHERE rolname = 'postgres') THEN
-        CREATE ROLE postgres LOGIN SUPERUSER PASSWORD 'postgres';
-    END IF;
-END
-$$;
+-- Note: PostgreSQL user 'postgres' is created automatically by the Docker image
+-- using POSTGRES_PASSWORD environment variable. Do NOT create it manually here.
 
 -- ============================================================================
 -- Enable UUID extension
