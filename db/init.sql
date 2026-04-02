@@ -386,6 +386,42 @@ CREATE TRIGGER update_job_queue_updated_at BEFORE UPDATE ON job_queue FOR EACH R
 CREATE TRIGGER update_campaign_notes_updated_at BEFORE UPDATE ON campaign_notes FOR EACH ROW EXECUTE FUNCTION update_updated_at_column();
 
 -- ============================================================================
+-- AUTO AI ANALYSIS TRIGGER
+-- Automatically queues AI analysis job when a new campaign is created
+-- ============================================================================
+CREATE OR REPLACE FUNCTION queue_ai_analysis_for_new_campaign()
+RETURNS TRIGGER AS $$
+BEGIN
+    -- Only trigger for INSERT operations (new campaigns)
+    IF TG_OP = 'INSERT' THEN
+        INSERT INTO jobs (type, payload, status, priority, max_attempts, scheduled_at)
+        VALUES (
+            'ai-analysis',
+            json_build_object(
+                'campaignId', NEW.id,
+                'title', NEW.title,
+                'description', NEW.body,
+                'priority', 'medium',
+                'validFrom', NEW.valid_from,
+                'validTo', NEW.valid_to
+            ),
+            'pending',
+            50,
+            3,
+            NOW()
+        );
+    END IF;
+    RETURN NEW;
+END;
+$$ LANGUAGE plpgsql;
+
+DROP TRIGGER IF EXISTS queue_ai_analysis_on_campaign_insert ON campaigns;
+CREATE TRIGGER queue_ai_analysis_on_campaign_insert
+    AFTER INSERT ON campaigns
+    FOR EACH ROW
+    EXECUTE FUNCTION queue_ai_analysis_for_new_campaign();
+
+-- ============================================================================
 -- SEED DATA: Sites
 -- ============================================================================
 INSERT INTO sites (code, name, base_url, campaigns_url, adapter_key, is_active, priority) VALUES
