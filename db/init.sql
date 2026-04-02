@@ -2,6 +2,17 @@
 -- Includes all migrations + fixes for scraper columns
 
 -- ============================================================================
+-- Create postgres role (if not exists) - must be done first
+-- ============================================================================
+DO $$
+BEGIN
+    IF NOT EXISTS (SELECT FROM pg_catalog.pg_roles WHERE rolname = 'postgres') THEN
+        CREATE ROLE postgres LOGIN SUPERUSER PASSWORD 'postgres';
+    END IF;
+END
+$$;
+
+-- ============================================================================
 -- Enable UUID extension
 -- ============================================================================
 CREATE EXTENSION IF NOT EXISTS "uuid-ossp";
