@@ -1,8 +1,8 @@
 -- Combined init script for Coolify deployment
--- Includes all migrations + fixes for scraper columns
+-- Database schema for RakipAnaliz project
 
 -- Note: PostgreSQL user 'postgres' is created automatically by the Docker image
--- using POSTGRES_PASSWORD environment variable. Do NOT create it manually here.
+-- using POSTGRES_PASSWORD environment variable.
 
 -- ============================================================================
 -- Enable UUID extension
@@ -27,73 +27,50 @@ CREATE TABLE IF NOT EXISTS sites (
     last_scraped_at TIMESTAMP,
     last_scrape_status VARCHAR(32),
     last_scrape_error TEXT,
-    last_scrape_duration INTEGER,
-    last_scrape_started_at TIMESTAMP,
-    campaign_count INTEGER,
-    scrape_error_count INTEGER DEFAULT 0
+    last_scrape_duration INTEGER
 );
+
+CREATE INDEX IF NOT EXISTS idx_sites_code ON sites(code);
+CREATE INDEX IF NOT EXISTS idx_sites_is_active ON sites(is_active);
 
 -- ============================================================================
 -- Table: scrape_runs
 -- ============================================================================
 CREATE TABLE IF NOT EXISTS scrape_runs (
     id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
-    site_id UUID REFERENCES sites(id),
-    run_type VARCHAR(32) NOT NULL DEFAULT 'scheduled',
-    trigger_source VARCHAR(32) NOT NULL DEFAULT 'scheduler',
     status VARCHAR(32) NOT NULL DEFAULT 'running',
     started_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
     completed_at TIMESTAMPTZ,
-    total_sites INTEGER NOT NULL DEFAULT 0,
-    completed_sites INTEGER NOT NULL DEFAULT 0,
-    failed_sites INTEGER NOT NULL DEFAULT 0,
-    inserted_count INTEGER NOT NULL DEFAULT 0,
-    updated_count INTEGER NOT NULL DEFAULT 0,
-    skipped_count INTEGER NOT NULL DEFAULT 0,
-    metadata JSONB NOT NULL DEFAULT '{}'
+    total_sites INTEGER DEFAULT 0,
+    successful_sites INTEGER DEFAULT 0,
+    failed_sites INTEGER DEFAULT 0,
+    total_campaigns INTEGER DEFAULT 0,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
+
+CREATE INDEX IF NOT EXISTS idx_scrape_runs_status ON scrape_runs(status);
+CREATE INDEX IF NOT EXISTS idx_scrape_runs_started_at ON scrape_runs(started_at);
 
 -- ============================================================================
 -- Table: scrape_run_sites
 -- ============================================================================
 CREATE TABLE IF NOT EXISTS scrape_run_sites (
     id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
-    scrape_run_id UUID NOT NULL REFERENCES scrape_runs(id) ON DELETE CASCADE,
+    scrape_run_id UUID NOT NULL REFERENCES scrape_runs(id),
     site_id UUID NOT NULL REFERENCES sites(id),
-    status VARCHAR(32) NOT NULL DEFAULT 'running',
-    started_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    status VARCHAR(32) NOT NULL DEFAULT 'pending',
+    cards_found INTEGER DEFAULT 0,
+    new_campaigns INTEGER DEFAULT 0,
+    updated_campaigns INTEGER DEFAULT 0,
+    errors TEXT,
+    started_at TIMESTAMPTZ,
     completed_at TIMESTAMPTZ,
-    raw_count INTEGER NOT NULL DEFAULT 0,
-    inserted_count INTEGER NOT NULL DEFAULT 0,
-    updated_count INTEGER NOT NULL DEFAULT 0,
-    skipped_count INTEGER NOT NULL DEFAULT 0,
-    retry_count INTEGER NOT NULL DEFAULT 0,
-    error_code VARCHAR(64),
-    error_message TEXT,
-    metrics JSONB NOT NULL DEFAULT '{}'
-);
-
--- ============================================================================
--- Table: raw_campaign_snapshots
--- ============================================================================
-CREATE TABLE IF NOT EXISTS raw_campaign_snapshots (
-    id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
-    scrape_run_id UUID REFERENCES scrape_runs(id) ON DELETE SET NULL,
-    scrape_run_site_id UUID REFERENCES scrape_run_sites(id) ON DELETE SET NULL,
-    site_id UUID NOT NULL REFERENCES sites(id),
-    source_url TEXT,
-    page_url TEXT,
-    external_id VARCHAR(255),
-    raw_title TEXT,
-    raw_body TEXT,
-    raw_image_urls JSONB NOT NULL DEFAULT '[]',
-    raw_date_text TEXT,
-    raw_html TEXT,
-    raw_payload JSONB NOT NULL DEFAULT '{}',
-    raw_hash CHAR(64) NOT NULL,
-    extracted_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
     created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
+
+CREATE INDEX IF NOT EXISTS idx_scrape_run_sites_run_id ON scrape_run_sites(scrape_run_id);
+CREATE INDEX IF NOT EXISTS idx_scrape_run_sites_site_id ON scrape_run_sites(site_id);
 
 -- ============================================================================
 -- Table: campaigns
@@ -104,33 +81,36 @@ CREATE TABLE IF NOT EXISTS campaigns (
     external_id VARCHAR(255),
     source_url TEXT NOT NULL,
     canonical_url TEXT,
-    title TEXT NOT NULL,
+    title VARCHAR(500) NOT NULL,
     body TEXT,
-    normalized_text TEXT NOT NULL,
-    fingerprint CHAR(64) NOT NULL,
-    content_version INTEGER NOT NULL DEFAULT 1,
+    normalized_text TEXT,
+    fingerprint VARCHAR(64) NOT NULL UNIQUE,
+    version_no INTEGER NOT NULL DEFAULT 1,
     primary_image_url TEXT,
     valid_from TIMESTAMPTZ,
     valid_to TIMESTAMPTZ,
-    valid_from_source VARCHAR(32),
-    valid_to_source VARCHAR(32),
+    valid_from_source VARCHAR(255),
+    valid_to_source VARCHAR(255),
     valid_from_confidence NUMERIC(5,4),
     valid_to_confidence NUMERIC(5,4),
-    raw_date_text TEXT,
-    status VARCHAR(16) NOT NULL DEFAULT 'passive',
-    status_reason VARCHAR(64),
-    status_calculated_at TIMESTAMPTZ,
-    first_seen_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
-    last_seen_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    raw_date_text VARCHAR(500),
+    status VARCHAR(32) NOT NULL DEFAULT 'active',
+    status_reason TEXT,
+    tags TEXT[] DEFAULT '{}',
+    metadata JSONB DEFAULT '{}',
+    is_visible_on_last_scrape BOOLEAN DEFAULT true,
+    last_seen_at TIMESTAMPTZ DEFAULT NOW(),
     last_visible_at TIMESTAMPTZ,
-    removed_from_source_at TIMESTAMPTZ,
-    is_visible_on_last_scrape BOOLEAN NOT NULL DEFAULT true,
-    tags TEXT[] NOT NULL DEFAULT '{}',
-    metadata JSONB NOT NULL DEFAULT '{}',
     created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
-    updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
-    UNIQUE(site_id, fingerprint)
+    updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
+
+CREATE INDEX IF NOT EXISTS idx_campaigns_site_id ON campaigns(site_id);
+CREATE INDEX IF NOT EXISTS idx_campaigns_fingerprint ON campaigns(fingerprint);
+CREATE INDEX IF NOT EXISTS idx_campaigns_status ON campaigns(status);
+CREATE INDEX IF NOT EXISTS idx_campaigns_valid_from ON campaigns(valid_from);
+CREATE INDEX IF NOT EXISTS idx_campaigns_valid_to ON campaigns(valid_to);
+CREATE INDEX IF NOT EXISTS idx_campaigns_last_seen_at ON campaigns(last_seen_at);
 
 -- ============================================================================
 -- Table: campaign_images
@@ -139,11 +119,12 @@ CREATE TABLE IF NOT EXISTS campaign_images (
     id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
     campaign_id UUID NOT NULL REFERENCES campaigns(id) ON DELETE CASCADE,
     image_url TEXT NOT NULL,
-    image_type VARCHAR(32) NOT NULL DEFAULT 'primary',
-    display_order INTEGER NOT NULL DEFAULT 0,
-    source VARCHAR(32) NOT NULL DEFAULT 'scraper',
+    alt_text VARCHAR(255),
+    is_primary BOOLEAN DEFAULT false,
     created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
+
+CREATE INDEX IF NOT EXISTS idx_campaign_images_campaign_id ON campaign_images(campaign_id);
 
 -- ============================================================================
 -- Table: campaign_versions
@@ -152,21 +133,18 @@ CREATE TABLE IF NOT EXISTS campaign_versions (
     id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
     campaign_id UUID NOT NULL REFERENCES campaigns(id) ON DELETE CASCADE,
     version_no INTEGER NOT NULL,
-    title TEXT NOT NULL,
+    title VARCHAR(500) NOT NULL,
     body TEXT,
-    normalized_text TEXT NOT NULL,
-    fingerprint CHAR(64) NOT NULL,
-    primary_image_url TEXT,
+    normalized_text TEXT,
     valid_from TIMESTAMPTZ,
     valid_to TIMESTAMPTZ,
-    valid_from_source VARCHAR(32),
-    valid_to_source VARCHAR(32),
-    raw_date_text TEXT,
-    diff_summary JSONB NOT NULL DEFAULT '{}',
-    snapshot_id UUID REFERENCES raw_campaign_snapshots(id) ON DELETE SET NULL,
-    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
-    UNIQUE(campaign_id, version_no)
+    status VARCHAR(32),
+    change_summary TEXT,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
+
+CREATE INDEX IF NOT EXISTS idx_campaign_versions_campaign_id ON campaign_versions(campaign_id);
+CREATE INDEX IF NOT EXISTS idx_campaign_versions_version ON campaign_versions(campaign_id, version_no DESC);
 
 -- ============================================================================
 -- Table: campaign_status_history
@@ -174,12 +152,13 @@ CREATE TABLE IF NOT EXISTS campaign_versions (
 CREATE TABLE IF NOT EXISTS campaign_status_history (
     id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
     campaign_id UUID NOT NULL REFERENCES campaigns(id) ON DELETE CASCADE,
-    previous_status VARCHAR(16),
-    new_status VARCHAR(16) NOT NULL,
-    reason VARCHAR(64) NOT NULL,
-    changed_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
-    context JSONB NOT NULL DEFAULT '{}'
+    old_status VARCHAR(32),
+    new_status VARCHAR(32) NOT NULL,
+    reason TEXT,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
+
+CREATE INDEX IF NOT EXISTS idx_campaign_status_history_campaign_id ON campaign_status_history(campaign_id);
 
 -- ============================================================================
 -- Table: campaign_ai_analyses
@@ -187,44 +166,32 @@ CREATE TABLE IF NOT EXISTS campaign_status_history (
 CREATE TABLE IF NOT EXISTS campaign_ai_analyses (
     id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
     campaign_id UUID NOT NULL REFERENCES campaigns(id) ON DELETE CASCADE,
-    campaign_version_id UUID REFERENCES campaign_versions(id) ON DELETE SET NULL,
-    analysis_type VARCHAR(32) NOT NULL DEFAULT 'content_analysis',
-    model_provider VARCHAR(64) NOT NULL,
-    model_name VARCHAR(128) NOT NULL,
-    prompt_version VARCHAR(64) NOT NULL,
-    status VARCHAR(32) NOT NULL DEFAULT 'completed',
-    sentiment_label VARCHAR(32),
-    sentiment_score NUMERIC(5,4),
-    category_code VARCHAR(64),
-    category_confidence NUMERIC(5,4),
-    summary_text TEXT,
-    key_points JSONB NOT NULL DEFAULT '[]',
-    risk_flags JSONB NOT NULL DEFAULT '[]',
-    recommendation_text TEXT,
-    extracted_valid_from TIMESTAMPTZ,
-    extracted_valid_to TIMESTAMPTZ,
-    extracted_date_confidence NUMERIC(5,4),
-    tokens_input INTEGER,
-    tokens_output INTEGER,
-    duration_ms INTEGER,
-    raw_request JSONB,
+    analysis_type VARCHAR(50) NOT NULL,
     raw_response JSONB,
+    parsed_response JSONB,
+    extraction_confidence NUMERIC(5,4),
+    processing_time_ms INTEGER,
+    error TEXT,
     created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
+
+CREATE INDEX IF NOT EXISTS idx_campaign_ai_analyses_campaign_id ON campaign_ai_analyses(campaign_id);
+CREATE INDEX IF NOT EXISTS idx_campaign_ai_analyses_type ON campaign_ai_analyses(analysis_type);
 
 -- ============================================================================
 -- Table: campaign_similarities
 -- ============================================================================
 CREATE TABLE IF NOT EXISTS campaign_similarities (
     id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
-    campaign_id UUID NOT NULL REFERENCES campaigns(id) ON DELETE CASCADE,
-    similar_campaign_id UUID NOT NULL REFERENCES campaigns(id) ON DELETE CASCADE,
+    campaign_id_1 UUID NOT NULL REFERENCES campaigns(id) ON DELETE CASCADE,
+    campaign_id_2 UUID NOT NULL REFERENCES campaigns(id) ON DELETE CASCADE,
     similarity_score NUMERIC(5,4) NOT NULL,
-    similarity_reason TEXT,
-    method VARCHAR(32) NOT NULL DEFAULT 'ai+text',
-    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
-    UNIQUE(campaign_id, similar_campaign_id)
+    comparison_type VARCHAR(50),
+    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
+
+CREATE INDEX IF NOT EXISTS idx_campaign_similarities_campaign_1 ON campaign_similarities(campaign_id_1);
+CREATE INDEX IF NOT EXISTS idx_campaign_similarities_campaign_2 ON campaign_similarities(campaign_id_2);
 
 -- ============================================================================
 -- Table: campaign_notes
@@ -232,13 +199,13 @@ CREATE TABLE IF NOT EXISTS campaign_similarities (
 CREATE TABLE IF NOT EXISTS campaign_notes (
     id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
     campaign_id UUID NOT NULL REFERENCES campaigns(id) ON DELETE CASCADE,
-    author_name VARCHAR(255) NOT NULL,
-    note_text TEXT NOT NULL,
-    note_type VARCHAR(32) NOT NULL DEFAULT 'general',
-    is_pinned BOOLEAN NOT NULL DEFAULT false,
+    content TEXT NOT NULL,
+    created_by VARCHAR(100),
     created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
     updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
+
+CREATE INDEX IF NOT EXISTS idx_campaign_notes_campaign_id ON campaign_notes(campaign_id);
 
 -- ============================================================================
 -- Table: weekly_reports
@@ -247,20 +214,16 @@ CREATE TABLE IF NOT EXISTS weekly_reports (
     id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
     report_week_start DATE NOT NULL,
     report_week_end DATE NOT NULL,
-    title TEXT NOT NULL,
+    title VARCHAR(255) NOT NULL,
     executive_summary TEXT,
-    status VARCHAR(32) NOT NULL DEFAULT 'completed',
-    site_coverage_count INTEGER NOT NULL DEFAULT 0,
-    campaign_count INTEGER NOT NULL DEFAULT 0,
-    started_count INTEGER NOT NULL DEFAULT 0,
-    ended_count INTEGER NOT NULL DEFAULT 0,
-    active_overlap_count INTEGER NOT NULL DEFAULT 0,
-    changed_count INTEGER NOT NULL DEFAULT 0,
-    passive_count INTEGER NOT NULL DEFAULT 0,
-    report_payload JSONB NOT NULL DEFAULT '{}',
+    status VARCHAR(32) NOT NULL DEFAULT 'pending',
+    report_payload JSONB DEFAULT '{}',
     created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
-    UNIQUE(report_week_start, report_week_end)
+    updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
+
+CREATE INDEX IF NOT EXISTS idx_weekly_reports_week ON weekly_reports(report_week_start, report_week_end);
+CREATE INDEX IF NOT EXISTS idx_weekly_reports_status ON weekly_reports(status);
 
 -- ============================================================================
 -- Table: weekly_report_items
@@ -268,64 +231,68 @@ CREATE TABLE IF NOT EXISTS weekly_reports (
 CREATE TABLE IF NOT EXISTS weekly_report_items (
     id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
     weekly_report_id UUID NOT NULL REFERENCES weekly_reports(id) ON DELETE CASCADE,
-    item_type VARCHAR(64) NOT NULL,
-    item_order INTEGER NOT NULL DEFAULT 0,
-    title TEXT,
-    body TEXT,
-    payload JSONB NOT NULL DEFAULT '{}',
+    item_type VARCHAR(50) NOT NULL,
+    item_value JSONB NOT NULL,
     created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
+
+CREATE INDEX IF NOT EXISTS idx_weekly_report_items_report_id ON weekly_report_items(weekly_report_id);
+
+-- ============================================================================
+-- Table: jobs
+-- ============================================================================
+CREATE TABLE IF NOT EXISTS jobs (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    type VARCHAR(100) NOT NULL,
+    status VARCHAR(50) NOT NULL DEFAULT 'pending',
+    priority INTEGER NOT NULL DEFAULT 0,
+    payload JSONB,
+    scheduled_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    available_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    max_attempts INTEGER NOT NULL DEFAULT 3,
+    attempts INTEGER NOT NULL DEFAULT 0,
+    started_at TIMESTAMPTZ,
+    completed_at TIMESTAMPTZ,
+    result TEXT,
+    error TEXT,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+
+CREATE INDEX IF NOT EXISTS idx_jobs_pick ON jobs(status, scheduled_at, priority);
+CREATE INDEX IF NOT EXISTS idx_jobs_status_scheduled ON jobs(status, scheduled_at);
 
 -- ============================================================================
 -- Table: job_queue
 -- ============================================================================
 CREATE TABLE IF NOT EXISTS job_queue (
-    id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
-    job_type VARCHAR(64) NOT NULL,
-    job_key VARCHAR(255),
-    payload JSONB NOT NULL DEFAULT '{}',
-    status VARCHAR(32) NOT NULL DEFAULT 'pending',
-    priority INTEGER NOT NULL DEFAULT 100,
-    attempt_count INTEGER NOT NULL DEFAULT 0,
-    max_attempts INTEGER NOT NULL DEFAULT 3,
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    type VARCHAR(100) NOT NULL,
+    status VARCHAR(50) NOT NULL DEFAULT 'pending',
+    priority INTEGER NOT NULL DEFAULT 0,
+    payload JSONB,
     available_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
-    locked_at TIMESTAMPTZ,
-    locked_by VARCHAR(255),
-    last_error_code VARCHAR(64),
-    last_error_message TEXT,
+    max_attempts INTEGER NOT NULL DEFAULT 3,
+    attempts INTEGER NOT NULL DEFAULT 0,
+    last_error TEXT,
     created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
     updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
 
--- ============================================================================
--- Table: jobs (alternative table for scraper's JobScheduler)
--- ============================================================================
-CREATE TABLE IF NOT EXISTS jobs (
-    id SERIAL PRIMARY KEY,
-    type VARCHAR(64) NOT NULL,
-    status VARCHAR(32) NOT NULL DEFAULT 'pending',
-    priority INTEGER NOT NULL DEFAULT 100,
-    payload JSONB,
-    max_attempts INTEGER NOT NULL DEFAULT 3,
-    attempts INTEGER NOT NULL DEFAULT 0,
-    scheduled_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
-    started_at TIMESTAMPTZ,
-    completed_at TIMESTAMPTZ,
-    result TEXT,
-    error TEXT,
-    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
-);
+CREATE INDEX IF NOT EXISTS idx_job_queue_pick ON job_queue(status, available_at, priority);
 
 -- ============================================================================
 -- Table: sse_events
 -- ============================================================================
 CREATE TABLE IF NOT EXISTS sse_events (
     id BIGSERIAL PRIMARY KEY,
-    event_type VARCHAR(64) NOT NULL,
-    event_channel VARCHAR(64) NOT NULL DEFAULT 'global',
-    payload JSONB NOT NULL,
+    event_type VARCHAR(100) NOT NULL,
+    event_channel VARCHAR(255) NOT NULL,
+    payload JSONB,
     created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
+
+CREATE INDEX IF NOT EXISTS idx_sse_events_channel ON sse_events(event_channel, id);
 
 -- ============================================================================
 -- Table: error_logs
@@ -335,37 +302,17 @@ CREATE TABLE IF NOT EXISTS error_logs (
     error_code VARCHAR(64),
     error_message TEXT NOT NULL,
     context JSONB NOT NULL DEFAULT '{}',
+    stack_trace TEXT,
+    severity VARCHAR(20) NOT NULL DEFAULT 'error',
     created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
 
--- ============================================================================
--- INDEXES
--- ============================================================================
-CREATE INDEX IF NOT EXISTS idx_campaigns_site_status ON campaigns(site_id, status);
-CREATE INDEX IF NOT EXISTS idx_campaigns_valid_from ON campaigns(valid_from);
-CREATE INDEX IF NOT EXISTS idx_campaigns_valid_to ON campaigns(valid_to);
-CREATE INDEX IF NOT EXISTS idx_campaigns_first_seen ON campaigns(first_seen_at DESC);
-CREATE INDEX IF NOT EXISTS idx_campaigns_last_seen ON campaigns(last_seen_at DESC);
-CREATE INDEX IF NOT EXISTS idx_campaigns_removed_from_source ON campaigns(removed_from_source_at);
-CREATE INDEX IF NOT EXISTS idx_campaigns_visible_last_scrape ON campaigns(is_visible_on_last_scrape);
-CREATE INDEX IF NOT EXISTS idx_campaign_versions_campaign_created ON campaign_versions(campaign_id, created_at DESC);
-CREATE INDEX IF NOT EXISTS idx_campaign_status_history_campaign_changed ON campaign_status_history(campaign_id, changed_at DESC);
-CREATE INDEX IF NOT EXISTS idx_campaign_ai_analyses_campaign_created ON campaign_ai_analyses(campaign_id, created_at DESC);
-CREATE INDEX IF NOT EXISTS idx_job_queue_pick ON job_queue(status, available_at, priority);
-CREATE INDEX IF NOT EXISTS idx_raw_campaign_snapshots_site_extracted ON raw_campaign_snapshots(site_id, extracted_at DESC);
-CREATE INDEX IF NOT EXISTS idx_jobs_pick ON jobs(status, scheduled_at, priority);
-CREATE INDEX IF NOT EXISTS idx_jobs_status_scheduled ON jobs(status, scheduled_at);
-CREATE INDEX IF NOT EXISTS idx_scrape_runs_site_id ON scrape_runs(site_id);
-CREATE INDEX IF NOT EXISTS idx_campaigns_valid_dates ON campaigns(valid_from, valid_to);
-CREATE INDEX IF NOT EXISTS idx_campaigns_status ON campaigns(status);
-CREATE INDEX IF NOT EXISTS idx_campaigns_fingerprint ON campaigns(fingerprint);
-CREATE INDEX IF NOT EXISTS idx_campaigns_metadata_ai ON campaigns(metadata) WHERE metadata ? 'ai_analysis';
-CREATE INDEX IF NOT EXISTS idx_campaign_ai_analyses_category ON campaign_ai_analyses(category_code);
-CREATE INDEX IF NOT EXISTS idx_campaign_versions_campaign ON campaign_versions(campaign_id, version_no DESC);
-CREATE INDEX IF NOT EXISTS idx_campaign_status_history_campaign ON campaign_status_history(campaign_id, changed_at DESC);
+CREATE INDEX IF NOT EXISTS idx_error_logs_code ON error_logs(error_code);
+CREATE INDEX IF NOT EXISTS idx_error_logs_severity ON error_logs(severity);
+CREATE INDEX IF NOT EXISTS idx_error_logs_created_at ON error_logs(created_at);
 
 -- ============================================================================
--- FUNCTIONS AND TRIGGERS
+-- Trigger function for updated_at
 -- ============================================================================
 CREATE OR REPLACE FUNCTION update_updated_at_column()
 RETURNS TRIGGER AS $$
@@ -375,67 +322,29 @@ BEGIN
 END;
 $$ LANGUAGE plpgsql;
 
-DROP TRIGGER IF EXISTS update_sites_updated_at ON sites;
-DROP TRIGGER IF EXISTS update_campaigns_updated_at ON campaigns;
-DROP TRIGGER IF EXISTS update_job_queue_updated_at ON job_queue;
-DROP TRIGGER IF EXISTS update_campaign_notes_updated_at ON campaign_notes;
-
+-- ============================================================================
+-- Apply updated_at triggers
+-- ============================================================================
 CREATE TRIGGER update_sites_updated_at BEFORE UPDATE ON sites FOR EACH ROW EXECUTE FUNCTION update_updated_at_column();
+CREATE TRIGGER update_scrape_runs_updated_at BEFORE UPDATE ON scrape_runs FOR EACH ROW EXECUTE FUNCTION update_updated_at_column();
 CREATE TRIGGER update_campaigns_updated_at BEFORE UPDATE ON campaigns FOR EACH ROW EXECUTE FUNCTION update_updated_at_column();
 CREATE TRIGGER update_job_queue_updated_at BEFORE UPDATE ON job_queue FOR EACH ROW EXECUTE FUNCTION update_updated_at_column();
-CREATE TRIGGER update_campaign_notes_updated_at BEFORE UPDATE ON campaign_notes FOR EACH ROW EXECUTE FUNCTION update_updated_at_column();
 
 -- ============================================================================
--- AUTO AI ANALYSIS TRIGGER
--- Automatically queues AI analysis job when a new campaign is created
+-- Seed sites data
 -- ============================================================================
-CREATE OR REPLACE FUNCTION queue_ai_analysis_for_new_campaign()
-RETURNS TRIGGER AS $$
-BEGIN
-    -- Only trigger for INSERT operations (new campaigns)
-    IF TG_OP = 'INSERT' THEN
-        INSERT INTO jobs (type, payload, status, priority, max_attempts, scheduled_at)
-        VALUES (
-            'ai-analysis',
-            json_build_object(
-                'campaignId', NEW.id,
-                'title', NEW.title,
-                'description', NEW.body,
-                'priority', 'medium',
-                'validFrom', NEW.valid_from,
-                'validTo', NEW.valid_to
-            ),
-            'pending',
-            50,
-            3,
-            NOW()
-        );
-    END IF;
-    RETURN NEW;
-END;
-$$ LANGUAGE plpgsql;
-
-DROP TRIGGER IF EXISTS queue_ai_analysis_on_campaign_insert ON campaigns;
-CREATE TRIGGER queue_ai_analysis_on_campaign_insert
-    AFTER INSERT ON campaigns
-    FOR EACH ROW
-    EXECUTE FUNCTION queue_ai_analysis_for_new_campaign();
-
--- ============================================================================
--- SEED DATA: Sites
--- ============================================================================
-INSERT INTO sites (code, name, base_url, campaigns_url, adapter_key, is_active, priority) VALUES
-('4nala', '4Nala', 'https://4nala.com', 'https://4nala.com/kampanyalar', '4nala', true, 100),
-('altiliganyan', 'Altılı Ganyan', 'https://altiliganyan.com', 'https://altiliganyan.com/iptal-ve-garanti', 'altiliganyan', true, 90),
-('atyarisi', 'At Yarışı', 'https://atyarisi.com', 'https://atyarisi.com/kampanyalar', 'atyarisi', true, 85),
-('bitalih', 'Bitalih', 'https://bitalih.com', 'https://bitalih.com/kampanyalar', 'bitalih', true, 95),
-('bilyoner', 'Bilyoner', 'https://bilyoner.com', 'https://bilyoner.com/bonus-ve-kampanyalar', 'bilyoner', true, 95),
-('birebin', 'Birebin', 'https://birebin.com', 'https://birebin.com/bonuskampanya', 'birebin', true, 90),
-('ekuri', 'Eküri', 'https://ekuri.com', 'https://ekuri.com/kampanyalar', 'ekuri', true, 80),
-('hipodrom', 'Hipodrom', 'https://hipodrom.com', 'https://hipodrom.com/bonus-ve-kampanyalar', 'hipodrom', true, 75),
-('misli', 'Misli', 'https://misli.com', 'https://misli.com/bonus-kampanyalari', 'misli', true, 95),
-('nesine', 'Nesine', 'https://nesine.com', 'https://nesine.com/bonus-kampanyalari', 'nesine', true, 100),
-('oley', 'Oley', 'https://oley.com', 'https://oley.com/kampanyalar', 'oley', true, 90),
-('sonduzluk', 'SonDüzlük', 'https://sonduzluk.com', 'https://sonduzluk.com/kampanyalar', 'sonduzluk', true, 70),
-('sundzulyuk', 'SonDüzlük Eski', 'https://sundzulyuk.com', 'https://sundzulyuk.com/bonus-ve-kampanyalar', 'sundzulyuk', true, 60)
+INSERT INTO sites (code, name, base_url, adapter_key, is_active, priority) VALUES
+('misli', 'Misli.com', 'https://www.misli.com', 'misli', true, 100),
+('傻子', '傻子.com', 'https://www.傻子.com', 'sizi', true, 100),
+('bayin', 'Bayin.com', 'https://www.bayin.com', 'bayin', true, 100),
+('4nala', '4nala.com', 'https://4nala.com', '4nala', true, 100),
+('Edit', 'Edit.com', 'https://www.Edit.com', 'Edit', true, 100),
+('Merit', 'Merit.com', 'https://www.merit poker.com', 'merit', true, 100),
+('Restbet', 'Restbet.com', 'https://www.restbet.com', 'restbet', true, 100),
+('Bex', 'Bex.com', 'https://www.bex.com', 'bex', true, 100),
+('Anka', 'Anka.com', 'https://www.anka.com', 'anka', true, 100),
+('Hide', 'Hide.com', 'https://www.hide.com', 'hide', true, 100),
+('Grand', 'Grand.com', 'https://www.grand.com', 'grand', true, 100),
+('Roket', 'Roket.com', 'https://www.roket.com', 'roket', true, 100),
+('Sundzu', 'Sundzu.com', 'https://www.sundzu.com', 'sundzu', true, 100)
 ON CONFLICT (code) DO NOTHING;

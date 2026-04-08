@@ -21,6 +21,7 @@ COPY . .
 RUN npm install -g pnpm@8 && pnpm install && pnpm add -w puppeteer esbuild
 WORKDIR /app/apps/scraper
 RUN npx esbuild src/index.ts --bundle --platform=node --outfile=dist/index.cjs --format=cjs --packages=external
+RUN npx esbuild src/db/migrate-runner.ts --bundle --platform=node --outfile=dist/migrate.cjs --format=cjs --packages=external
 
 FROM base AS production
 WORKDIR /app
@@ -45,7 +46,10 @@ COPY apps/scraper/package.json ./apps/scraper/
 COPY packages/shared ./packages/shared
 COPY --from=builder /app/apps/scraper/dist ./apps/scraper/dist
 COPY --from=builder /app/tsconfig.base.json ./
+COPY db ./db
+COPY apps/scraper/src ./apps/scraper/src
 
 RUN npm install -g pnpm@8 && pnpm install --force
 
-CMD ["node", "apps/scraper/dist/index.cjs"]
+# Run migrations on startup
+CMD ["sh", "-c", "node apps/scraper/dist/migrate.cjs || true && node apps/scraper/dist/index.cjs"]

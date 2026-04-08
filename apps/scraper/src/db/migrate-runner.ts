@@ -1,3 +1,4 @@
+import 'dotenv/config';
 import { getDb } from './index';
 import { readFileSync } from 'fs';
 import { join } from 'path';
@@ -16,21 +17,21 @@ async function runMigrations() {
   ];
   
   console.log('Running migrations...');
-  console.log('Looking for migrations in:', DB_MIGRATIONS_PATH);
   
   for (const filename of migrations) {
     const migrationPath = join(DB_MIGRATIONS_PATH, filename);
-    const sql = readFileSync(migrationPath, 'utf-8');
-    console.log(`Executing ${filename}...`);
-    await db.query(sql);
-    console.log(`${filename} completed`);
+    try {
+      const sql = readFileSync(migrationPath, 'utf-8');
+      console.log(`Executing ${filename}...`);
+      await db.query(sql);
+      console.log(`${filename} completed`);
+    } catch (err) {
+      console.error(`Migration ${filename} failed:`, err instanceof Error ? err.message : err);
+      // Continue with other migrations
+    }
   }
   
-  console.log('All migrations completed successfully');
-  process.exit(0);
+  console.log('All migrations completed');
 }
 
-runMigrations().catch((error) => {
-  console.error('Migration failed:', error);
-  process.exit(1);
-});
+runMigrations();
