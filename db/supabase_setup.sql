@@ -439,12 +439,23 @@ AS $$
 DECLARE
   result JSONB;
 BEGIN
-  IF params IS NULL THEN
-    EXECUTE sql INTO result;
+  BEGIN
+    IF params IS NULL THEN
+      EXECUTE sql INTO result;
+    ELSE
+      EXECUTE sql USING params;
+    END IF;
+  EXCEPTION WHEN OTHERS THEN
+    RETURN jsonb_build_object('error', SQLERRM, 'sql', sql);
+  END;
+
+  IF result IS NULL THEN
+    RETURN '[]'::jsonb;
+  ELSIF jsonb_typeof(result) = 'object' THEN
+    RETURN jsonb_build_array(result);
   ELSE
-    EXECUTE sql USING params;
+    RETURN result;
   END IF;
-  RETURN COALESCE(result, '[]'::jsonb);
 EXCEPTION WHEN OTHERS THEN
   RETURN jsonb_build_object('error', SQLERRM, 'sql', sql);
 END;

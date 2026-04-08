@@ -2,33 +2,37 @@
 -- Adds RPC functions that replace raw pg library calls used by the scraper.
 
 -- ============================================================================
--- Raw SQL execution function (for Supabase which uses PostgREST, not raw TCP)
--- This replaces direct pg Pool.query() calls throughout the app.
--- Usage: SELECT * FROM exec('SELECT ...', '["param1"]'::jsonb);
+-- Raw SQL execution function
+-- Uses RETURN QUERY EXECUTE to return rows directly.
+-- Returns SETOF JSONB — PostgREST aggregates into a JSONB array.
+-- Non-SELECT: returns a single {"ok": true} row.
 -- ============================================================================
+DROP FUNCTION IF EXISTS exec(TEXT, JSONB);
+
 CREATE OR REPLACE FUNCTION exec(sql TEXT, params JSONB DEFAULT NULL)
-RETURNS JSONB
+RETURNS SETOF JSONB
 LANGUAGE plpgsql
 VOLATILE
 SECURITY DEFINER
 AS $$
-DECLARE
-  result JSONB;
 BEGIN
   IF params IS NULL THEN
-    EXECUTE sql INTO result;
+    RETURN QUERY EXECUTE sql;
   ELSE
-    EXECUTE sql USING params;
+    RETURN QUERY EXECUTE sql USING params;
   END IF;
-  RETURN COALESCE(result, '[]'::jsonb);
+  RETURN;
 EXCEPTION WHEN OTHERS THEN
-  RETURN jsonb_build_object('error', SQLERRM, 'sql', sql);
+  RETURN QUERY SELECT jsonb_build_object('error', SQLERRM, 'sql', left(sql, 200))::jsonb;
+  RETURN;
 END;
 $$;
 
 -- ============================================================================
--- Atomic counter helpers (replace raw UPDATE ... SET x = x + 1 calls)
+-- Atomic counter helpers
 -- ============================================================================
+DROP FUNCTION IF EXISTS increment_version_count(UUID);
+
 CREATE OR REPLACE FUNCTION increment_version_count(campaign_id UUID)
 RETURNS VOID
 LANGUAGE plpgsql
@@ -40,6 +44,8 @@ BEGIN
   WHERE id = campaign_id;
 END;
 $$;
+
+DROP FUNCTION IF EXISTS increment_job_attempts(BIGINT);
 
 CREATE OR REPLACE FUNCTION increment_job_attempts(job_id BIGINT)
 RETURNS VOID
@@ -56,6 +62,8 @@ $$;
 -- ============================================================================
 -- Campaign status recalculation
 -- ============================================================================
+DROP FUNCTION IF EXISTS recalculate_campaign_status(UUID);
+
 CREATE OR REPLACE FUNCTION recalculate_campaign_status(campaign_id UUID)
 RETURNS VOID
 LANGUAGE plpgsql
@@ -87,12 +95,3 @@ BEGIN
   END IF;
 END;
 $$;
-
--- ============================================================================
--- Note: Supabase manages connection pooling automatically.
--- No need for Pool configuration — remove DATABASE_URL approach.
--- Environment variables needed:
---   SUPABASE_URL        = https://your-project.supabase.co
---   SUPABASE_ANON_KEY  = eyJ... (anonymous key, for browser/client)
---   SUPABASE_SERVICE_ROLE_KEY = eyJ... (service role, server-side only)
--- ============================================================================
