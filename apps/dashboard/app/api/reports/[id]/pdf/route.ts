@@ -11,26 +11,24 @@ const paramsSchema = z.object({
 
 type WeeklyReportRow = {
   id: number
-  period_start: Date
-  period_end: Date
-  summary: string
-  by_site: string
-  top_bonuses: string
+  report_week_start: Date
+  report_week_end: Date
+  executive_summary: string
+  report_payload: Record<string, unknown>
   status: string
-  generated_at: Date
+  created_at: Date
 }
 
 async function getWeeklyReportData(id: string) {
   const report = await queryOne<WeeklyReportRow>(`
-    SELECT 
+    SELECT
       id,
-      period_start,
-      period_end,
-      summary,
-      by_site,
-      top_bonuses,
+      report_week_start,
+      report_week_end,
+      executive_summary,
+      report_payload,
       status,
-      generated_at
+      created_at
     FROM weekly_reports
     WHERE id = $1
   `, [id])
@@ -39,67 +37,49 @@ async function getWeeklyReportData(id: string) {
     throw new NotFoundError('WeeklyReport', id)
   }
 
-  const startDate = new Date(report.period_start)
+  const startDate = new Date(report.report_week_start)
   const oneJan = new Date(startDate.getFullYear(), 0, 1)
   const weekNumber = Math.ceil(((startDate.getTime() - oneJan.getTime()) / 86400000 + oneJan.getDay() + 1) / 7)
 
-  let summary: Record<string, unknown> = {};
-  let bySite: unknown[] = [];
-  let topBonuses: unknown[] = [];
+  const summary = report.report_payload ?? {}
+  const bySite = (summary.by_site as Record<string, unknown>[]) ?? []
+  const topBonuses = (summary.top_bonuses as Record<string, unknown>[]) ?? []
 
-  try {
-    summary = JSON.parse(report.summary || '{}');
-  } catch {
-    // Use empty object as fallback
-  }
-
-  try {
-    bySite = JSON.parse(report.by_site || '[]');
-  } catch {
-    bySite = [];
-  }
-
-  try {
-    topBonuses = JSON.parse(report.top_bonuses || '[]');
-  } catch {
-    topBonuses = [];
-  }
-
-  const topSites = (bySite as Record<string, unknown>[]).map((site: Record<string, unknown>) => ({
+  const topSites = bySite.map((site: Record<string, unknown>) => ({
     siteName: site.siteCode as string,
     count: site.totalCampaigns as number,
   }))
 
   return {
     id: String(report.id),
-    weekStart: report.period_start.toISOString(),
-    weekEnd: report.period_end.toISOString(),
+    weekStart: report.report_week_start.toISOString(),
+    weekEnd: report.report_week_end.toISOString(),
     weekNumber,
     year: startDate.getFullYear(),
     title: `Haftalık Rapor - ${startDate.toLocaleDateString('tr-TR')}`,
-    executiveSummary: null,
+    executiveSummary: report.executive_summary ?? null,
     status: report.status,
-    siteCoverageCount: (summary.activeSites as number) || 0,
-    campaignCount: (summary.totalCampaigns as number) || 0,
-    startedCount: (summary.newCampaigns as number) || 0,
-    endedCount: (summary.expiredCampaigns as number) || 0,
-    activeOverlapCount: (summary.totalCampaigns as number) || 0,
-    changedCount: (summary.updatedCampaigns as number) || 0,
+    siteCoverageCount: summary.activeSites ?? 0,
+    campaignCount: summary.totalCampaigns ?? 0,
+    startedCount: summary.newCampaigns ?? 0,
+    endedCount: summary.expiredCampaigns ?? 0,
+    activeOverlapCount: summary.totalCampaigns ?? 0,
+    changedCount: summary.updatedCampaigns ?? 0,
     passiveCount: 0,
     topCategories: [],
     topSites,
     risks: [],
     recommendations: [],
-    createdAt: report.generated_at.toISOString(),
-    updatedAt: report.generated_at.toISOString(),
-    items: (topBonuses as Record<string, unknown>[]).map((bonus: Record<string, unknown>, index: number) => ({
+    createdAt: report.created_at.toISOString(),
+    updatedAt: report.created_at.toISOString(),
+    items: topBonuses.map((bonus: Record<string, unknown>, index: number) => ({
       id: String(index),
       type: 'top_bonus',
       order: index,
       title: bonus.title as string,
       body: `Site: ${bonus.siteCode} - Bonus: ${bonus.bonusAmount || bonus.bonusPercentage || 'N/A'}`,
       payload: bonus,
-      createdAt: report.generated_at.toISOString(),
+      createdAt: report.created_at.toISOString(),
     })),
   }
 }

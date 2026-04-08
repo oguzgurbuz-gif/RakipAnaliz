@@ -21,6 +21,13 @@ CREATE TABLE IF NOT EXISTS sites (
     is_active BOOLEAN NOT NULL DEFAULT true,
     priority SMALLINT NOT NULL DEFAULT 100,
     config JSONB NOT NULL DEFAULT '{}',
+    last_scraped_at TIMESTAMPTZ,
+    last_scrape_status VARCHAR(32),
+    last_scrape_error TEXT,
+    last_scrape_duration INTEGER,
+    last_scrape_started_at TIMESTAMPTZ,
+    campaign_count INTEGER NOT NULL DEFAULT 0,
+    scrape_error_count INTEGER NOT NULL DEFAULT 0,
     created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
     updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
@@ -39,6 +46,11 @@ CREATE TABLE IF NOT EXISTS scrape_runs (
     inserted_count INTEGER NOT NULL DEFAULT 0,
     updated_count INTEGER NOT NULL DEFAULT 0,
     skipped_count INTEGER NOT NULL DEFAULT 0,
+    cards_found INTEGER NOT NULL DEFAULT 0,
+    new_campaigns INTEGER NOT NULL DEFAULT 0,
+    updated_campaigns INTEGER NOT NULL DEFAULT 0,
+    unchanged INTEGER NOT NULL DEFAULT 0,
+    errors INTEGER NOT NULL DEFAULT 0,
     metadata JSONB NOT NULL DEFAULT '{}'
 );
 
@@ -57,6 +69,11 @@ CREATE TABLE IF NOT EXISTS scrape_run_sites (
     retry_count INTEGER NOT NULL DEFAULT 0,
     error_code VARCHAR(64),
     error_message TEXT,
+    cards_found INTEGER NOT NULL DEFAULT 0,
+    new_campaigns INTEGER NOT NULL DEFAULT 0,
+    updated_campaigns INTEGER NOT NULL DEFAULT 0,
+    unchanged INTEGER NOT NULL DEFAULT 0,
+    errors INTEGER NOT NULL DEFAULT 0,
     metrics JSONB NOT NULL DEFAULT '{}'
 );
 
@@ -66,6 +83,7 @@ CREATE TABLE IF NOT EXISTS raw_campaign_snapshots (
     scrape_run_id UUID REFERENCES scrape_runs(id) ON DELETE SET NULL,
     scrape_run_site_id UUID REFERENCES scrape_run_sites(id) ON DELETE SET NULL,
     site_id UUID NOT NULL REFERENCES sites(id),
+    campaign_id UUID REFERENCES campaigns(id) ON DELETE SET NULL,
     source_url TEXT,
     page_url TEXT,
     external_id VARCHAR(255),
@@ -75,6 +93,7 @@ CREATE TABLE IF NOT EXISTS raw_campaign_snapshots (
     raw_date_text TEXT,
     raw_html TEXT,
     raw_payload JSONB NOT NULL DEFAULT '{}',
+    raw_data JSONB NOT NULL DEFAULT '{}',
     raw_hash CHAR(64) NOT NULL,
     extracted_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
     created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
@@ -92,6 +111,7 @@ CREATE TABLE IF NOT EXISTS campaigns (
     normalized_text TEXT NOT NULL,
     fingerprint CHAR(64) NOT NULL,
     content_version INTEGER NOT NULL DEFAULT 1,
+    current_version_id UUID REFERENCES campaign_versions(id) ON DELETE SET NULL,
     primary_image_url TEXT,
     valid_from TIMESTAMPTZ,
     valid_to TIMESTAMPTZ,
@@ -136,6 +156,7 @@ CREATE TABLE IF NOT EXISTS campaign_versions (
     normalized_text TEXT NOT NULL,
     fingerprint CHAR(64) NOT NULL,
     primary_image_url TEXT,
+    source_url TEXT,
     valid_from TIMESTAMPTZ,
     valid_to TIMESTAMPTZ,
     valid_from_source VARCHAR(32),
@@ -182,6 +203,15 @@ CREATE TABLE IF NOT EXISTS campaign_ai_analyses (
     tokens_input INTEGER,
     tokens_output INTEGER,
     duration_ms INTEGER,
+    confidence NUMERIC(5,4),
+    min_deposit NUMERIC,
+    max_bonus NUMERIC,
+    bonus_amount NUMERIC,
+    bonus_percentage NUMERIC,
+    free_bet_amount NUMERIC,
+    cashback_percent NUMERIC,
+    turnover NUMERIC,
+    extracted_details JSONB NOT NULL DEFAULT '{}',
     raw_request JSONB,
     raw_response JSONB,
     created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
@@ -194,6 +224,7 @@ CREATE TABLE IF NOT EXISTS campaign_similarities (
     similar_campaign_id UUID NOT NULL REFERENCES campaigns(id) ON DELETE CASCADE,
     similarity_score NUMERIC(5,4) NOT NULL,
     similarity_reason TEXT,
+    matched_fields TEXT[] NOT NULL DEFAULT '{}',
     method VARCHAR(32) NOT NULL DEFAULT 'ai+text',
     created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
     UNIQUE(campaign_id, similar_campaign_id)
@@ -427,7 +458,7 @@ SECURITY DEFINER
 AS $$
 BEGIN
   UPDATE campaigns
-  SET version_count = version_count + 1, updated_at = NOW()
+  SET content_version = content_version + 1, updated_at = NOW()
   WHERE id = campaign_id;
 END;
 $$;

@@ -126,11 +126,10 @@ async function storeWeeklyReport(report: WeeklyReport): Promise<void> {
     queries.insertWeeklyReport(db, {
       periodStart: report.period.start,
       periodEnd: report.period.end,
-      summary: JSON.stringify(report.summary),
-      bySite: JSON.stringify(report.bySite),
-      topBonuses: JSON.stringify(report.topBonuses),
-      status: JSON.stringify(report.status),
-      generatedAt: report.generatedAt,
+      summary: report.summary,
+      bySite: report.bySite,
+      topBonuses: report.topBonuses,
+      status: 'completed',
     });
 
     logger.debug('Weekly report stored successfully');
@@ -149,16 +148,28 @@ export async function getLatestWeeklyReport(): Promise<WeeklyReport | null> {
     return null;
   }
 
+  const payload = (row.report_payload ?? {}) as Record<string, unknown>;
   return {
     period: {
-      start: row.period_start as string,
-      end: row.period_end as string,
+      start: row.report_week_start as string,
+      end: row.report_week_end as string,
     },
-    summary: JSON.parse(row.summary as string),
-    bySite: JSON.parse(row.by_site as string),
-    topBonuses: JSON.parse(row.top_bonuses as string),
-    status: JSON.parse(row.status as string),
-    generatedAt: row.generated_at as string,
+    summary: {
+      totalCampaigns: (payload.totalCampaigns as number) ?? 0,
+      newCampaigns: (payload.newCampaigns as number) ?? 0,
+      expiredCampaigns: (payload.expiredCampaigns as number) ?? 0,
+      updatedCampaigns: (payload.updatedCampaigns as number) ?? 0,
+      activeSites: (payload.activeSites as number) ?? 0,
+    },
+    bySite: (payload.by_site as WeeklyReport['bySite']) ?? [],
+    topBonuses: (payload.top_bonuses as WeeklyReport['topBonuses']) ?? [],
+    status: {
+      visible: 0,
+      hidden: 0,
+      expired: 0,
+      pending: 0,
+    },
+    generatedAt: (row.created_at as string) ?? new Date().toISOString(),
   };
 }
 
@@ -166,17 +177,31 @@ export async function getWeeklyReportHistory(limit: number = 12): Promise<Weekly
   const db = getDb();
   const rows = await queries.getWeeklyReportHistory(db, limit);
 
-  return rows.map((row: Record<string, unknown>) => ({
-    period: {
-      start: row.period_start as string,
-      end: row.period_end as string,
-    },
-    summary: JSON.parse(row.summary as string),
-    bySite: JSON.parse(row.by_site as string),
-    topBonuses: JSON.parse(row.top_bonuses as string),
-    status: JSON.parse(row.status as string),
-    generatedAt: row.generated_at as string,
-  }));
+  return rows.map((row: Record<string, unknown>) => {
+    const payload = (row.report_payload ?? {}) as Record<string, unknown>;
+    return {
+      period: {
+        start: row.report_week_start as string,
+        end: row.report_week_end as string,
+      },
+      summary: {
+        totalCampaigns: (payload.totalCampaigns as number) ?? 0,
+        newCampaigns: (payload.newCampaigns as number) ?? 0,
+        expiredCampaigns: (payload.expiredCampaigns as number) ?? 0,
+        updatedCampaigns: (payload.updatedCampaigns as number) ?? 0,
+        activeSites: (payload.activeSites as number) ?? 0,
+      },
+      bySite: (payload.by_site as WeeklyReport['bySite']) ?? [],
+      topBonuses: (payload.top_bonuses as WeeklyReport['topBonuses']) ?? [],
+      status: {
+        visible: 0,
+        hidden: 0,
+        expired: 0,
+        pending: 0,
+      },
+      generatedAt: (row.created_at as string) ?? new Date().toISOString(),
+    };
+  });
 }
 
 export async function scheduleNextWeeklyReport(): Promise<void> {

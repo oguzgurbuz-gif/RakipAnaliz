@@ -172,9 +172,8 @@ export async function incrementVersionCount(
 ): Promise<void> {
   const { error } = await db.rpc('increment_version_count', { campaign_id: campaignId });
   if (error) {
-    // Fallback via exec
     const { error: err } = await db.rpc('exec', {
-      sql: `UPDATE campaigns SET version_count = version_count + 1, updated_at = NOW() WHERE id = $1`,
+      sql: `UPDATE campaigns SET content_version = content_version + 1, updated_at = NOW() WHERE id = $1`,
       params: [campaignId],
     });
     if (err) throw err;
@@ -508,11 +507,10 @@ export async function insertWeeklyReport(
   data: {
     periodStart: string;
     periodEnd: string;
-    summary: string;
-    bySite: string;
-    topBonuses: string;
+    summary: Record<string, unknown>;
+    bySite: Record<string, unknown>[];
+    topBonuses: Record<string, unknown>[];
     status: string;
-    generatedAt: string;
   }
 ): Promise<{ id: number }> {
   const { data: row, error } = await db
@@ -520,9 +518,16 @@ export async function insertWeeklyReport(
     .insert({
       report_week_start: data.periodStart,
       report_week_end: data.periodEnd,
-      summary: data.summary,
-      by_site: data.bySite,
-      top_bonuses: data.topBonuses,
+      executive_summary: data.summary.executiveSummary as string ?? null,
+      report_payload: {
+        activeSites: data.summary.activeSites,
+        totalCampaigns: data.summary.totalCampaigns,
+        newCampaigns: data.summary.newCampaigns,
+        expiredCampaigns: data.summary.expiredCampaigns,
+        updatedCampaigns: data.summary.updatedCampaigns,
+        by_site: data.bySite,
+        top_bonuses: data.topBonuses,
+      },
       status: data.status,
     })
     .select('id')
@@ -537,7 +542,7 @@ export async function getLatestWeeklyReport(
   const { data, error } = await db
     .from('weekly_reports')
     .select('*')
-    .order('generated_at', { ascending: false })
+    .order('created_at', { ascending: false })
     .limit(1)
     .maybeSingle();
   if (error && error.code !== 'PGRST116') throw error;
@@ -551,7 +556,7 @@ export async function getWeeklyReportHistory(
   const { data, error } = await db
     .from('weekly_reports')
     .select('*')
-    .order('generated_at', { ascending: false })
+    .order('created_at', { ascending: false })
     .limit(limit);
   if (error) throw error;
   return (data ?? []) as Record<string, unknown>[];
@@ -569,7 +574,7 @@ export async function insertScrapeRun(
     newCampaigns: number;
     updatedCampaigns: number;
     unchanged: number;
-    errors: string | null;
+    errors: number | null;
   }
 ): Promise<{ id: string }> {
   const { data: row, error } = await db
@@ -628,7 +633,7 @@ export async function insertScrapeRunSite(
     newCampaigns: number;
     updatedCampaigns: number;
     unchanged: number;
-    errors: string | null;
+    errors: number | null;
   }
 ): Promise<{ id: string }> {
   const { data: row, error } = await db

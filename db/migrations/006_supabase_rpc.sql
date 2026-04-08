@@ -36,7 +36,7 @@ SECURITY DEFINER
 AS $$
 BEGIN
   UPDATE campaigns
-  SET version_count = version_count + 1, updated_at = NOW()
+  SET content_version = content_version + 1, updated_at = NOW()
   WHERE id = campaign_id;
 END;
 $$;
