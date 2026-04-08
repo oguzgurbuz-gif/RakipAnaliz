@@ -81,61 +81,118 @@ export async function GET(request: NextRequest) {
       statsParams.push(category);
     }
 
+    const categoryExpr = `COALESCE(c.metadata->'ai_analysis'->>'category', c.metadata->'ai_analysis'->>'campaign_type')`;
+    const bonusMetricsCte = `
+      WITH campaign_bonus_metrics AS (
+        SELECT
+          c.id,
+          c.site_id,
+          c.title,
+          c.status,
+          c.valid_to,
+          ${categoryExpr} as category,
+          NULLIF(COALESCE(
+            c.metadata->>'bonus_amount',
+            c.metadata->'ai_analysis'->'extractedTags'->>'bonus_amount'
+          ), '')::numeric as direct_bonus_amount,
+          NULLIF(COALESCE(
+            c.metadata->>'bonus_percentage',
+            c.metadata->'ai_analysis'->'extractedTags'->>'bonus_percentage'
+          ), '')::numeric as bonus_percentage,
+          NULLIF(COALESCE(
+            c.metadata->'ai_analysis'->'extractedTags'->>'min_deposit',
+            c.metadata->'ai_analysis'->'conditions'->>'min_deposit'
+          ), '')::numeric as min_deposit,
+          NULLIF(COALESCE(
+            c.metadata->'ai_analysis'->'extractedTags'->>'max_bonus',
+            c.metadata->'ai_analysis'->'conditions'->>'max_bonus'
+          ), '')::numeric as max_bonus,
+          NULLIF(COALESCE(
+            c.metadata->'ai_analysis'->'extractedTags'->>'free_bet_amount',
+            c.metadata->'ai_analysis'->'extractedTags'->>'freebet_amount',
+            c.metadata->'ai_analysis'->'conditions'->>'freebet_amount'
+          ), '')::numeric as freebet_amount,
+          NULLIF(COALESCE(
+            c.metadata->'ai_analysis'->'extractedTags'->>'cashback_percent',
+            c.metadata->'ai_analysis'->'conditions'->>'cashback_percentage'
+          ), '')::numeric as cashback_percent
+        FROM campaigns c
+      ),
+      campaign_bonus_values AS (
+        SELECT
+          cbm.*,
+          CASE
+            WHEN cbm.direct_bonus_amount IS NOT NULL AND cbm.direct_bonus_amount > 0 THEN cbm.direct_bonus_amount
+            WHEN cbm.freebet_amount IS NOT NULL AND cbm.freebet_amount > 0 THEN cbm.freebet_amount
+            WHEN cbm.bonus_percentage IS NOT NULL AND cbm.min_deposit IS NOT NULL THEN LEAST(
+              cbm.min_deposit * cbm.bonus_percentage / 100.0,
+              COALESCE(NULLIF(cbm.max_bonus, 0), cbm.min_deposit * cbm.bonus_percentage / 100.0)
+            )
+            WHEN cbm.cashback_percent IS NOT NULL AND cbm.min_deposit IS NOT NULL THEN cbm.min_deposit * cbm.cashback_percent / 100.0
+            WHEN cbm.max_bonus IS NOT NULL AND cbm.max_bonus > 0 THEN cbm.max_bonus
+            ELSE NULL
+          END as effective_bonus_amount
+        FROM campaign_bonus_metrics cbm
+      )
+    `;
+
     const statsQuery = `
+      ${bonusMetricsCte}
       SELECT 
-        c.metadata->'ai_analysis'->>'category' as category,
-        c.site_id,
+        cbv.category as category,
+        cbv.site_id,
         s.name as site_name,
         s.code as site_code,
         COUNT(*) as campaign_count,
-        COUNT(*) FILTER (WHERE c.status = 'active') as active_count,
-        COALESCE(AVG((c.metadata->>'bonus_amount')::numeric), 0) as avg_bonus,
-        COALESCE(SUM((c.metadata->>'bonus_amount')::numeric), 0) as total_bonus
-      FROM campaigns c
-      JOIN sites s ON s.id = c.site_id
-      WHERE c.metadata->'ai_analysis'->>'category' IS NOT NULL
-        AND c.metadata->'ai_analysis'->>'category' != ''
-        ${category ? `AND c.metadata->'ai_analysis'->>'category' = $1` : ''}
-      GROUP BY c.metadata->'ai_analysis'->>'category', c.site_id, s.name, s.code
-      ORDER BY c.metadata->'ai_analysis'->>'category', s.name
+        COUNT(*) FILTER (WHERE cbv.status = 'active') as active_count,
+        COALESCE(AVG(cbv.effective_bonus_amount), 0) as avg_bonus,
+        COALESCE(SUM(cbv.effective_bonus_amount), 0) as total_bonus
+      FROM campaign_bonus_values cbv
+      JOIN sites s ON s.id = cbv.site_id
+      WHERE cbv.category IS NOT NULL
+        AND cbv.category != ''
+        ${category ? `AND cbv.category = $1` : ''}
+      GROUP BY cbv.category, cbv.site_id, s.name, s.code
+      ORDER BY cbv.category, s.name
     `;
     const statsResult = await query<CategoryStats>(statsQuery, statsParams);
 
     const siteRankingsQuery = `
+      ${bonusMetricsCte}
       SELECT 
-        c.site_id,
+        cbv.site_id,
         s.name as site_name,
         s.code as site_code,
         COUNT(*) as total_campaigns,
-        COUNT(*) FILTER (WHERE c.status = 'active') as active_campaigns,
-        COALESCE(AVG((c.metadata->>'bonus_amount')::numeric), 0) as avg_bonus,
-        COALESCE(SUM((c.metadata->>'bonus_amount')::numeric), 0) as total_bonus,
-        COUNT(DISTINCT c.metadata->'ai_analysis'->>'category') as categories_count,
-        COUNT(*) FILTER (WHERE c.status = 'active')::numeric / NULLIF(COUNT(*), 0)::numeric as active_rate
-      FROM campaigns c
-      JOIN sites s ON s.id = c.site_id
-      GROUP BY c.site_id, s.name, s.code
+        COUNT(*) FILTER (WHERE cbv.status = 'active') as active_campaigns,
+        COALESCE(AVG(cbv.effective_bonus_amount), 0) as avg_bonus,
+        COALESCE(SUM(cbv.effective_bonus_amount), 0) as total_bonus,
+        COUNT(DISTINCT cbv.category) as categories_count,
+        COUNT(*) FILTER (WHERE cbv.status = 'active')::numeric / NULLIF(COUNT(*), 0)::numeric as active_rate
+      FROM campaign_bonus_values cbv
+      JOIN sites s ON s.id = cbv.site_id
+      GROUP BY cbv.site_id, s.name, s.code
       ORDER BY ${metric === 'avg_bonus' ? 'avg_bonus' : metric === 'total_bonus' ? 'total_bonus' : metric === 'active_rate' ? 'active_rate' : 'total_campaigns'} DESC
     `;
     const siteRankingsResult = await query<SiteRanking>(siteRankingsQuery);
 
     const bestDealsQuery = `
+      ${bonusMetricsCte}
       SELECT 
-        c.id as campaign_id,
-        c.title as campaign_title,
+        cbv.id as campaign_id,
+        cbv.title as campaign_title,
         s.name as site_name,
         s.code as site_code,
-        c.metadata->'ai_analysis'->>'category' as category,
-        (c.metadata->>'bonus_amount')::numeric as bonus_amount,
-        (c.metadata->>'bonus_percentage')::numeric as bonus_percentage,
-        c.status,
-        c.valid_to
-      FROM campaigns c
-      JOIN sites s ON s.id = c.site_id
-      WHERE ((c.metadata->>'bonus_amount')::numeric > 0 
-         OR (c.metadata->>'bonus_percentage')::numeric > 0)
-        ${category ? `AND c.metadata->'ai_analysis'->>'category' = $1` : ''}
-      ORDER BY COALESCE((c.metadata->>'bonus_amount')::numeric, 0) DESC
+        cbv.category as category,
+        cbv.effective_bonus_amount as bonus_amount,
+        cbv.bonus_percentage,
+        cbv.status,
+        cbv.valid_to
+      FROM campaign_bonus_values cbv
+      JOIN sites s ON s.id = cbv.site_id
+      WHERE (cbv.effective_bonus_amount > 0 OR cbv.bonus_percentage > 0)
+        ${category ? `AND cbv.category = $1` : ''}
+      ORDER BY COALESCE(cbv.effective_bonus_amount, 0) DESC, COALESCE(cbv.bonus_percentage, 0) DESC
       LIMIT 20
     `;
     const bestDealsResult = await query<BestDeal>(bestDealsQuery, category ? [category] : []);

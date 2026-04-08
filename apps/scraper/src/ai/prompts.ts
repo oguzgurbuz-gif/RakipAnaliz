@@ -256,6 +256,11 @@ export interface ComprehensiveExtractionResult {
     freebet_amount: number | null;
     cashback_percentage: number | null;
     turnover: string | null;
+    promo_code: string | null;
+    eligible_products: string[];
+    deposit_methods: string[];
+    target_segment: string[];
+    max_uses_per_user: string | null;
     required_actions: string[];
     excluded_games: string[];
     time_restrictions: string | null;
@@ -326,6 +331,11 @@ Tarih ipucu (varsa):
     "freebet_amount": number or null,
     "cashback_percentage": number or null,
     "turnover": "Nx" or null,
+    "promo_code": "code or null",
+    "eligible_products": ["product1", "product2"],
+    "deposit_methods": ["method1", "method2"],
+    "target_segment": ["segment1", "segment2"],
+    "max_uses_per_user": "text or null",
     "required_actions": ["action1", "action2"],
     "excluded_games": ["game1", "game2"],
     "time_restrictions": "restriction or null",
@@ -347,6 +357,11 @@ Tarih ipucu (varsa):
 - "5x çevrim şartı" → turnover: "5x"
 - "Bedava 50 TL bahis" → freebet_amount: 50
 - "%10 cashback" → cashback_percentage: 10
+- "BONUS100 kodu ile" → promo_code: "BONUS100"
+- "Sadece spor bahislerinde" → eligible_products: ["spor bahisleri"]
+- "Papara ve havale ile yatırımlarda" → deposit_methods: ["Papara", "havale"]
+- "Yeni üyeler ve VIP oyuncular" → target_segment: ["yeni üye", "VIP"]
+- "Kullanıcı başına 1 kez" → max_uses_per_user: "Kullanıcı başına 1 kez"
 - "Sadece yeni üyeler" → membership_requirements: ["yeni üye"]
 - "At yarışı ve Spor bahisleri hariç" → excluded_games: ["At yarışı", "Spor bahisleri"]
 - "00:00-23:59 arası geçerli" → time_restrictions: "Günlük 00:00-23:59"

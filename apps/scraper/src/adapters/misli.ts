@@ -261,43 +261,75 @@ export class MisliAdapter extends BaseAdapter {
       url: card.url,
     });
 
+    const bonusAmount = extractNumericValue(card.bonusAmount);
+    const bonusPercentage = card.bonusPercentage;
+    const minDeposit = extractNumericValue(card.minDeposit);
+    const maxBonus = extractNumericValue(card.maxBonus);
+
     const fingerprint = buildFingerprint({
       siteCode: card.siteCode,
       title: card.title,
-      bonusType: 'amount',
-      bonusAmount: null,
-      bonusPercentage: null,
-      minDeposit: null,
-      code: null,
-      category: null,
+      bonusType: bonusAmount !== null ? 'amount' : bonusPercentage !== null ? 'percentage' : 'amount',
+      bonusAmount,
+      bonusPercentage,
+      minDeposit,
+      code: card.code,
+      category: card.category,
     });
 
     const dateResult = extractDatesFromCampaignText(card.title, card.description);
     const startDate = dateResult.startDate;
     const endDate = dateResult.endDate;
 
+    const bonusType = this.classifyBonusType(
+      bonusAmount,
+      bonusPercentage,
+      card.description ?? undefined
+    );
+
     return {
       siteCode: card.siteCode,
       fingerprint,
       title: card.title,
       description: card.description,
-      bonusType: 'amount',
-      bonusAmount: null,
-      bonusPercentage: null,
-      minDeposit: null,
-      maxBonus: null,
-      code: null,
+      bonusType,
+      bonusAmount,
+      bonusPercentage,
+      minDeposit,
+      maxBonus,
+      code: card.code,
       url: card.url,
       imageUrl: card.imageUrl,
       startDate,
       endDate,
-      termsUrl: null,
-      category: 'genel',
-      isFeatured: false,
-      isExclusive: false,
+      termsUrl: card.termsUrl,
+      category: card.category ?? 'genel',
+      isFeatured: card.isFeatured,
+      isExclusive: card.isExclusive,
       visibility: 'visible',
       rawFingerprint,
     };
+  }
+
+  private classifyBonusType(
+    bonusAmount: number | null,
+    bonusPercentage: number | null,
+    description?: string
+  ): 'amount' | 'percentage' | 'freebet' | 'cashback' | 'mixed' {
+    const desc = description?.toLowerCase() ?? '';
+    if (desc.includes('freebet') || desc.includes('serbest bahis') || desc.includes('free bet')) {
+      return 'freebet';
+    }
+    if (desc.includes('cashback') || desc.includes('iade') || desc.includes('kayıp')) {
+      return 'cashback';
+    }
+    if (bonusAmount !== null && bonusPercentage !== null) {
+      return 'mixed';
+    }
+    if (bonusPercentage !== null) {
+      return 'percentage';
+    }
+    return 'amount';
   }
 }
 

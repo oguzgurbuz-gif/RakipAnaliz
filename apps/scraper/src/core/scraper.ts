@@ -7,6 +7,7 @@ import { processDedupLogic, DedupResult } from './dedup';
 import { findExistingCampaign, getLatestCampaignVersion, insertCampaign, insertCampaignVersion, updateCampaign, markCampaignSeen, updateCampaignVisibilityByFingerprint, getActiveCampaignsBySite, updateSiteScrapeStatus, getDb } from '../db';
 import { publishScrapeEvent } from '../publish/sse';
 import { shouldTriggerAiExtraction, triggerAiDateExtraction } from '../date-extraction/ai-fallback';
+import { getInvalidCampaignReason } from '../normalizers/text';
 
 export class ScrapeManager {
   private browser: Browser | null = null;
@@ -210,6 +211,18 @@ export class ScrapeManager {
       for (const card of cards) {
         try {
           const normalized = adapter.normalize(card);
+          const invalidReason = getInvalidCampaignReason(normalized.title, normalized.description);
+
+          if (invalidReason) {
+            logger.warn(`Skipping invalid campaign candidate`, {
+              siteCode: run.siteCode,
+              invalidReason,
+              title: normalized.title,
+              url: normalized.url,
+            });
+            continue;
+          }
+
           const result = await this.processNormalizedCampaign(normalized);
 
           if (result.action === 'create') {
@@ -224,6 +237,9 @@ export class ScrapeManager {
           }
 
           if (result.action === 'create' || result.action === 'update') {
+            if (result.action === 'update' && result.campaign) {
+              await this.scheduleAiAnalysisForUpdate(result.campaign.id, normalized);
+            }
             await this.triggerDateExtractionIfNeeded(result, normalized);
           }
 
@@ -343,6 +359,41 @@ export class ScrapeManager {
           rawData: {},
         });
       }
+    }
+  }
+
+  private async scheduleAiAnalysisForUpdate(
+    campaignId: string,
+    normalized: NormalizedCampaignInput
+  ): Promise<void> {
+    try {
+      const { jobScheduler } = await import('../jobs/scheduler');
+
+      await jobScheduler.scheduleJob(
+        'ai-analysis',
+        {
+          campaignId,
+          title: normalized.title,
+          description: normalized.description,
+          termsUrl: normalized.termsUrl,
+          termsText: null,
+          priority: 'high',
+          validFrom: normalized.startDate?.toISOString() ?? null,
+          validTo: normalized.endDate?.toISOString() ?? null,
+          bonusAmount: normalized.bonusAmount,
+          bonusPercentage: normalized.bonusPercentage,
+          minDeposit: normalized.minDeposit,
+          maxBonus: normalized.maxBonus,
+          isFreebet: normalized.bonusType === 'freebet' || normalized.bonusType === 'mixed',
+          isCashback: normalized.bonusType === 'cashback' || normalized.bonusType === 'mixed',
+          sportsType: normalized.category,
+        },
+        { priority: 80 }
+      );
+    } catch (error) {
+      logger.warn(`Failed to schedule AI analysis for updated campaign ${campaignId}`, {
+        error: error instanceof Error ? error.message : 'Unknown error',
+      });
     }
   }
 

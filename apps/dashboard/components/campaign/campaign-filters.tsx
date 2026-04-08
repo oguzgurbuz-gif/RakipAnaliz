@@ -35,6 +35,13 @@ const SENTIMENT_OPTIONS = [
   { value: 'neutral', label: 'Nötr' },
 ]
 
+const DATE_COMPLETENESS_OPTIONS = [
+  { value: 'complete', label: 'Başlangıç + Bitiş Var' },
+  { value: 'missing_start', label: 'Başlangıç Eksik' },
+  { value: 'missing_end', label: 'Bitiş Eksik' },
+  { value: 'missing_any', label: 'Herhangi Biri Eksik' },
+]
+
 const CAMPAIGN_TYPE_OPTIONS = [
   { value: 'hoş-geldin-bonusu', label: 'Hoş Geldin Bonusu' },
   { value: 'depozit-bonusu', label: 'Depozit Bonusu' },
@@ -85,7 +92,7 @@ export function CampaignFilters({ filters, onFiltersChange, sites }: CampaignFil
         )}
       </div>
 
-      <div className="grid grid-cols-2 gap-4 md:grid-cols-4 lg:grid-cols-6">
+      <div className="grid grid-cols-2 gap-4 md:grid-cols-4 lg:grid-cols-8">
         <div>
           <label className="text-sm font-medium text-muted-foreground">Tarih Modu</label>
           <Select
@@ -120,6 +127,22 @@ export function CampaignFilters({ filters, onFiltersChange, sites }: CampaignFil
             onChange={(e) => handleChange('dateTo', e.target.value)}
             className="mt-1"
           />
+        </div>
+
+        <div>
+          <label className="text-sm font-medium text-muted-foreground">Tarih Durumu</label>
+          <Select
+            value={filters.dateCompleteness || ''}
+            onChange={(e) => handleChange('dateCompleteness', e.target.value)}
+            className="mt-1"
+          >
+            <option value="">Tümü</option>
+            {DATE_COMPLETENESS_OPTIONS.map((opt) => (
+              <option key={opt.value} value={opt.value}>
+                {opt.label}
+              </option>
+            ))}
+          </Select>
         </div>
 
         <div>

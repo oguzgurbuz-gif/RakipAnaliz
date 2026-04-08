@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { z } from 'zod';
 import { query } from '@/lib/db';
 import { successResponse, handleApiError, getCorsHeaders } from '@/lib/response';
+import { getCategoryLabel, isGenericCategory } from '@/lib/category-labels';
 
 const querySchema = z.object({
   from: z.string().optional(),
@@ -49,21 +50,36 @@ export async function GET(request: NextRequest) {
          OR (valid_from IS NULL AND first_seen_at >= $1 AND first_seen_at <= $2)
     `, [dateFrom, dateTo]);
 
-    const topCategories = await query<{ category: string; count: string }>(`
+    const topCategoriesRaw = await query<{ category: string; count: string }>(`
+      WITH latest_ai AS (
+        SELECT DISTINCT ON (campaign_id)
+          campaign_id,
+          category_code
+        FROM campaign_ai_analyses
+        ORDER BY campaign_id, created_at DESC
+      )
       SELECT 
-        COALESCE(ai.category_code, 'unknown') as category,
+        COALESCE(
+          NULLIF(c.metadata->'ai_analysis'->>'campaign_type', ''),
+          NULLIF(latest_ai.category_code, ''),
+          NULLIF(c.metadata->'ai_analysis'->>'category', ''),
+          'unknown'
+        ) as category,
         COUNT(*) as count
       FROM campaigns c
-      LEFT JOIN campaign_ai_analyses ai ON ai.campaign_id = c.id AND ai.id = (
-        SELECT ai2.id FROM campaign_ai_analyses ai2 
-        WHERE ai2.campaign_id = c.id 
-        ORDER BY ai2.created_at DESC LIMIT 1
-      )
-      WHERE (c.valid_from >= $1 AND c.valid_from <= $2)
+      LEFT JOIN latest_ai ON latest_ai.campaign_id = c.id
+      WHERE (
+            (c.valid_from >= $1 AND c.valid_from <= $2)
          OR (c.valid_from IS NULL AND c.first_seen_at >= $1 AND c.first_seen_at <= $2)
-      GROUP BY COALESCE(ai.category_code, 'unknown')
+      )
+        AND COALESCE(BTRIM(c.title), '') <> ''
+        AND LOWER(BTRIM(c.title)) NOT IN ('kampanyalar', 'güncel kampanyalar')
+        AND c.title NOT ILIKE '%tarayıcı sürümü%'
+        AND COALESCE(c.body, '') NOT ILIKE '%desteklenmemektedir%'
+        AND COALESCE(c.body, '') NOT ILIKE '%güncel kampanya bulunmamaktadır%'
+      GROUP BY 1
       ORDER BY count DESC
-      LIMIT 5
+      LIMIT 10
     `, [dateFrom, dateTo]);
 
     const topSites = await query<{ site_name: string; count: string }>(`
@@ -87,6 +103,16 @@ export async function GET(request: NextRequest) {
       changed_count: '0',
     };
 
+    const parsedTopCategories = topCategoriesRaw.map((c) => ({
+      category: c.category,
+      label: getCategoryLabel(c.category),
+      count: parseInt(c.count, 10),
+    }));
+
+    const specificTopCategories = parsedTopCategories.filter((item) => !isGenericCategory(item.category));
+    const visibleTopCategories = (specificTopCategories.length > 0 ? specificTopCategories : parsedTopCategories).slice(0, 5);
+    const totalVisibleCategoryCount = visibleTopCategories.reduce((sum, item) => sum + item.count, 0);
+
     const result = {
       dateFrom: dateFrom.toISOString(),
       dateTo: dateTo.toISOString(),
@@ -95,9 +121,11 @@ export async function GET(request: NextRequest) {
       activeCount: parseInt(counts.active_count || '0', 10),
       passiveCount: parseInt(counts.passive_count || '0', 10),
       changedCount: parseInt(counts.changed_count || '0', 10),
-      topCategories: topCategories.map((c: { category: string; count: string }) => ({
+      topCategories: visibleTopCategories.map((c) => ({
         category: c.category,
-        count: parseInt(c.count, 10),
+        label: c.label,
+        count: c.count,
+        share: totalVisibleCategoryCount > 0 ? c.count / totalVisibleCategoryCount : 0,
       })),
       topSites: topSites.map((s: { site_name: string; count: string }) => ({
         siteName: s.site_name,

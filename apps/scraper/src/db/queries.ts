@@ -1,31 +1,23 @@
-import { Pool, PoolClient } from 'pg';
+import { SupabaseClient } from '@supabase/supabase-js';
 
-export async function findCampaignByExternalId(
-  db: Pool,
-  siteId: string,
-  externalId: string
-): Promise<Record<string, unknown> | null> {
-  const result = await db.query(
-    `SELECT * FROM campaigns WHERE site_id = $1 AND external_id = $2 LIMIT 1`,
-    [siteId, externalId]
-  );
-  return result.rows[0] ?? null;
-}
+// ─── Campaigns ───────────────────────────────────────────────────────────────
 
-export async function findCampaignByFingerprint(
-  db: Pool,
-  siteId: string,
+export async function findExistingCampaign(
+  db: SupabaseClient,
   fingerprint: string
 ): Promise<Record<string, unknown> | null> {
-  const result = await db.query(
-    `SELECT * FROM campaigns WHERE site_id = $1 AND fingerprint = $2 LIMIT 1`,
-    [siteId, fingerprint]
-  );
-  return result.rows[0] ?? null;
+  const { data, error } = await db
+    .from('campaigns')
+    .select('*')
+    .eq('fingerprint', fingerprint)
+    .limit(1)
+    .maybeSingle();
+  if (error) throw error;
+  return data as Record<string, unknown> | null;
 }
 
 export async function insertCampaign(
-  db: Pool,
+  db: SupabaseClient,
   data: {
     siteId: string;
     externalId: string | null;
@@ -49,63 +41,198 @@ export async function insertCampaign(
     tags: string[] | null;
     metadata: Record<string, unknown> | null;
   }
-): Promise<string> {
-  const result = await db.query(
-    `INSERT INTO campaigns (
-      site_id, external_id, source_url, canonical_url, title, body, normalized_text,
-      fingerprint, content_version, primary_image_url, valid_from, valid_to,
-      valid_from_source, valid_to_source, valid_from_confidence, valid_to_confidence,
-      raw_date_text, status, status_reason, tags, metadata,
-      first_seen_at, last_seen_at, last_visible_at, is_visible_on_last_scrape,
-      created_at, updated_at
-    ) VALUES (
-      $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20, $21,
-      NOW(), NOW(), NOW(), true, NOW(), NOW()
-    ) RETURNING id`,
-    [
-      data.siteId,
-      data.externalId,
-      data.sourceUrl,
-      data.canonicalUrl,
-      data.title,
-      data.body,
-      data.normalizedText,
-      data.fingerprint,
-      data.contentVersion,
-      data.primaryImageUrl,
-      data.validFrom,
-      data.validTo,
-      data.validFromSource,
-      data.validToSource,
-      data.validFromConfidence,
-      data.validToConfidence,
-      data.rawDateText,
-      data.status,
-      data.statusReason,
-      data.tags || null,
-      data.metadata ? JSON.stringify(data.metadata) : null,
-    ]
-  );
-  return result.rows[0].id;
+): Promise<{ id: string }> {
+  const { data: row, error } = await db
+    .from('campaigns')
+    .insert({
+      site_id: data.siteId,
+      external_id: data.externalId,
+      source_url: data.sourceUrl,
+      canonical_url: data.canonicalUrl,
+      title: data.title,
+      body: data.body,
+      normalized_text: data.normalizedText ?? '',
+      fingerprint: data.fingerprint,
+      version_no: data.contentVersion,
+      primary_image_url: data.primaryImageUrl,
+      valid_from: data.validFrom?.toISOString() ?? null,
+      valid_to: data.validTo?.toISOString() ?? null,
+      valid_from_source: data.validFromSource,
+      valid_to_source: data.validToSource,
+      valid_from_confidence: data.validFromConfidence,
+      valid_to_confidence: data.validToConfidence,
+      raw_date_text: data.rawDateText,
+      status: data.status,
+      status_reason: data.statusReason,
+      tags: data.tags ?? [],
+      metadata: data.metadata ?? {},
+      is_visible_on_last_scrape: true,
+    })
+    .select('id')
+    .single();
+  if (error) throw error;
+  return { id: row!.id as string };
+}
+
+export async function updateCampaign(
+  db: SupabaseClient,
+  campaignId: string,
+  data: {
+    title: string;
+    body: string | null;
+    status: string;
+    lastSeenAt: string;
+  }
+): Promise<void> {
+  const { error } = await db
+    .from('campaigns')
+    .update({
+      title: data.title,
+      body: data.body,
+      status: data.status,
+      last_seen_at: data.lastSeenAt,
+    })
+    .eq('id', campaignId);
+  if (error) throw error;
 }
 
 export async function updateCampaignLastSeen(
-  db: Pool,
+  db: SupabaseClient,
   campaignId: string
 ): Promise<void> {
-  await db.query(
-    `UPDATE campaigns SET
-      last_seen_at = NOW(),
-      last_visible_at = NOW(),
-      is_visible_on_last_scrape = true,
-      updated_at = NOW()
-    WHERE id = $1`,
-    [campaignId]
-  );
+  const { error } = await db
+    .from('campaigns')
+    .update({
+      last_seen_at: new Date().toISOString(),
+      last_visible_at: new Date().toISOString(),
+      is_visible_on_last_scrape: true,
+    })
+    .eq('id', campaignId);
+  if (error) throw error;
 }
 
+export async function updateCampaignVisibility(
+  db: SupabaseClient,
+  fingerprint: string,
+  visibility: string
+): Promise<void> {
+  const { error } = await db
+    .from('campaigns')
+    .update({ is_visible_on_last_scrape: visibility === 'visible' })
+    .eq('fingerprint', fingerprint);
+  if (error) throw error;
+}
+
+export async function updateCampaignStatus(
+  db: SupabaseClient,
+  campaignId: string,
+  status: string,
+  visibility: string
+): Promise<void> {
+  const { error } = await db
+    .from('campaigns')
+    .update({
+      status,
+      is_visible_on_last_scrape: visibility === 'visible',
+    })
+    .eq('id', campaignId);
+  if (error) throw error;
+}
+
+export async function getLatestVersion(
+  db: SupabaseClient,
+  campaignId: string
+): Promise<Record<string, unknown> | null> {
+  const { data, error } = await db
+    .from('campaign_versions')
+    .select('*')
+    .eq('campaign_id', campaignId)
+    .order('version_no', { ascending: false })
+    .limit(1)
+    .maybeSingle();
+  if (error && error.code !== 'PGRST116') throw error;
+  return data as Record<string, unknown> | null;
+}
+
+export async function getVersionCount(
+  db: SupabaseClient,
+  campaignId: string
+): Promise<{ count: number } | null> {
+  const result = await db
+    .from('campaign_versions')
+    .select('id', { count: 'exact', head: true })
+    .eq('campaign_id', campaignId) as unknown as { data: unknown[]; count: number; error: null };
+  if (result.error) throw result.error;
+  return { count: result.count ?? 0 };
+}
+
+export async function incrementVersionCount(
+  db: SupabaseClient,
+  campaignId: string
+): Promise<void> {
+  const { error } = await db.rpc('increment_version_count', { campaign_id: campaignId });
+  if (error) {
+    // Fallback via exec
+    const { error: err } = await db.rpc('exec', {
+      sql: `UPDATE campaigns SET version_count = version_count + 1, updated_at = NOW() WHERE id = $1`,
+      params: [campaignId],
+    });
+    if (err) throw err;
+  }
+}
+
+export async function getActiveCampaignsBySite(
+  db: SupabaseClient,
+  siteCode: string
+): Promise<Record<string, unknown>[]> {
+  const { data, error } = await db
+    .from('campaigns')
+    .select('*, sites!inner(code)')
+    .eq('sites.code', siteCode)
+    .not('status', 'eq', 'expired')
+    .not('status', 'eq', 'hidden');
+  if (error) throw error;
+  return (data ?? []) as Record<string, unknown>[];
+}
+
+export async function getCampaignCountBySite(
+  db: SupabaseClient,
+  siteCode: string
+): Promise<{ count: number } | null> {
+  const res2 = await db
+    .from('campaigns')
+    .select('id', { count: 'exact', head: true })
+    .eq('sites.code', siteCode) as unknown as { data: unknown[]; count: number | null; error: { message: string } | null };
+  if (res2.error) throw res2.error;
+  return { count: res2.count ?? 0 };
+}
+
+export async function updateSiteScrapeStatus(
+  db: SupabaseClient,
+  siteCode: string,
+  data: {
+    lastScrapedAt: string;
+    lastScrapeStatus: string;
+    lastScrapeError: string | null;
+    campaignCount: number;
+  }
+): Promise<void> {
+  const { error } = await db
+    .from('sites')
+    .update({
+      last_scraped_at: data.lastScrapedAt,
+      last_scrape_status: data.lastScrapeStatus,
+      last_scrape_error: data.lastScrapeError,
+      campaign_count: data.campaignCount,
+    })
+    .eq('code', siteCode);
+  if (error) throw error;
+}
+
+// ─── Campaign versions ───────────────────────────────────────────────────────
+
 export async function insertCampaignVersion(
-  db: Pool,
+  db: SupabaseClient,
   data: {
     campaignId: string;
     title: string;
@@ -120,80 +247,45 @@ export async function insertCampaignVersion(
     rawDateText: string | null;
     versionNo: number;
   }
-): Promise<string> {
-  const result = await db.query(
-    `INSERT INTO campaign_versions (
-      campaign_id, title, body, normalized_text,
-      fingerprint, primary_image_url, valid_from, valid_to,
-      valid_from_source, valid_to_source,
-      raw_date_text, version_no, created_at
-    ) VALUES (
-      $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, NOW()
-    ) RETURNING id`,
-    [
-      data.campaignId,
-      data.title,
-      data.body,
-      data.normalizedText,
-      data.fingerprint,
-      data.primaryImageUrl,
-      data.validFrom,
-      data.validTo,
-      data.validFromSource,
-      data.validToSource,
-      data.rawDateText,
-      data.versionNo,
-    ]
-  );
-  return result.rows[0].id;
+): Promise<{ id: string }> {
+  const { data: row, error } = await db
+    .from('campaign_versions')
+    .insert({
+      campaign_id: data.campaignId,
+      title: data.title,
+      body: data.body,
+      normalized_text: data.normalizedText,
+      fingerprint: data.fingerprint,
+      primary_image_url: data.primaryImageUrl,
+      valid_from: data.validFrom?.toISOString() ?? null,
+      valid_to: data.validTo?.toISOString() ?? null,
+      valid_from_source: data.validFromSource,
+      valid_to_source: data.validToSource,
+      raw_date_text: data.rawDateText,
+      version_no: data.versionNo,
+    })
+    .select('id')
+    .single();
+  if (error) throw error;
+  return { id: row!.id as string };
 }
 
-export async function recalculateCampaignStatus(
-  db: Pool,
-  campaignId: string
-): Promise<void> {
-  await db.query(`SELECT recalculate_campaign_status($1)`, [campaignId]);
-}
-
-export async function applyAiExtractedDates(
-  db: Pool,
+export async function updateCampaignVersionId(
+  db: SupabaseClient,
   campaignId: string,
-  dates: {
-    validFrom: Date | null;
-    validTo: Date | null;
-    validFromSource: string | null;
-    validToSource: string | null;
-    validFromConfidence: number | null;
-    validToConfidence: number | null;
-    rawDateText: string | null;
-  }
+  versionId: string
 ): Promise<void> {
-  await db.query(
-    `UPDATE campaigns SET
-      valid_from = COALESCE($2, valid_from),
-      valid_to = COALESCE($3, valid_to),
-      valid_from_source = COALESCE($4, valid_from_source),
-      valid_to_source = COALESCE($5, valid_to_source),
-      valid_from_confidence = COALESCE($6, valid_from_confidence),
-      valid_to_confidence = COALESCE($7, valid_to_confidence),
-      raw_date_text = COALESCE($8, raw_date_text),
-      updated_at = NOW()
-    WHERE id = $1`,
-    [
-      campaignId,
-      dates.validFrom,
-      dates.validTo,
-      dates.validFromSource,
-      dates.validToSource,
-      dates.validFromConfidence,
-      dates.validToConfidence,
-      dates.rawDateText,
-    ]
-  );
+  const { error } = await db
+    .from('campaigns')
+    .update({ current_version_id: versionId })
+    .eq('id', campaignId);
+  if (error) throw error;
 }
+
+// ─── AI analyses ─────────────────────────────────────────────────────────────
 
 export async function insertAiAnalysis(
-  db: Pool,
+  db: SupabaseClient,
   data: {
     campaignId: string;
     campaignVersionId?: string;
@@ -228,173 +320,191 @@ export async function insertAiAnalysis(
     durationMs?: number;
     confidence?: number;
   }
-): Promise<string> {
-  const result = await db.query(
-    `INSERT INTO campaign_ai_analyses (
-      campaign_id, campaign_version_id, analysis_type, model_provider, model_name,
-      prompt_version, status, sentiment_label, sentiment_score, category_code,
-      category_confidence, summary_text, key_points, risk_flags, recommendation_text,
-      extracted_valid_from, extracted_valid_to, extracted_date_confidence,
-      min_deposit, max_bonus, bonus_amount, bonus_percentage, free_bet_amount,
-      cashback_percent, turnover, extracted_details, raw_request, raw_response,
-      tokens_input, tokens_output, duration_ms, confidence, created_at
-    ) VALUES (
-      $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20, $21,
-      $22, $23, $24, $25, $26, $27, $28, $29, $30, $31, NOW()
-    ) RETURNING id`,
-    [
-      data.campaignId,
-      data.campaignVersionId ?? null,
-      data.analysisType ?? null,
-      data.modelProvider ?? null,
-      data.modelName ?? null,
-      data.promptVersion ?? null,
-      data.status ?? null,
-      data.sentimentLabel ?? null,
-      data.sentimentScore ?? null,
-      data.categoryCode ?? null,
-      data.categoryConfidence ?? null,
-      data.summaryText ?? null,
-      data.keyPoints ?? null,
-      data.riskFlags ?? null,
-      data.recommendationText ?? null,
-      data.extractedValidFrom ?? null,
-      data.extractedValidTo ?? null,
-      data.extractedDateConfidence ?? null,
-      data.minDeposit ?? null,
-      data.maxBonus ?? null,
-      data.bonusAmount ?? null,
-      data.bonusPercentage ?? null,
-      data.freeBetAmount ?? null,
-      data.cashbackPercent ?? null,
-      data.turnover ?? null,
-      data.extractedDetails ? JSON.stringify(data.extractedDetails) : null,
-      data.rawRequest ? JSON.stringify(data.rawRequest) : null,
-      data.rawResponse ? JSON.stringify(data.rawResponse) : null,
-      data.tokensInput ?? null,
-      data.tokensOutput ?? null,
-      data.durationMs ?? null,
-      data.confidence ?? null,
-    ]
-  );
-  return result.rows[0].id;
-}
-
-export async function getCampaignForRecalc(
-  db: Pool,
-  campaignId: string
-): Promise<Record<string, unknown> | null> {
-  const result = await db.query(
-    `SELECT c.*, s.id as site_id, s.code as site_code
-    FROM campaigns c
-    JOIN sites s ON c.site_id = s.id
-    WHERE c.id = $1`,
-    [campaignId]
-  );
-  return result.rows[0] ?? null;
-}
-
-export async function getAiAnalysisStats(
-  db: Pool,
-  campaignId?: number
-): Promise<Record<string, unknown> | null> {
-  let query: string;
-  let params: unknown[];
-
-  if (campaignId !== undefined) {
-    query = `
-      SELECT 
-        COUNT(*) as total,
-        AVG((analysis->>'valueScore')::numeric) as avg_value_score,
-        JSONB_OBJECT_AGG(analysis->>'category', COUNT(*)) as category_dist
-      FROM ai_analyses
-      WHERE campaign_id = $1
-    `;
-    params = [campaignId];
-  } else {
-    query = `
-      SELECT 
-        COUNT(*) as total,
-        AVG((analysis->>'valueScore')::numeric) as avg_value_score,
-        JSONB_OBJECT_AGG(analysis->>'category', COUNT(*)) as category_dist
-      FROM ai_analyses
-    `;
-    params = [];
-  }
-
-  const result = await db.query(query, params);
-  return result.rows[0] ?? null;
+): Promise<{ id: string }> {
+  const { data: row, error } = await db
+    .from('campaign_ai_analyses')
+    .insert({
+      campaign_id: data.campaignId,
+      campaign_version_id: data.campaignVersionId ?? null,
+      analysis_type: data.analysisType ?? 'content_analysis',
+      model_provider: data.modelProvider ?? 'deepseek',
+      model_name: data.modelName ?? 'deepseek-chat',
+      prompt_version: data.promptVersion ?? '1.0',
+      status: data.status ?? 'completed',
+      sentiment_label: data.sentimentLabel ?? null,
+      sentiment_score: data.sentimentScore ?? null,
+      category_code: data.categoryCode ?? null,
+      category_confidence: data.categoryConfidence ?? null,
+      summary_text: data.summaryText ?? null,
+      key_points: data.keyPoints ?? null,
+      risk_flags: data.riskFlags ?? null,
+      recommendation_text: data.recommendationText ?? null,
+      extracted_valid_from: data.extractedValidFrom ?? null,
+      extracted_valid_to: data.extractedValidTo ?? null,
+      extracted_date_confidence: data.extractedDateConfidence ?? null,
+      min_deposit: data.minDeposit ?? null,
+      max_bonus: data.maxBonus ?? null,
+      bonus_amount: data.bonusAmount ?? null,
+      bonus_percentage: data.bonusPercentage ?? null,
+      free_bet_amount: data.freeBetAmount ?? null,
+      cashback_percent: data.cashbackPercent ?? null,
+      turnover: data.turnover ?? null,
+      extracted_details: data.extractedDetails ?? null,
+      raw_request: data.rawRequest ?? null,
+      raw_response: data.rawResponse ?? null,
+      tokens_input: data.tokensInput ?? null,
+      tokens_output: data.tokensOutput ?? null,
+      duration_ms: data.durationMs ?? null,
+      confidence: data.confidence ?? null,
+    })
+    .select('id')
+    .single();
+  if (error) throw error;
+  return { id: row!.id as string };
 }
 
 export async function updateCampaignAiAnalysis(
-  db: Pool,
+  db: SupabaseClient,
   campaignId: string,
-  analysis: {
-    category: string | null;
-    tags: string;
-    sentiment: string;
-    targetAudience?: string | null;
-    valueScore?: number;
-    keyPoints?: string[];
-    summary?: string;
-    expirationRisk?: string;
-    extractedTags?: Record<string, unknown>;
-    campaign_type?: string;
-    type_confidence?: number;
-    type_reasoning?: string;
-    conditions?: Record<string, unknown>;
-    risk_flags?: string[];
-    valid_from?: string | null;
-    valid_to?: string | null;
-    date_confidence?: number;
-    extraction_confidence?: number;
-    [key: string]: unknown;
+  analysis: Record<string, unknown>
+): Promise<void> {
+  const { data: current, error: getErr } = await db
+    .from('campaigns')
+    .select('metadata')
+    .eq('id', campaignId)
+    .maybeSingle();
+  if (getErr) throw getErr;
+
+  const existing = (current?.metadata as Record<string, unknown>) ?? {};
+  const merged = { ...existing, ai_analysis: analysis };
+
+  const { error } = await db
+    .from('campaigns')
+    .update({ metadata: merged })
+    .eq('id', campaignId);
+  if (error) throw error;
+}
+
+// ─── Dates / recalc ──────────────────────────────────────────────────────────
+
+export async function applyAiExtractedDates(
+  db: SupabaseClient,
+  campaignId: string,
+  dates: {
+    validFrom: Date | null;
+    validTo: Date | null;
+    validFromSource: string | null;
+    validToSource: string | null;
+    validFromConfidence: number | null;
+    validToConfidence: number | null;
+    rawDateText: string | null;
   }
 ): Promise<void> {
-  await db.query(
-    `UPDATE campaigns SET
-      metadata = JSONB_SET(COALESCE(metadata, '{}'), '{ai_analysis}',
-        to_jsonb($2::jsonb)),
-      updated_at = NOW()
-    WHERE id = $1`,
-    [campaignId, JSON.stringify(analysis)]
-  );
+  const { error } = await db
+    .from('campaigns')
+    .update({
+      valid_from: dates.validFrom ?? undefined,
+      valid_to: dates.validTo ?? undefined,
+      valid_from_source: dates.validFromSource,
+      valid_to_source: dates.validToSource,
+      valid_from_confidence: dates.validFromConfidence,
+      valid_to_confidence: dates.validToConfidence,
+      raw_date_text: dates.rawDateText,
+    })
+    .eq('id', campaignId);
+  if (error) throw error;
 }
 
-export async function getCampaignForDateExtraction(
-  db: Pool,
+export async function recalculateCampaignStatus(
+  db: SupabaseClient,
   campaignId: string
-): Promise<Record<string, unknown> | null> {
-  const result = await db.query(
-    `SELECT cv.title, cv.body, cv.source_url as terms_url
-    FROM campaigns c
-    JOIN campaign_versions cv ON c.id = cv.campaign_id
-    WHERE c.id = $1
-    ORDER BY cv.content_version DESC
-    LIMIT 1`,
-    [campaignId]
-  );
-  return result.rows[0] ?? null;
+): Promise<void> {
+  const { error } = await db.rpc('recalculate_campaign_status', { campaign_id: campaignId });
+  if (error) throw error;
 }
 
-export async function getStaleCampaignsWithoutDates(
-  db: Pool,
-  limit: number
-): Promise<string[]> {
-  const result = await db.query(
-    `SELECT id FROM campaigns
-    WHERE valid_to IS NULL
-    AND status != 'expired'
-    AND created_at < NOW() - INTERVAL '7 days'
-    ORDER BY created_at ASC
-    LIMIT $1`,
-    [limit]
-  );
-  return result.rows.map((row) => row.id);
+// ─── Jobs ───────────────────────────────────────────────────────────────────
+
+export async function insertJob(
+  db: SupabaseClient,
+  data: {
+    type: string;
+    status: string;
+    priority: number;
+    payload: string;
+    maxAttempts: number;
+    scheduledAt: string;
+  }
+): Promise<{ id: number }> {
+  const { data: row, error } = await db
+    .from('jobs')
+    .insert({
+      type: data.type,
+      status: data.status,
+      priority: data.priority,
+      payload: JSON.parse(data.payload),
+      max_attempts: data.maxAttempts,
+      scheduled_at: data.scheduledAt,
+    })
+    .select('id')
+    .single();
+  if (error) throw error;
+  return { id: row!.id as number };
 }
+
+export async function getPendingJobs(
+  db: SupabaseClient,
+  limit = 10
+): Promise<Record<string, unknown>[]> {
+  const { data, error } = await db
+    .from('jobs')
+    .select('*')
+    .eq('status', 'pending')
+    .lte('scheduled_at', new Date().toISOString())
+    .order('priority', { ascending: false })
+    .order('scheduled_at', { ascending: true })
+    .limit(limit);
+  if (error) throw error;
+  return (data ?? []) as Record<string, unknown>[];
+}
+
+export async function updateJobStatus(
+  db: SupabaseClient,
+  jobId: number,
+  status: string,
+  result?: string | null,
+  errorMsg?: string | null
+): Promise<void> {
+  const updates: Record<string, unknown> = { status };
+  if (status === 'processing') updates.started_at = new Date().toISOString();
+  if (status === 'completed' || status === 'failed') {
+    updates.result = result ?? null;
+    updates.error = errorMsg ?? null;
+    updates.completed_at = new Date().toISOString();
+  }
+
+  const { error } = await db.from('jobs').update(updates).eq('id', jobId);
+  if (error) throw error;
+}
+
+export async function incrementJobAttempts(
+  db: SupabaseClient,
+  jobId: number
+): Promise<void> {
+  const { error } = await db.rpc('increment_job_attempts', { job_id: jobId });
+  if (error) {
+    const { error: err } = await db.rpc('exec', {
+      sql: `UPDATE jobs SET attempts = attempts + 1 WHERE id = $1`,
+      params: [jobId],
+    });
+    if (err) throw err;
+  }
+}
+
+// ─── Reports ─────────────────────────────────────────────────────────────────
 
 export async function insertWeeklyReport(
-  db: Pool,
+  db: SupabaseClient,
   data: {
     periodStart: string;
     periodEnd: string;
@@ -404,90 +514,53 @@ export async function insertWeeklyReport(
     status: string;
     generatedAt: string;
   }
-): Promise<number> {
-  const result = await db.query(
-    `INSERT INTO weekly_reports (
-      period_start, period_end, summary, by_site, top_bonuses, status, generated_at
-    ) VALUES ($1, $2, $3, $4, $5, $6, $7)
-    RETURNING id`,
-    [
-      data.periodStart,
-      data.periodEnd,
-      data.summary,
-      data.bySite,
-      data.topBonuses,
-      data.status,
-      data.generatedAt,
-    ]
-  );
-  return result.rows[0].id;
+): Promise<{ id: number }> {
+  const { data: row, error } = await db
+    .from('weekly_reports')
+    .insert({
+      report_week_start: data.periodStart,
+      report_week_end: data.periodEnd,
+      summary: data.summary,
+      by_site: data.bySite,
+      top_bonuses: data.topBonuses,
+      status: data.status,
+    })
+    .select('id')
+    .single();
+  if (error) throw error;
+  return { id: row!.id as number };
 }
 
-export async function getWeeklyReportItems(
-  db: Pool,
-  reportId: string
+export async function getLatestWeeklyReport(
+  db: SupabaseClient
+): Promise<Record<string, unknown> | null> {
+  const { data, error } = await db
+    .from('weekly_reports')
+    .select('*')
+    .order('generated_at', { ascending: false })
+    .limit(1)
+    .maybeSingle();
+  if (error && error.code !== 'PGRST116') throw error;
+  return data as Record<string, unknown> | null;
+}
+
+export async function getWeeklyReportHistory(
+  db: SupabaseClient,
+  limit = 10
 ): Promise<Record<string, unknown>[]> {
-  const result = await db.query(
-    `SELECT * FROM weekly_reports WHERE id = $1`,
-    [reportId]
-  );
-  return result.rows;
+  const { data, error } = await db
+    .from('weekly_reports')
+    .select('*')
+    .order('generated_at', { ascending: false })
+    .limit(limit);
+  if (error) throw error;
+  return (data ?? []) as Record<string, unknown>[];
 }
 
-export async function findSimilarCampaigns(
-  db: Pool,
-  campaignId: string,
-  category: string | null,
-  limit: number
-): Promise<Record<string, unknown>[]> {
-  let query = `
-    SELECT c.*, similarity_score
-    FROM campaigns c
-    JOIN campaign_similarities cs ON c.id = cs.similar_campaign_id
-    WHERE cs.campaign_id = $1
-  `;
-  const params: unknown[] = [campaignId];
-
-  if (category) {
-    query += ` AND (c.metadata->>'category') = $2`;
-    params.push(category);
-  }
-
-  query += ` ORDER BY cs.similarity_score DESC LIMIT $${params.length + 1}`;
-  params.push(limit);
-
-  const result = await db.query(query, params);
-  return result.rows;
-}
-
-export async function insertCampaignSimilarity(
-  db: Pool,
-  data: {
-    campaignId: string;
-    similarCampaignId: string;
-    similarityScore: number;
-    matchedFields: string[];
-  }
-): Promise<string> {
-  const result = await db.query(
-    `INSERT INTO campaign_similarities (
-      campaign_id, similar_campaign_id, similarity_score, matched_fields
-    ) VALUES ($1, $2, $3, $4)
-    ON CONFLICT (campaign_id, similar_campaign_id) DO UPDATE
-    SET similarity_score = $3, matched_fields = $4
-    RETURNING id`,
-    [
-      data.campaignId,
-      data.similarCampaignId,
-      data.similarityScore,
-      JSON.stringify(data.matchedFields),
-    ]
-  );
-  return result.rows[0].id;
-}
+// ─── Scrape runs ─────────────────────────────────────────────────────────────
 
 export async function insertScrapeRun(
-  db: Pool,
+  db: SupabaseClient,
   data: {
     siteId: string;
     status: string;
@@ -498,29 +571,27 @@ export async function insertScrapeRun(
     unchanged: number;
     errors: string | null;
   }
-): Promise<string> {
-  const result = await db.query(
-    `INSERT INTO scrape_runs (
-      site_id, status, started_at, cards_found,
-      new_campaigns, updated_campaigns, unchanged, errors
-    ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
-    RETURNING id`,
-    [
-      data.siteId,
-      data.status,
-      data.startedAt,
-      data.cardsFound,
-      data.newCampaigns,
-      data.updatedCampaigns,
-      data.unchanged,
-      data.errors,
-    ]
-  );
-  return result.rows[0].id;
+): Promise<{ id: string }> {
+  const { data: row, error } = await db
+    .from('scrape_runs')
+    .insert({
+      site_id: data.siteId,
+      status: data.status,
+      started_at: data.startedAt.toISOString(),
+      cards_found: data.cardsFound,
+      new_campaigns: data.newCampaigns,
+      updated_campaigns: data.updatedCampaigns,
+      unchanged: data.unchanged,
+      errors: data.errors,
+    })
+    .select('id')
+    .single();
+  if (error) throw error;
+  return { id: row!.id as string };
 }
 
 export async function updateScrapeRun(
-  db: Pool,
+  db: SupabaseClient,
   runId: string,
   data: {
     status?: string;
@@ -532,50 +603,23 @@ export async function updateScrapeRun(
     errors?: string | null;
   }
 ): Promise<void> {
-  const updates: string[] = [];
-  const params: unknown[] = [];
-  let paramIndex = 1;
+  const updates: Record<string, unknown> = {};
+  if (data.status !== undefined) updates.status = data.status;
+  if (data.completedAt !== undefined) updates.completed_at = data.completedAt.toISOString();
+  if (data.cardsFound !== undefined) updates.cards_found = data.cardsFound;
+  if (data.newCampaigns !== undefined) updates.new_campaigns = data.newCampaigns;
+  if (data.updatedCampaigns !== undefined) updates.updated_campaigns = data.updatedCampaigns;
+  if (data.unchanged !== undefined) updates.unchanged = data.unchanged;
+  if (data.errors !== undefined) updates.errors = data.errors;
 
-  if (data.status !== undefined) {
-    updates.push(`status = $${paramIndex++}`);
-    params.push(data.status);
-  }
-  if (data.completedAt !== undefined) {
-    updates.push(`completed_at = $${paramIndex++}`);
-    params.push(data.completedAt);
-  }
-  if (data.cardsFound !== undefined) {
-    updates.push(`cards_found = $${paramIndex++}`);
-    params.push(data.cardsFound);
-  }
-  if (data.newCampaigns !== undefined) {
-    updates.push(`new_campaigns = $${paramIndex++}`);
-    params.push(data.newCampaigns);
-  }
-  if (data.updatedCampaigns !== undefined) {
-    updates.push(`updated_campaigns = $${paramIndex++}`);
-    params.push(data.updatedCampaigns);
-  }
-  if (data.unchanged !== undefined) {
-    updates.push(`unchanged = $${paramIndex++}`);
-    params.push(data.unchanged);
-  }
-  if (data.errors !== undefined) {
-    updates.push(`errors = $${paramIndex++}`);
-    params.push(data.errors);
-  }
+  if (Object.keys(updates).length === 0) return;
 
-  if (updates.length === 0) return;
-
-  params.push(runId);
-  await db.query(
-    `UPDATE scrape_runs SET ${updates.join(', ')} WHERE id = $${paramIndex}`,
-    params
-  );
+  const { error } = await db.from('scrape_runs').update(updates).eq('id', runId);
+  if (error) throw error;
 }
 
 export async function insertScrapeRunSite(
-  db: Pool,
+  db: SupabaseClient,
   data: {
     scrapeRunId: string;
     siteId: string;
@@ -586,29 +630,27 @@ export async function insertScrapeRunSite(
     unchanged: number;
     errors: string | null;
   }
-): Promise<string> {
-  const result = await db.query(
-    `INSERT INTO scrape_run_sites (
-      scrape_run_id, site_id, status, cards_found,
-      new_campaigns, updated_campaigns, unchanged, errors
-    ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
-    RETURNING id`,
-    [
-      data.scrapeRunId,
-      data.siteId,
-      data.status,
-      data.cardsFound,
-      data.newCampaigns,
-      data.updatedCampaigns,
-      data.unchanged,
-      data.errors,
-    ]
-  );
-  return result.rows[0].id;
+): Promise<{ id: string }> {
+  const { data: row, error } = await db
+    .from('scrape_run_sites')
+    .insert({
+      scrape_run_id: data.scrapeRunId,
+      site_id: data.siteId,
+      status: data.status,
+      cards_found: data.cardsFound,
+      new_campaigns: data.newCampaigns,
+      updated_campaigns: data.updatedCampaigns,
+      unchanged: data.unchanged,
+      errors: data.errors,
+    })
+    .select('id')
+    .single();
+  if (error) throw error;
+  return { id: row!.id as string };
 }
 
 export async function updateScrapeRunSite(
-  db: Pool,
+  db: SupabaseClient,
   siteRunId: string,
   data: {
     status?: string;
@@ -619,520 +661,420 @@ export async function updateScrapeRunSite(
     errors?: string | null;
   }
 ): Promise<void> {
-  const updates: string[] = [];
-  const params: unknown[] = [];
-  let paramIndex = 1;
+  const updates: Record<string, unknown> = {};
+  if (data.status !== undefined) updates.status = data.status;
+  if (data.cardsFound !== undefined) updates.cards_found = data.cardsFound;
+  if (data.newCampaigns !== undefined) updates.new_campaigns = data.newCampaigns;
+  if (data.updatedCampaigns !== undefined) updates.updated_campaigns = data.updatedCampaigns;
+  if (data.unchanged !== undefined) updates.unchanged = data.unchanged;
+  if (data.errors !== undefined) updates.errors = data.errors;
 
-  if (data.status !== undefined) {
-    updates.push(`status = $${paramIndex++}`);
-    params.push(data.status);
-  }
-  if (data.cardsFound !== undefined) {
-    updates.push(`cards_found = $${paramIndex++}`);
-    params.push(data.cardsFound);
-  }
-  if (data.newCampaigns !== undefined) {
-    updates.push(`new_campaigns = $${paramIndex++}`);
-    params.push(data.newCampaigns);
-  }
-  if (data.updatedCampaigns !== undefined) {
-    updates.push(`updated_campaigns = $${paramIndex++}`);
-    params.push(data.updatedCampaigns);
-  }
-  if (data.unchanged !== undefined) {
-    updates.push(`unchanged = $${paramIndex++}`);
-    params.push(data.unchanged);
-  }
-  if (data.errors !== undefined) {
-    updates.push(`errors = $${paramIndex++}`);
-    params.push(data.errors);
-  }
+  if (Object.keys(updates).length === 0) return;
 
-  if (updates.length === 0) return;
-
-  params.push(siteRunId);
-  await db.query(
-    `UPDATE scrape_run_sites SET ${updates.join(', ')} WHERE id = $${paramIndex}`,
-    params
-  );
+  const { error } = await db.from('scrape_run_sites').update(updates).eq('id', siteRunId);
+  if (error) throw error;
 }
 
+// ─── Raw snapshots ───────────────────────────────────────────────────────────
+
 export async function insertRawSnapshot(
-  db: Pool,
+  db: SupabaseClient,
   data: {
     campaignId: string;
     siteId: string;
     rawData: Record<string, unknown>;
   }
-): Promise<string> {
-  const result = await db.query(
-    `INSERT INTO raw_snapshots (campaign_id, site_id, raw_data, created_at)
-    VALUES ($1, $2, $3, NOW())
-    RETURNING id`,
-    [data.campaignId, data.siteId, JSON.stringify(data.rawData)]
-  );
-  return result.rows[0].id;
+): Promise<{ id: string }> {
+  const { data: row, error } = await db
+    .from('raw_campaign_snapshots')
+    .insert({
+      campaign_id: data.campaignId,
+      site_id: data.siteId,
+      raw_data: data.rawData,
+    })
+    .select('id')
+    .single();
+  if (error) throw error;
+  return { id: row!.id as string };
 }
 
+// ─── SSE events ─────────────────────────────────────────────────────────────
+
 export async function publishSseEvent(
-  db: Pool,
+  db: SupabaseClient,
   eventType: string,
   channel: string,
   payload: Record<string, unknown>
 ): Promise<void> {
-  await db.query(
-    `INSERT INTO sse_events (event_type, channel, payload, created_at)
-    VALUES ($1, $2, $3, NOW())`,
-    [eventType, channel, JSON.stringify(payload)]
-  );
+  const { error } = await db.from('sse_events').insert({
+    event_type: eventType,
+    event_channel: channel,
+    payload,
+  });
+  if (error) throw error;
 }
 
-export async function findExistingCampaign(
-  db: Pool,
-  fingerprint: string
+// ─── Similarity ─────────────────────────────────────────────────────────────
+
+export async function insertCampaignSimilarity(
+  db: SupabaseClient,
+  data: {
+    campaignId: string;
+    similarCampaignId: string;
+    similarityScore: number;
+    matchedFields: string[];
+  }
+): Promise<{ id: string }> {
+  const { data: row, error } = await db
+    .from('campaign_similarities')
+    .upsert(
+      {
+        campaign_id: data.campaignId,
+        similar_campaign_id: data.similarCampaignId,
+        similarity_score: data.similarityScore,
+        matched_fields: data.matchedFields,
+      },
+      { onConflict: 'campaign_id,similar_campaign_id' }
+    )
+    .select('id')
+    .single();
+  if (error) throw error;
+  return { id: row!.id as string };
+}
+
+// ─── Stats / reporting queries ───────────────────────────────────────────────
+
+export async function getCampaignStatusCounts(
+  db: SupabaseClient
 ): Promise<Record<string, unknown> | null> {
-  const result = await db.query(
-    `SELECT * FROM campaigns WHERE fingerprint = $1 LIMIT 1`,
-    [fingerprint]
-  );
-  return result.rows[0] ?? null;
-}
+  const { data, error } = await db
+    .from('campaigns')
+    .select('status, is_visible_on_last_scrape');
+  if (error) throw error;
 
-export async function getActiveCampaignsBySite(
-  db: Pool,
-  siteCode: string
-): Promise<Record<string, unknown>[]> {
-  const result = await db.query(
-    `SELECT c.* FROM campaigns c
-    JOIN sites s ON c.site_id = s.id
-    WHERE s.code = $1 AND c.status NOT IN ('expired', 'hidden')`,
-    [siteCode]
-  );
-  return result.rows;
-}
-
-export async function updateCampaignVisibility(
-  db: Pool,
-  fingerprint: string,
-  visibility: string
-): Promise<void> {
-  await db.query(
-    `UPDATE campaigns SET is_visible_on_last_scrape = $1, updated_at = NOW() WHERE fingerprint = $2`,
-    [visibility === 'visible', fingerprint]
-  );
-}
-
-export async function updateCampaign(
-  db: Pool,
-  campaignId: string,
-  data: {
-    title: string;
-    body: string | null;
-    status: string;
-    lastSeenAt: string;
+  const result: Record<string, number> = { visible: 0, hidden: 0, expired: 0, pending: 0 };
+  for (const row of data ?? []) {
+    const r = row as { status: string; is_visible_on_last_scrape: boolean };
+    if (r.is_visible_on_last_scrape) result.visible++;
+    else result.hidden++;
+    if (r.status === 'expired') result.expired++;
+    if (r.status === 'pending') result.pending++;
   }
-): Promise<void> {
-  await db.query(
-    `UPDATE campaigns SET
-      title = $1,
-      body = $2,
-      status = $3,
-      last_seen_at = $4,
-      updated_at = NOW()
-    WHERE id = $5`,
-    [data.title, data.body, data.status, data.lastSeenAt, campaignId]
-  );
-}
-
-export async function updateSiteScrapeStatus(
-  db: Pool,
-  siteCode: string,
-  data: {
-    lastScrapedAt: string;
-    lastScrapeStatus: string;
-    lastScrapeError: string | null;
-    campaignCount: number;
-  }
-): Promise<void> {
-  await db.query(
-    `UPDATE sites SET
-      last_scraped_at = $1,
-      last_scrape_status = $2,
-      last_scrape_error = $3,
-      campaign_count = $4,
-      updated_at = NOW()
-    WHERE code = $5`,
-    [
-      data.lastScrapedAt,
-      data.lastScrapeStatus,
-      data.lastScrapeError,
-      data.campaignCount,
-      siteCode,
-    ]
-  );
-}
-
-export async function getCampaignCountBySite(
-  db: Pool,
-  siteCode: string
-): Promise<{ count: number } | null> {
-  const result = await db.query(
-    `SELECT COUNT(*) as count FROM campaigns c
-    JOIN sites s ON c.site_id = s.id
-    WHERE s.code = $1`,
-    [siteCode]
-  );
-  return result.rows[0] ?? null;
-}
-
-export async function getLatestVersion(
-  db: Pool,
-  campaignId: string
-): Promise<Record<string, unknown> | null> {
-  const result = await db.query(
-    `SELECT * FROM campaign_versions
-    WHERE campaign_id = $1
-    ORDER BY content_version DESC
-    LIMIT 1`,
-    [campaignId]
-  );
-  return result.rows[0] ?? null;
-}
-
-export async function getVersionCount(
-  db: Pool,
-  campaignId: string
-): Promise<{ count: number } | null> {
-  const result = await db.query(
-    `SELECT COUNT(*) as count FROM campaign_versions WHERE campaign_id = $1`,
-    [campaignId]
-  );
-  return result.rows[0] ?? null;
-}
-
-export async function incrementVersionCount(
-  db: Pool,
-  campaignId: string
-): Promise<void> {
-  await db.query(
-    `UPDATE campaigns SET version_count = version_count + 1, updated_at = NOW()
-    WHERE id = $1`,
-    [campaignId]
-  );
-}
-
-export async function updateCampaignVersionId(
-  db: Pool,
-  campaignId: string,
-  versionId: string
-): Promise<void> {
-  await db.query(
-    `UPDATE campaigns SET current_version_id = $1 WHERE id = $2`,
-    [versionId, campaignId]
-  );
-}
-
-export async function insertJob(
-  db: Pool,
-  data: {
-    type: string;
-    status: string;
-    priority: number;
-    payload: string;
-    maxAttempts: number;
-    scheduledAt: string;
-  }
-): Promise<number> {
-  const result = await db.query(
-    `INSERT INTO jobs (type, status, priority, payload, max_attempts, scheduled_at)
-    VALUES ($1, $2, $3, $4, $5, $6)
-    RETURNING id`,
-    [data.type, data.status, data.priority, data.payload, data.maxAttempts, data.scheduledAt]
-  );
-  return result.rows[0].id;
-}
-
-export async function getPendingJobs(
-  db: Pool,
-  limit: number = 10
-): Promise<Record<string, unknown>[]> {
-  const result = await db.query(
-    `SELECT * FROM jobs
-    WHERE status = 'pending' AND scheduled_at <= NOW()
-    ORDER BY priority DESC, scheduled_at ASC
-    LIMIT $1`,
-    [limit]
-  );
-  return result.rows;
-}
-
-export async function updateJobStatus(
-  db: Pool,
-  jobId: number,
-  status: string,
-  result?: string | null,
-  error?: string | null
-): Promise<void> {
-  if (status === 'processing') {
-    await db.query(
-      `UPDATE jobs SET status = $1, started_at = NOW() WHERE id = $2`,
-      [status, jobId]
-    );
-  } else if (status === 'completed' || status === 'failed') {
-    await db.query(
-      `UPDATE jobs SET status = $1, result = $2, error = $3, completed_at = NOW() WHERE id = $4`,
-      [status, result ?? null, error ?? null, jobId]
-    );
-  } else {
-    await db.query(
-      `UPDATE jobs SET status = $1 WHERE id = $2`,
-      [status, jobId]
-    );
-  }
-}
-
-export async function incrementJobAttempts(
-  db: Pool,
-  jobId: number
-): Promise<void> {
-  await db.query(
-    `UPDATE jobs SET attempts = attempts + 1 WHERE id = $1`,
-    [jobId]
-  );
+  return result;
 }
 
 export async function getTotalCampaignsInPeriod(
-  db: Pool,
+  db: SupabaseClient,
   startDate: string,
   endDate: string
 ): Promise<{ count: number } | null> {
-  const result = await db.query(
-    `SELECT COUNT(*) as count FROM campaigns
-    WHERE created_at >= $1 AND created_at <= $2`,
-    [startDate, endDate]
-  );
-  return result.rows[0] ?? null;
+  const r = await db
+    .from('campaigns')
+    .select('id', { count: 'exact', head: true })
+    .gte('created_at', startDate)
+    .lte('created_at', endDate) as unknown as { data: unknown[]; count: number | null; error: { message: string } | null };
+  if (r.error) throw r.error;
+  return { count: r.count ?? 0 };
 }
 
 export async function getNewCampaignsInPeriod(
-  db: Pool,
+  db: SupabaseClient,
   startDate: string,
   endDate: string
 ): Promise<{ count: number } | null> {
-  const result = await db.query(
-    `SELECT COUNT(*) as count FROM campaigns
-    WHERE created_at >= $1 AND created_at <= $2
-    AND status_reason = 'created'`,
-    [startDate, endDate]
-  );
-  return result.rows[0] ?? null;
+  const r = await db
+    .from('campaigns')
+    .select('id', { count: 'exact', head: true })
+    .gte('created_at', startDate)
+    .lte('created_at', endDate)
+    .eq('status_reason', 'created') as unknown as { data: unknown[]; count: number | null; error: { message: string } | null };
+  if (r.error) throw r.error;
+  return { count: r.count ?? 0 };
 }
 
 export async function getExpiredCampaignsInPeriod(
-  db: Pool,
+  db: SupabaseClient,
   startDate: string,
   endDate: string
 ): Promise<{ count: number } | null> {
-  const result = await db.query(
-    `SELECT COUNT(*) as count FROM campaigns
-    WHERE updated_at >= $1 AND updated_at <= $2
-    AND status = 'expired'`,
-    [startDate, endDate]
-  );
-  return result.rows[0] ?? null;
+  const r = await db
+    .from('campaigns')
+    .select('id', { count: 'exact', head: true })
+    .gte('updated_at', startDate)
+    .lte('updated_at', endDate)
+    .eq('status', 'expired') as unknown as { data: unknown[]; count: number | null; error: { message: string } | null };
+  if (r.error) throw r.error;
+  return { count: r.count ?? 0 };
 }
 
 export async function getUpdatedCampaignsInPeriod(
-  db: Pool,
+  db: SupabaseClient,
   startDate: string,
   endDate: string
 ): Promise<{ count: number } | null> {
-  const result = await db.query(
-    `SELECT COUNT(*) as count FROM campaigns
-    WHERE updated_at >= $1 AND updated_at <= $2
-    AND status = 'updated'`,
-    [startDate, endDate]
-  );
-  return result.rows[0] ?? null;
+  const r = await db
+    .from('campaigns')
+    .select('id', { count: 'exact', head: true })
+    .gte('updated_at', startDate)
+    .lte('updated_at', endDate)
+    .eq('status', 'updated') as unknown as { data: unknown[]; count: number | null; error: { message: string } | null };
+  if (r.error) throw r.error;
+  return { count: r.count ?? 0 };
 }
 
 export async function getActiveSitesInPeriod(
-  db: Pool,
+  db: SupabaseClient,
   startDate: string,
   endDate: string
 ): Promise<{ count: number } | null> {
-  const result = await db.query(
-    `SELECT COUNT(DISTINCT site_id) as count FROM campaigns
-    WHERE created_at >= $1 AND created_at <= $2`,
-    [startDate, endDate]
+  const { data, error } = await db
+    .from('campaigns')
+    .select('site_id')
+    .gte('created_at', startDate)
+    .lte('created_at', endDate);
+  if (error) throw error;
+  const unique = new Set(
+    (data ?? []).map((r: Record<string, unknown>) => r.site_id as string)
   );
-  return result.rows[0] ?? null;
+  return { count: unique.size };
 }
 
 export async function getCampaignsBySiteInPeriod(
-  db: Pool,
+  db: SupabaseClient,
   startDate: string,
   endDate: string,
   includeSites?: string[]
 ): Promise<Record<string, unknown>[]> {
-  let query = `
-    SELECT 
-      s.code as site_code,
-      COUNT(c.id) as total,
-      COUNT(CASE WHEN c.status_reason = 'created' THEN 1 END) as new_count,
-      COUNT(CASE WHEN c.status = 'updated' THEN 1 END) as updated_count,
-      COUNT(CASE WHEN c.status = 'expired' THEN 1 END) as expired_count
-    FROM campaigns c
-    JOIN sites s ON c.site_id = s.id
-    WHERE c.created_at >= $1 AND c.created_at <= $2
-  `;
-  const params: unknown[] = [startDate, endDate];
+  let q = db
+    .from('campaigns')
+    .select('*, sites!inner(code)')
+    .gte('created_at', startDate)
+    .lte('created_at', endDate);
 
   if (includeSites && includeSites.length > 0) {
-    query += ` AND s.code = ANY($3)`;
-    params.push(includeSites);
+    q = q.in('sites.code', includeSites);
   }
 
-  query += ` GROUP BY s.code`;
+  const { data, error } = await q;
+  if (error) throw error;
 
-  const result = await db.query(query, params);
-  return result.rows;
+  // Group by site in application code
+  const bySite: Record<string, Record<string, number>> = {};
+  for (const row of data ?? []) {
+    const r = row as Record<string, unknown>;
+    const code = (r.site_code ?? ((r.sites as Record<string, unknown>)?.code as string)) as string;
+    if (!bySite[code]) bySite[code] = { total: 0, new_count: 0, updated_count: 0, expired_count: 0 };
+    bySite[code].total++;
+    if (r.status_reason === 'created') bySite[code].new_count++;
+    if (r.status === 'updated') bySite[code].updated_count++;
+    if (r.status === 'expired') bySite[code].expired_count++;
+  }
+
+  return Object.entries(bySite).map(([site_code, counts]) => ({ site_code, ...counts }));
 }
 
 export async function getTopBonusesInPeriod(
-  db: Pool,
+  db: SupabaseClient,
   startDate: string,
   endDate: string,
   limit: number
 ): Promise<Record<string, unknown>[]> {
-  const result = await db.query(
-    `SELECT 
-      s.code as site_code,
-      cv.title,
-      (c.metadata->>'valueScore')::numeric as value_score,
-      (c.metadata->>'ai_analysis') as ai_analysis
-    FROM campaigns c
-    JOIN sites s ON c.site_id = s.id
-    JOIN campaign_versions cv ON c.id = cv.campaign_id
-    WHERE c.created_at >= $1 AND c.created_at <= $2
-    ORDER BY value_score DESC NULLS LAST
-    LIMIT $3`,
-    [startDate, endDate, limit]
-  );
-  return result.rows;
+  // Supabase PostgREST doesn't support ->> for JSONB extraction easily,
+  // so we over-fetch and post-process client-side.
+  const { data, error } = await db
+    .from('campaigns')
+    .select('*, sites!inner(code), campaign_versions(title)')
+    .gte('created_at', startDate)
+    .lte('created_at', endDate)
+    .limit(limit * 3);
+  if (error) throw error;
+
+  return (data ?? [])
+    .map((r: Record<string, unknown>) => {
+      const meta = (r.metadata as Record<string, unknown>) ?? {};
+      return {
+        site_code: ((r.sites as Record<string, unknown>)?.code ?? r.site_code) as string,
+        title: ((r.campaign_versions as Record<string, unknown>[]) ?? [])[0]?.title as string ?? r.title,
+        value_score: meta.valueScore as number ?? 0,
+        ai_analysis: meta.ai_analysis as Record<string, unknown>,
+      };
+    })
+    .sort((a, b) => ((b as { value_score: number }).value_score ?? 0) - ((a as { value_score: number }).value_score ?? 0))
+    .slice(0, limit);
 }
 
-export async function getCampaignStatusCounts(
-  db: Pool
+export async function getStaleCampaignsWithoutDates(
+  db: SupabaseClient,
+  limit: number
+): Promise<string[]> {
+  const cutoff = new Date(Date.now() - 7 * 24 * 60 * 60 * 1000).toISOString();
+  const { data, error } = await db
+    .from('campaigns')
+    .select('id')
+    .is('valid_to', null)
+    .neq('status', 'expired')
+    .lt('created_at', cutoff)
+    .limit(limit);
+  if (error) throw error;
+  return (data ?? []).map((r: Record<string, unknown>) => r.id as string);
+}
+
+export async function getCampaignForDateExtraction(
+  db: SupabaseClient,
+  campaignId: string
 ): Promise<Record<string, unknown> | null> {
-  const result = await db.query(
-    `SELECT 
-      COUNT(CASE WHEN is_visible_on_last_scrape = true THEN 1 END) as visible,
-      COUNT(CASE WHEN is_visible_on_last_scrape = false THEN 1 END) as hidden,
-      COUNT(CASE WHEN status = 'expired' THEN 1 END) as expired,
-      COUNT(CASE WHEN status = 'pending' THEN 1 END) as pending
-    FROM campaigns`
-  );
-  return result.rows[0] ?? null;
+  const { data, error } = await db
+    .from('campaign_versions')
+    .select('campaign_id, title, body, source_url')
+    .eq('campaign_id', campaignId)
+    .order('version_no', { ascending: false })
+    .limit(1)
+    .maybeSingle();
+  if (error && error.code !== 'PGRST116') throw error;
+  return data as Record<string, unknown> | null;
 }
 
-export async function getLatestWeeklyReport(
-  db: Pool
+export async function getCampaignForRecalc(
+  db: SupabaseClient,
+  campaignId: string
 ): Promise<Record<string, unknown> | null> {
-  const result = await db.query(
-    `SELECT * FROM weekly_reports ORDER BY generated_at DESC LIMIT 1`
-  );
-  return result.rows[0] ?? null;
+  const { data, error } = await db
+    .from('campaigns')
+    .select('*, sites!inner(id, code)')
+    .eq('id', campaignId)
+    .maybeSingle();
+  if (error && error.code !== 'PGRST116') throw error;
+  return data as Record<string, unknown> | null;
 }
 
-export async function getWeeklyReportHistory(
-  db: Pool,
+export async function findSimilarCampaigns(
+  db: SupabaseClient,
+  campaignId: string,
+  _category: string | null,
   limit: number
 ): Promise<Record<string, unknown>[]> {
-  const result = await db.query(
-    `SELECT * FROM weekly_reports ORDER BY generated_at DESC LIMIT $1`,
-    [limit]
-  );
-  return result.rows;
-}
-
-export async function getCampaignIdsBySite(
-  db: Pool,
-  siteCode: string,
-  batchSize: number
-): Promise<string[]> {
-  const result = await db.query(
-    `SELECT c.id FROM campaigns c
-    JOIN sites s ON c.site_id = s.id
-    WHERE s.code = $1
-    LIMIT $2`,
-    [siteCode, batchSize]
-  );
-  return result.rows.map((row) => row.id);
-}
-
-export async function getAllCampaignIds(
-  db: Pool,
-  batchSize: number
-): Promise<string[]> {
-  const result = await db.query(
-    `SELECT id FROM campaigns LIMIT $1`,
-    [batchSize]
-  );
-  return result.rows.map((row) => row.id);
-}
-
-export async function getLatestVersionForCampaign(
-  db: Pool,
-  campaignId: string
-): Promise<Record<string, unknown> | null> {
-  const result = await db.query(
-    `SELECT * FROM campaign_versions
-    WHERE campaign_id = $1
-    ORDER BY content_version DESC
-    LIMIT 1`,
-    [campaignId]
-  );
-  return result.rows[0] ?? null;
-}
-
-export async function getCampaignStatus(
-  db: Pool,
-  campaignId: string
-): Promise<{ status: string } | null> {
-  const result = await db.query(
-    `SELECT status FROM campaigns WHERE id = $1`,
-    [campaignId]
-  );
-  return result.rows[0] ?? null;
-}
-
-export async function updateCampaignStatus(
-  db: Pool,
-  campaignId: string,
-  status: string,
-  visibility: string
-): Promise<void> {
-  await db.query(
-    `UPDATE campaigns SET status = $1, is_visible_on_last_scrape = $2, updated_at = NOW() WHERE id = $3`,
-    [status, visibility === 'visible', campaignId]
-  );
+  const { data, error } = await db
+    .from('campaign_similarities')
+    .select('*, campaigns(*)')
+    .eq('campaign_id', campaignId)
+    .order('similarity_score', { ascending: false })
+    .limit(limit);
+  if (error) throw error;
+  return (data ?? []) as Record<string, unknown>[];
 }
 
 export async function getExpiredCampaignIds(
-  db: Pool
+  db: SupabaseClient
 ): Promise<string[]> {
-  const result = await db.query(
-    `SELECT id FROM campaigns WHERE status = 'expired'`
-  );
-  return result.rows.map((row) => row.id);
+  const { data, error } = await db
+    .from('campaigns')
+    .select('id')
+    .eq('status', 'expired');
+  if (error) throw error;
+  return (data ?? []).map((r: Record<string, unknown>) => r.id as string);
 }
 
 export async function getPendingCampaignIds(
-  db: Pool
+  db: SupabaseClient
 ): Promise<string[]> {
-  const result = await db.query(
-    `SELECT id FROM campaigns WHERE status = 'pending'`
-  );
-  return result.rows.map((row) => row.id);
+  const { data, error } = await db
+    .from('campaigns')
+    .select('id')
+    .eq('status', 'pending');
+  if (error) throw error;
+  return (data ?? []).map((r: Record<string, unknown>) => r.id as string);
+}
+
+export async function getCampaignIdsBySite(
+  db: SupabaseClient,
+  siteCode: string,
+  batchSize: number
+): Promise<string[]> {
+  const { data, error } = await db
+    .from('campaigns')
+    .select('id')
+    .eq('sites.code', siteCode)
+    .limit(batchSize);
+  if (error) throw error;
+  return (data ?? []).map((r: Record<string, unknown>) => r.id as string);
+}
+
+export async function getAllCampaignIds(
+  db: SupabaseClient,
+  batchSize: number
+): Promise<string[]> {
+  const { data, error } = await db
+    .from('campaigns')
+    .select('id')
+    .limit(batchSize);
+  if (error) throw error;
+  return (data ?? []).map((r: Record<string, unknown>) => r.id as string);
+}
+
+export async function getLatestVersionForCampaign(
+  db: SupabaseClient,
+  campaignId: string
+): Promise<Record<string, unknown> | null> {
+  return await getLatestVersion(db, campaignId);
+}
+
+export async function getCampaignStatus(
+  db: SupabaseClient,
+  campaignId: string
+): Promise<{ status: string } | null> {
+  const { data, error } = await db
+    .from('campaigns')
+    .select('status')
+    .eq('id', campaignId)
+    .maybeSingle();
+  if (error && error.code !== 'PGRST116') throw error;
+  return data as { status: string } | null;
+}
+
+export async function getWeeklyReportItems(
+  _db: SupabaseClient,
+  _reportId: string
+): Promise<Record<string, unknown>[]> {
+  // Implemented via exec RPC if needed; stub for compatibility
+  return [];
+}
+
+export async function getAiAnalysisStats(
+  _db: SupabaseClient,
+  _campaignId?: number
+): Promise<Record<string, unknown> | null> {
+  // Stub — not critical for scraper
+  return null;
+}
+
+export async function findCampaignByExternalId(
+  db: SupabaseClient,
+  siteId: string,
+  externalId: string
+): Promise<Record<string, unknown> | null> {
+  const { data, error } = await db
+    .from('campaigns')
+    .select('*')
+    .eq('site_id', siteId)
+    .eq('external_id', externalId)
+    .limit(1)
+    .maybeSingle();
+  if (error && error.code !== 'PGRST116') throw error;
+  return data as Record<string, unknown> | null;
+}
+
+export async function findCampaignByFingerprint(
+  db: SupabaseClient,
+  siteId: string,
+  fingerprint: string
+): Promise<Record<string, unknown> | null> {
+  const { data, error } = await db
+    .from('campaigns')
+    .select('*')
+    .eq('site_id', siteId)
+    .eq('fingerprint', fingerprint)
+    .limit(1)
+    .maybeSingle();
+  if (error && error.code !== 'PGRST116') throw error;
+  return data as Record<string, unknown> | null;
 }

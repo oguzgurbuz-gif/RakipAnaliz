@@ -15,6 +15,10 @@ export interface Campaign {
   status: 'active' | 'ended' | 'passive' | 'changed'
   validFrom: string | null
   validTo: string | null
+  validFromSource?: string | null
+  validToSource?: string | null
+  validFromConfidence?: number | null
+  validToConfidence?: number | null
   firstSeen: string
   lastSeen: string
   primaryImage: string | null
@@ -154,7 +158,7 @@ export interface ReportSummary {
   activeCount: number
   passiveCount: number
   changedCount: number
-  topCategories: { category: string; count: number }[]
+  topCategories: { category: string; label?: string; count: number; share?: number }[]
   topSites: { siteName: string; count: number }[]
 }
 
@@ -169,6 +173,7 @@ export interface CampaignFilters {
   category?: string
   sentiment?: string
   dateMode?: 'started_in_range' | 'ended_in_range' | 'active_during_range' | 'changed_in_range' | 'passive_in_range' | 'seen_in_range'
+  dateCompleteness?: 'complete' | 'missing_start' | 'missing_end' | 'missing_any'
   dateFrom?: string
   dateTo?: string
   search?: string

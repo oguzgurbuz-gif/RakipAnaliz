@@ -6,7 +6,11 @@ import Link from 'next/link'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
+import { DataQualityBadge } from '@/components/ui/data-quality-badge'
+import { InsightCard } from '@/components/ui/insight-card'
 import { Input } from '@/components/ui/input'
+import { PageHeader } from '@/components/ui/page-header'
+import { SectionHeader } from '@/components/ui/section-header'
 import { Textarea } from '@/components/ui/textarea'
 import { Skeleton } from '@/components/ui/skeleton'
 import { ErrorDisplay } from '@/components/ui/error'
@@ -17,10 +21,115 @@ import {
   addCampaignNote,
   updateCampaign,
 } from '@/lib/api'
+import { extractBodyDateRange, getDateSourceLabel } from '@/lib/campaign-dates'
+import { getCampaignQualitySignals, getCampaignTypeLabel, getDisplaySentimentLabel } from '@/lib/campaign-presentation'
 import type { Campaign } from '@/types'
 import { formatDate, formatDateTime, formatDateRange, getSentimentColor } from '@/lib/utils'
-import { ArrowLeft, Calendar, AlertTriangle, CheckCircle, MessageSquare, Plus, Pencil, X, Save } from 'lucide-react'
+import { ArrowLeft, Calendar, AlertTriangle, CheckCircle, MessageSquare, Plus, Pencil, X, Save, Flag, Shapes, TimerReset } from 'lucide-react'
 import { useState, useEffect } from 'react'
+
+const extractedTagLabels: Record<string, string> = {
+  min_deposit: 'Min Yatirim',
+  min_bet: 'Min Kupon',
+  max_bet: 'Max Kupon',
+  max_bonus: 'Max Bonus',
+  bonus_amount: 'Bonus Miktari',
+  bonus_percentage: 'Bonus Yuzdesi',
+  turnover: 'Cevrim Sarti',
+  free_bet_amount: 'Freebet',
+  freebet_amount: 'Freebet',
+  cashback_percent: 'Cashback',
+  promo_code: 'Promosyon Kodu',
+  max_uses_per_user: 'Kullanici Limiti',
+}
+
+const arrayFieldLabels: Record<string, string> = {
+  eligible_products: 'Gecerli Urunler',
+  deposit_methods: 'Yatirim Yontemleri',
+  target_segment: 'Hedef Kitle',
+  required_actions: 'Yapilacaklar',
+  excluded_games: 'Haric Olanlar',
+  membership_requirements: 'Uyelik Kosullari',
+}
+
+function asRecord(value: unknown): Record<string, unknown> {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return {}
+  return value as Record<string, unknown>
+}
+
+function normalizeStringArray(value: unknown): string[] {
+  if (Array.isArray(value)) {
+    return value.map((item) => String(item).trim()).filter(Boolean)
+  }
+
+  if (typeof value === 'string') {
+    const trimmed = value.trim()
+    if (!trimmed) return []
+
+    try {
+      const parsed = JSON.parse(trimmed)
+      if (Array.isArray(parsed)) {
+        return parsed.map((item) => String(item).trim()).filter(Boolean)
+      }
+    } catch {
+      return [trimmed]
+    }
+
+    return [trimmed]
+  }
+
+  return []
+}
+
+function formatDetailValue(value: unknown): string | null {
+  if (value === null || value === undefined) return null
+  if (Array.isArray(value)) {
+    const normalized = value.map((item) => String(item).trim()).filter(Boolean)
+    return normalized.length > 0 ? normalized.join(', ') : null
+  }
+  if (typeof value === 'boolean') return value ? 'Evet' : 'Hayir'
+  if (typeof value === 'number') return String(value)
+  if (typeof value === 'string') return value.trim() || null
+  return null
+}
+
+const DESCRIPTION_NOISE_LINES = new Set([
+  'giriş yap',
+  'üye ol',
+  'anasayfa',
+  'kuponlarım',
+  'iddaa',
+  'sosyoley',
+  'kampanya detayları',
+  'tüm kampanyaları göster',
+  'toplam kazanan kupon bedeli üzerinden',
+  'alt barem',
+  'üst barem',
+  'bonus',
+])
+
+function normalizeDescriptionLine(line: string): string {
+  return line
+    .replace(/[\u00A0\t]+/g, ' ')
+    .replace(/\s+/g, ' ')
+    .trim()
+}
+
+function getOrganizedDescriptionLines(body: string | null, title: string): string[] {
+  if (!body) return []
+
+  return body
+    .split(/\r?\n+/)
+    .map(normalizeDescriptionLine)
+    .filter((line) => {
+      if (!line) return false
+      if (line.toLowerCase() === title.trim().toLowerCase()) return false
+      if (DESCRIPTION_NOISE_LINES.has(line.toLowerCase())) return false
+      if (/^[0-9]+(?:[.,][0-9]+)?$/.test(line)) return false
+      if (/^[₺+\d.,\s]+$/.test(line)) return false
+      return true
+    })
+}
 
 export default function CampaignDetailPage({ params }: { params: { id: string } }) {
   const queryClient = useQueryClient()
@@ -62,15 +171,71 @@ export default function CampaignDetailPage({ params }: { params: { id: string } 
     }
   }, [campaign])
 
+  const aiAnalysis = asRecord((campaign?.metadata as any)?.ai_analysis)
+  const extractedTags = asRecord(aiAnalysis.extractedTags)
+  const conditionFields = asRecord(aiAnalysis.conditions)
+  const aiSummary = formatDetailValue(aiAnalysis.summary) ?? campaign?.latestAI?.summary ?? null
+  const aiKeyPoints = normalizeStringArray(
+    aiAnalysis.keyPoints ?? aiAnalysis.key_points ?? aiAnalysis.tags ?? campaign?.latestAI?.keyPoints
+  )
+  const aiRiskFlags = normalizeStringArray(
+    aiAnalysis.riskFlags ?? aiAnalysis.risk_flags ?? campaign?.latestAI?.riskFlags
+  )
+  const aiSentiment = formatDetailValue(aiAnalysis.sentiment) ?? campaign?.latestAI?.sentiment ?? null
+  const aiCampaignType = formatDetailValue(aiAnalysis.campaign_type ?? aiAnalysis.campaignType)
+  const aiTypeReasoning = formatDetailValue(aiAnalysis.type_reasoning ?? aiAnalysis.typeReasoning)
+  const requiredActions = normalizeStringArray(conditionFields.required_actions)
+  const membershipRequirements = normalizeStringArray(conditionFields.membership_requirements)
+  const eligibleProducts = normalizeStringArray(conditionFields.eligible_products)
+  const depositMethods = normalizeStringArray(conditionFields.deposit_methods)
+  const targetSegment = normalizeStringArray(conditionFields.target_segment)
+  const excludedGames = normalizeStringArray(conditionFields.excluded_games)
+  const promoCode = formatDetailValue(conditionFields.promo_code)
+  const maxUsesPerUser = formatDetailValue(conditionFields.max_uses_per_user)
+  const timeRestrictions = formatDetailValue(conditionFields.time_restrictions)
+  const aiTypeConfidence = typeof aiAnalysis.type_confidence === 'number'
+    ? aiAnalysis.type_confidence
+    : typeof aiAnalysis.typeConfidence === 'number'
+      ? aiAnalysis.typeConfidence
+      : null
+  const hasExtractedDetails =
+    Object.keys(extractedTagLabels).some((key) => formatDetailValue(extractedTags[key])) ||
+    Object.keys(arrayFieldLabels).some((key) => formatDetailValue(extractedTags[key]))
+  const hasConditionDetails = [
+    'required_actions',
+    'membership_requirements',
+    'eligible_products',
+    'deposit_methods',
+    'target_segment',
+    'excluded_games',
+    'promo_code',
+    'max_uses_per_user',
+    'time_restrictions',
+  ].some((key) => formatDetailValue(conditionFields[key]))
+  const organizedDescriptionLines = getOrganizedDescriptionLines(campaign?.body ?? null, campaign?.title ?? '')
+  const extractedBodyDateRange = extractBodyDateRange(campaign?.body ?? null)
+  const startDateDisplay = campaign?.validFrom
+    ? formatDate(campaign.validFrom)
+    : extractedBodyDateRange.start
+  const endDateDisplay = campaign?.validTo
+    ? formatDate(campaign.validTo)
+    : extractedBodyDateRange.end
+  const startDateSource = getDateSourceLabel(
+    campaign?.validFromSource,
+    campaign?.validFrom ? 'stored' : extractedBodyDateRange.start ? 'body' : 'missing'
+  )
+  const endDateSource = getDateSourceLabel(
+    campaign?.validToSource,
+    campaign?.validTo ? 'stored' : extractedBodyDateRange.end ? 'body' : 'missing'
+  )
+  const organizedDescriptionSummary = organizedDescriptionLines.slice(0, 3)
+  const organizedDescriptionRest = organizedDescriptionLines.slice(3)
+  const qualitySignals = campaign ? getCampaignQualitySignals(campaign) : []
+
   if (campaignError) {
     return (
       <div className="min-h-screen bg-background">
-        <header className="sticky top-0 z-30 flex h-16 items-center gap-4 border-b bg-background px-6">
-          <Link href="/campaigns" className="flex items-center gap-2 text-muted-foreground hover:text-foreground">
-            <ArrowLeft className="h-4 w-4" />
-            <span>Geri</span>
-          </Link>
-        </header>
+        <PageHeader title="Kampanya Detay" actions={<Link href="/campaigns" className="flex items-center gap-2 text-muted-foreground hover:text-foreground"><ArrowLeft className="h-4 w-4" /><span>Geri</span></Link>} />
         <main className="p-6">
           <ErrorDisplay error={campaignError} onRetry={() => window.location.reload()} />
         </main>
@@ -80,13 +245,24 @@ export default function CampaignDetailPage({ params }: { params: { id: string } 
 
   return (
     <div className="min-h-screen bg-background">
-      <header className="sticky top-0 z-30 flex h-16 items-center gap-4 border-b bg-background px-6">
-        <Link href="/campaigns" className="flex items-center gap-2 text-muted-foreground hover:text-foreground">
-          <ArrowLeft className="h-4 w-4" />
-          <span>Geri</span>
-        </Link>
-        <h1 className="text-lg font-semibold">Kampanya Detay</h1>
-      </header>
+      <PageHeader
+        title="Kampanya Detay"
+        description="Kampanya türü, tarihleri, katılım şartları ve veri kalitesi sinyallerini tek görünümde inceleyin."
+        actions={
+          <>
+            <Link href="/campaigns" className="flex items-center gap-2 text-muted-foreground hover:text-foreground">
+              <ArrowLeft className="h-4 w-4" />
+              <span>Geri</span>
+            </Link>
+            {!isEditing && campaign && (
+              <Button variant="outline" size="sm" onClick={() => setIsEditing(true)}>
+                <Pencil className="h-4 w-4 mr-1" />
+                Düzenle
+              </Button>
+            )}
+          </>
+        }
+      />
 
       <main className="p-6 space-y-6">
         {campaignLoading ? (
@@ -97,61 +273,73 @@ export default function CampaignDetailPage({ params }: { params: { id: string } 
           </div>
         ) : campaign ? (
           <>
-            <div className="flex items-start justify-between gap-4">
-              <div>
-                <h2 className="text-2xl font-bold">{campaign.title}</h2>
-                <div className="flex items-center gap-2 mt-2">
-                  {campaign.site && (
-                    <span className="text-muted-foreground">{campaign.site.name}</span>
-                  )}
-                  <StatusBadge status={campaign.status} />
-                  {(campaign.metadata as any)?.ai_analysis?.sentiment && (
-                    <Badge className={getSentimentColor((campaign.metadata as any)?.ai_analysis?.sentiment || 'neutral')}>
-                      {(campaign.metadata as any)?.ai_analysis?.sentiment}
-                    </Badge>
-                  )}
+            <div className="rounded-2xl border border-border/80 bg-card/90 p-6 shadow-sm">
+              <div className="flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
+                <div className="space-y-3">
+                  <div>
+                    <h2 className="text-2xl font-bold tracking-tight">{campaign.title}</h2>
+                    <div className="mt-2 flex flex-wrap items-center gap-2">
+                      {campaign.site && (
+                        <span className="text-muted-foreground">{campaign.site.name}</span>
+                      )}
+                      <StatusBadge status={campaign.status} />
+                      {aiSentiment && (
+                        <Badge className={getSentimentColor(aiSentiment || 'neutral')}>
+                          {getDisplaySentimentLabel(aiSentiment)}
+                        </Badge>
+                      )}
+                      {qualitySignals.map((signal) => (
+                        <DataQualityBadge key={signal.code} signal={signal} />
+                      ))}
+                    </div>
+                  </div>
+                  <p className="max-w-3xl text-sm text-muted-foreground">
+                    {aiSummary || 'Bu kampanya için özet henüz sınırlı. Şartlar ve ham açıklama üzerinden inceleme yapılabilir.'}
+                  </p>
                 </div>
               </div>
-              {!isEditing && (
-                <Button variant="outline" size="sm" onClick={() => setIsEditing(true)}>
-                  <Pencil className="h-4 w-4 mr-1" />
-                  Düzenle
-                </Button>
-              )}
             </div>
 
-            {((campaign.metadata as any)?.ai_analysis?.summary || (campaign.metadata as any)?.ai_analysis?.keyPoints) && (
+            <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-5">
+              <InsightCard icon={Shapes} title="Kampanya Türü" value={getCampaignTypeLabel(campaign)} description="Normalize edilmiş görünüm" />
+              <InsightCard icon={Calendar} title="Başlangıç" value={startDateDisplay || 'Belirsiz'} description={startDateSource} tone="info" />
+              <InsightCard icon={TimerReset} title="Bitiş" value={endDateDisplay || 'Belirsiz'} description={endDateSource} tone="info" />
+              <InsightCard icon={Flag} title="Durum" value={campaign.status} description="Canlı durum etiketi" tone="default" />
+              <InsightCard icon={AlertTriangle} title="Kalite Sinyali" value={qualitySignals.length} description={qualitySignals.length > 0 ? qualitySignals.map((signal) => signal.label).join(', ') : 'Önemli uyarı yok'} tone={qualitySignals.length > 0 ? 'warning' : 'positive'} />
+            </div>
+
+            {(aiSummary || aiKeyPoints.length > 0 || aiRiskFlags.length > 0) && (
               <Card>
                 <CardHeader>
-                  <CardTitle>AI Analizi</CardTitle>
+                  <SectionHeader title="Overview" description="AI özeti, ana noktalar ve risk sinyalleri." />
                 </CardHeader>
                 <CardContent className="space-y-4">
-                  {(campaign.metadata as any)?.ai_analysis?.summary && (
+                  {aiSummary && (
                     <div>
                       <h4 className="font-medium mb-2">Özet</h4>
-                      <p className="text-sm text-muted-foreground">{(campaign.metadata as any)?.ai_analysis?.summary}</p>
+                      <p className="text-sm text-muted-foreground">{aiSummary}</p>
                     </div>
                   )}
 
-                  {(campaign.metadata as any)?.ai_analysis?.keyPoints && (campaign.metadata as any)?.ai_analysis?.keyPoints.length > 0 && (
+                  {aiKeyPoints.length > 0 && (
                     <div>
                       <h4 className="font-medium mb-2">Ana Noktalar</h4>
                       <ul className="list-disc list-inside space-y-1">
-                        {(campaign.metadata as any)?.ai_analysis?.keyPoints.map((point: string, index: number) => (
+                        {aiKeyPoints.map((point: string, index: number) => (
                           <li key={index} className="text-sm">{point}</li>
                         ))}
                       </ul>
                     </div>
                   )}
 
-                  {(campaign.metadata as any)?.ai_analysis?.riskFlags && (campaign.metadata as any)?.ai_analysis?.riskFlags.length > 0 && (
+                  {aiRiskFlags.length > 0 && (
                     <div>
                       <h4 className="font-medium mb-2 flex items-center gap-2 text-destructive">
                         <AlertTriangle className="h-4 w-4" />
                         Risk Bayrakları
                       </h4>
                       <ul className="list-disc list-inside space-y-1">
-                        {(campaign.metadata as any)?.ai_analysis?.riskFlags.map((flag: string, index: number) => (
+                        {aiRiskFlags.map((flag: string, index: number) => (
                           <li key={index} className="text-sm text-destructive">{flag}</li>
                         ))}
                       </ul>
@@ -161,144 +349,129 @@ export default function CampaignDetailPage({ params }: { params: { id: string } 
               </Card>
             )}
 
-            {(campaign.metadata as any)?.ai_analysis?.extractedTags && (
+            {hasExtractedDetails && (
               <Card>
                 <CardHeader>
-                  <CardTitle>Kampanya Detayları</CardTitle>
+                  <SectionHeader title="Campaign Details" description="Bonus, limit ve kampanya mekaniklerinin normalize özeti." />
                 </CardHeader>
                 <CardContent>
                   <div className="grid grid-cols-2 gap-4">
-                    {(campaign.metadata as any)?.ai_analysis?.extractedTags?.min_deposit && (
-                      <div>
-                        <label className="text-sm font-medium text-muted-foreground">Min Yatırım</label>
-                        <p className="mt-1">{(campaign.metadata as any)?.ai_analysis?.extractedTags?.min_deposit} TL</p>
-                      </div>
-                    )}
-                    {(campaign.metadata as any)?.ai_analysis?.extractedTags?.max_bonus && (
-                      <div>
-                        <label className="text-sm font-medium text-muted-foreground">Max Bonus</label>
-                        <p className="mt-1">{(campaign.metadata as any)?.ai_analysis?.extractedTags?.max_bonus} TL</p>
-                      </div>
-                    )}
-                    {(campaign.metadata as any)?.ai_analysis?.extractedTags?.bonus_amount && (
-                      <div>
-                        <label className="text-sm font-medium text-muted-foreground">Bonus Miktarı</label>
-                        <p className="mt-1">{(campaign.metadata as any)?.ai_analysis?.extractedTags?.bonus_amount} TL</p>
-                      </div>
-                    )}
-                    {(campaign.metadata as any)?.ai_analysis?.extractedTags?.bonus_percentage && (
-                      <div>
-                        <label className="text-sm font-medium text-muted-foreground">Bonus Yüzdesi</label>
-                        <p className="mt-1">%{(campaign.metadata as any)?.ai_analysis?.extractedTags?.bonus_percentage}</p>
-                      </div>
-                    )}
-                    {(campaign.metadata as any)?.ai_analysis?.extractedTags?.turnover && (
-                      <div>
-                        <label className="text-sm font-medium text-muted-foreground">Çevrim Şartı</label>
-                        <p className="mt-1">{(campaign.metadata as any)?.ai_analysis?.extractedTags?.turnover}</p>
-                      </div>
-                    )}
-                    {(campaign.metadata as any)?.ai_analysis?.extractedTags?.free_bet_amount && (
-                      <div>
-                        <label className="text-sm font-medium text-muted-foreground">Freebet</label>
-                        <p className="mt-1">{(campaign.metadata as any)?.ai_analysis?.extractedTags?.free_bet_amount} TL</p>
-                      </div>
-                    )}
-                    {(campaign.metadata as any)?.ai_analysis?.extractedTags?.cashback_percent && (
-                      <div>
-                        <label className="text-sm font-medium text-muted-foreground">Cashback</label>
-                        <p className="mt-1">%{(campaign.metadata as any)?.ai_analysis?.extractedTags?.cashback_percent}</p>
-                      </div>
-                    )}
+                    {Object.entries(extractedTagLabels).map(([key, label]) => {
+                      const formatted = formatDetailValue(extractedTags[key])
+                      if (!formatted) return null
+
+                      const suffix = ['min_deposit', 'min_bet', 'max_bet', 'max_bonus', 'bonus_amount', 'free_bet_amount', 'freebet_amount'].includes(key) ? ' TL' : ''
+                      const prefix = ['bonus_percentage', 'cashback_percent'].includes(key) ? '%' : ''
+
+                      return (
+                        <div key={key}>
+                          <label className="text-sm font-medium text-muted-foreground">{label}</label>
+                          <p className="mt-1">{prefix}{formatted}{suffix}</p>
+                        </div>
+                      )
+                    })}
+                    {Object.entries(arrayFieldLabels).map(([key, label]) => {
+                      const formatted = formatDetailValue(extractedTags[key])
+                      if (!formatted) return null
+
+                      return (
+                        <div key={key} className="col-span-2">
+                          <label className="text-sm font-medium text-muted-foreground">{label}</label>
+                          <p className="mt-1">{formatted}</p>
+                        </div>
+                      )
+                    })}
                   </div>
                 </CardContent>
               </Card>
             )}
 
-            {(campaign.metadata as any)?.ai_analysis?.campaign_type && (
+            {aiCampaignType && (
               <Card>
                 <CardHeader>
-                  <CardTitle>Kampanya Türü</CardTitle>
+                  <SectionHeader title="Type Classification" description="AI sınıflandırmasının kampanya tipi kararı." />
                 </CardHeader>
                 <CardContent>
                   <div className="flex items-center gap-2">
                     <Badge className="text-sm">
-                      {(campaign.metadata as any)?.ai_analysis?.campaign_type}
+                      {aiCampaignType}
                     </Badge>
-                    <span className="text-xs text-muted-foreground">
-                      Güven: {((campaign.metadata as any)?.ai_analysis?.type_confidence * 100)?.toFixed(0)}%
-                    </span>
+                    {aiTypeConfidence !== null && (
+                      <span className="text-xs text-muted-foreground">
+                        Güven: {(aiTypeConfidence * 100).toFixed(0)}%
+                      </span>
+                    )}
                   </div>
-                  {(campaign.metadata as any)?.ai_analysis?.type_reasoning && (
+                  {aiTypeReasoning && (
                     <p className="text-sm text-muted-foreground mt-2">
-                      {(campaign.metadata as any)?.ai_analysis?.type_reasoning}
+                      {aiTypeReasoning}
                     </p>
                   )}
                 </CardContent>
               </Card>
             )}
 
-            {(campaign.metadata as any)?.ai_analysis?.conditions && (
+            {hasConditionDetails && (
               <Card>
                 <CardHeader>
-                  <CardTitle>Katılım Koşulları</CardTitle>
+                  <SectionHeader title="Participation Conditions" description="Kampanyaya dahil olma ve kullanım şartları." />
                 </CardHeader>
                 <CardContent>
                   <ul className="space-y-2 text-sm">
-                    {(campaign.metadata as any)?.ai_analysis?.conditions?.required_actions?.length > 0 && (
+                    {requiredActions.length > 0 && (
                       <li className="flex items-start gap-2">
                         <span className="font-medium shrink-0">Yapılması gereken:</span>
-                        <span>{(campaign.metadata as any)?.ai_analysis?.conditions?.required_actions?.join(', ')}</span>
+                        <span>{requiredActions.join(', ')}</span>
                       </li>
                     )}
-                    {(campaign.metadata as any)?.ai_analysis?.conditions?.membership_requirements?.length > 0 && (
+                    {membershipRequirements.length > 0 && (
                       <li className="flex items-start gap-2">
                         <span className="font-medium shrink-0">Üyelik:</span>
-                        <span>{(campaign.metadata as any)?.ai_analysis?.conditions?.membership_requirements?.join(', ')}</span>
+                        <span>{membershipRequirements.join(', ')}</span>
                       </li>
                     )}
-                    {(campaign.metadata as any)?.ai_analysis?.conditions?.excluded_games?.length > 0 && (
+                    {eligibleProducts.length > 0 && (
+                      <li className="flex items-start gap-2">
+                        <span className="font-medium shrink-0">Geçerli ürünler:</span>
+                        <span>{eligibleProducts.join(', ')}</span>
+                      </li>
+                    )}
+                    {depositMethods.length > 0 && (
+                      <li className="flex items-start gap-2">
+                        <span className="font-medium shrink-0">Yatırım yöntemi:</span>
+                        <span>{depositMethods.join(', ')}</span>
+                      </li>
+                    )}
+                    {targetSegment.length > 0 && (
+                      <li className="flex items-start gap-2">
+                        <span className="font-medium shrink-0">Hedef kitle:</span>
+                        <span>{targetSegment.join(', ')}</span>
+                      </li>
+                    )}
+                    {excludedGames.length > 0 && (
                       <li className="flex items-start gap-2">
                         <span className="font-medium shrink-0">Hariç olanlar:</span>
-                        <span>{(campaign.metadata as any)?.ai_analysis?.conditions?.excluded_games?.join(', ')}</span>
+                        <span>{excludedGames.join(', ')}</span>
                       </li>
                     )}
-                    {(campaign.metadata as any)?.ai_analysis?.conditions?.time_restrictions && (
+                    {promoCode && (
+                      <li className="flex items-start gap-2">
+                        <span className="font-medium shrink-0">Kod:</span>
+                        <span>{promoCode}</span>
+                      </li>
+                    )}
+                    {maxUsesPerUser && (
+                      <li className="flex items-start gap-2">
+                        <span className="font-medium shrink-0">Kullanım limiti:</span>
+                        <span>{maxUsesPerUser}</span>
+                      </li>
+                    )}
+                    {timeRestrictions && (
                       <li className="flex items-start gap-2">
                         <span className="font-medium shrink-0">Zaman:</span>
-                        <span>{(campaign.metadata as any)?.ai_analysis?.conditions?.time_restrictions}</span>
+                        <span>{timeRestrictions}</span>
                       </li>
                     )}
-                  </ul>
-                </CardContent>
-              </Card>
-            )}
-
-            {(campaign.metadata as any)?.ai_analysis?.key_points?.length > 0 && (
-              <Card>
-                <CardHeader>
-                  <CardTitle>Önemli Noktalar</CardTitle>
-                </CardHeader>
-                <CardContent>
-                  <ul className="list-disc list-inside space-y-1 text-sm">
-                    {(campaign.metadata as any)?.ai_analysis?.key_points?.map((point: string, idx: number) => (
-                      <li key={idx}>{point}</li>
-                    ))}
-                  </ul>
-                </CardContent>
-              </Card>
-            )}
-
-            {(campaign.metadata as any)?.ai_analysis?.risk_flags?.length > 0 && (
-              <Card className="border-yellow-500">
-                <CardHeader>
-                  <CardTitle className="text-yellow-600">⚠️ Risk Uyarıları</CardTitle>
-                </CardHeader>
-                <CardContent>
-                  <ul className="list-disc list-inside space-y-1 text-sm text-yellow-700">
-                    {(campaign.metadata as any)?.ai_analysis?.risk_flags?.map((flag: string, idx: number) => (
-                      <li key={idx}>{flag}</li>
-                    ))}
                   </ul>
                 </CardContent>
               </Card>
@@ -306,36 +479,50 @@ export default function CampaignDetailPage({ params }: { params: { id: string } 
 
             <Card>
               <CardHeader>
-                <CardTitle>Temel Bilgiler</CardTitle>
+                <SectionHeader title="Dates" description="Kampanyanın başlangıç, bitiş ve görünürlük bilgileri." />
               </CardHeader>
               <CardContent className="space-y-4">
-                <div className="grid grid-cols-2 gap-4">
+                <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
                   <div>
-                    <label className="text-sm font-medium text-muted-foreground">Geçerlilik</label>
+                    <label className="text-sm font-medium text-muted-foreground">Başlangıç Tarihi</label>
                     {isEditing ? (
-                      <div className="flex gap-2 mt-1">
-                        <Input
-                          type="date"
-                          value={editedValidFrom}
-                          onChange={(e) => setEditedValidFrom(e.target.value)}
-                          className="flex-1"
-                        />
-                        <span className="self-center">-</span>
-                        <Input
-                          type="date"
-                          value={editedValidTo}
-                          onChange={(e) => setEditedValidTo(e.target.value)}
-                          className="flex-1"
-                        />
-                      </div>
+                      <Input
+                        type="date"
+                        value={editedValidFrom}
+                        onChange={(e) => setEditedValidFrom(e.target.value)}
+                        className="mt-1"
+                      />
                     ) : (
-                      <p className="mt-1">
-                        <Calendar className="inline h-4 w-4 mr-1" />
-                        {formatDateRange(campaign.validFrom, campaign.validTo)}
-                      </p>
+                      <>
+                        <p className="mt-1 font-medium">{startDateDisplay || 'Belirlenemedi'}</p>
+                        <p className="text-xs text-muted-foreground mt-1">Kaynak: {startDateSource}</p>
+                        {campaign.validFromConfidence !== null && campaign.validFromConfidence !== undefined && (
+                          <p className="text-xs text-muted-foreground">
+                            Güven: {(campaign.validFromConfidence * 100).toFixed(0)}%
+                          </p>
+                        )}
+                      </>
                     )}
-                    {campaign.source && (
-                      <p className="text-xs text-muted-foreground mt-1">Kaynak: {campaign.source}</p>
+                  </div>
+                  <div>
+                    <label className="text-sm font-medium text-muted-foreground">Bitiş Tarihi</label>
+                    {isEditing ? (
+                      <Input
+                        type="date"
+                        value={editedValidTo}
+                        onChange={(e) => setEditedValidTo(e.target.value)}
+                        className="mt-1"
+                      />
+                    ) : (
+                      <>
+                        <p className="mt-1 font-medium">{endDateDisplay || 'Belirlenemedi'}</p>
+                        <p className="text-xs text-muted-foreground mt-1">Kaynak: {endDateSource}</p>
+                        {campaign.validToConfidence !== null && campaign.validToConfidence !== undefined && (
+                          <p className="text-xs text-muted-foreground">
+                            Güven: {(campaign.validToConfidence * 100).toFixed(0)}%
+                          </p>
+                        )}
+                      </>
                     )}
                   </div>
                   <div>
@@ -347,6 +534,12 @@ export default function CampaignDetailPage({ params }: { params: { id: string } 
                     <p className="mt-1">{formatDateTime(campaign.lastSeen)}</p>
                   </div>
                 </div>
+                {!isEditing && (
+                  <div className="rounded-lg border bg-muted/30 px-3 py-2 text-sm text-muted-foreground">
+                    <Calendar className="inline h-4 w-4 mr-1" />
+                    Geçerlilik Aralığı: {startDateDisplay || 'Belirsiz'} - {endDateDisplay || 'Belirsiz'}
+                  </div>
+                )}
               </CardContent>
             </Card>
 
@@ -365,17 +558,39 @@ export default function CampaignDetailPage({ params }: { params: { id: string } 
             {campaign.body && (
               <Card>
                 <CardHeader>
-                  <CardTitle>Açıklama</CardTitle>
+                  <SectionHeader title="Raw Description" description="Scrape edilen açıklama, gürültü azaltılmış görünümle listelenir." />
                 </CardHeader>
-                <CardContent>
+                <CardContent className="space-y-4">
                   {isEditing ? (
                     <Textarea
                       value={editedBody}
                       onChange={(e) => setEditedBody(e.target.value)}
-                      className="min-h-[100px]"
+                      className="min-h-[220px]"
                     />
                   ) : (
-                    <p className="text-sm whitespace-pre-wrap leading-relaxed">{campaign.body}</p>
+                    <>
+                      {organizedDescriptionSummary.length > 0 && (
+                        <div className="grid gap-3">
+                          {organizedDescriptionSummary.map((line, index) => (
+                            <div key={`${index}-${line}`} className="rounded-lg border bg-muted/20 px-4 py-3">
+                              <p className="text-sm leading-relaxed">{line}</p>
+                            </div>
+                          ))}
+                        </div>
+                      )}
+                      {organizedDescriptionRest.length > 0 && (
+                        <div>
+                          <h4 className="mb-2 text-sm font-medium text-muted-foreground">Diğer Detaylar</h4>
+                          <ul className="space-y-2">
+                            {organizedDescriptionRest.map((line, index) => (
+                              <li key={`${index}-${line}`} className="rounded-md border px-3 py-2 text-sm leading-relaxed">
+                                {line}
+                              </li>
+                            ))}
+                          </ul>
+                        </div>
+                      )}
+                    </>
                   )}
                 </CardContent>
               </Card>

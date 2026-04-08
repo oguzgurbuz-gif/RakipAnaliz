@@ -11,7 +11,10 @@ import {
   TableRow,
 } from '@/components/ui/table'
 import { Badge } from '@/components/ui/badge'
-import { formatDate, getSentimentColor, getStatusColor, cn } from '@/lib/utils'
+import { DataQualityBadge } from '@/components/ui/data-quality-badge'
+import { resolveCampaignDateDisplay } from '@/lib/campaign-dates'
+import { getCampaignQualitySignals, getCampaignTypeLabel, getDisplaySentimentLabel } from '@/lib/campaign-presentation'
+import { getSentimentColor, getStatusColor, cn } from '@/lib/utils'
 import { Star } from 'lucide-react'
 import type { Campaign } from '@/types'
 
@@ -26,17 +29,17 @@ export function CampaignTable({ campaigns, isLoading, favorites = [], onToggleFa
   if (isLoading) {
     return (
       <div className="rounded-md border">
-        <Table>
+        <Table className="min-w-[1080px]">
           <TableHeader>
             <TableRow>
               <TableHead></TableHead>
-              <TableHead>Başlık</TableHead>
-              <TableHead>Site</TableHead>
-              <TableHead>Tür</TableHead>
-              <TableHead>Duygu</TableHead>
-              <TableHead>Durum</TableHead>
-              <TableHead>Valid From</TableHead>
-              <TableHead>Valid To</TableHead>
+              <TableHead className="whitespace-nowrap">Başlık</TableHead>
+              <TableHead className="whitespace-nowrap">Site</TableHead>
+              <TableHead className="whitespace-nowrap">Tür</TableHead>
+              <TableHead className="whitespace-nowrap">Duygu</TableHead>
+              <TableHead className="whitespace-nowrap">Durum</TableHead>
+              <TableHead className="whitespace-nowrap">Başlangıç</TableHead>
+              <TableHead className="whitespace-nowrap">Bitiş</TableHead>
             </TableRow>
           </TableHeader>
           <TableBody>
@@ -65,27 +68,40 @@ export function CampaignTable({ campaigns, isLoading, favorites = [], onToggleFa
 
   return (
     <div className="rounded-md border">
-      <Table>
+      <Table className="min-w-[1080px]">
           <TableHeader>
             <TableRow>
               <TableHead></TableHead>
-              <TableHead>Başlık</TableHead>
-              <TableHead>Site</TableHead>
-              <TableHead>Tür</TableHead>
-              <TableHead>Duygu</TableHead>
-              <TableHead>Durum</TableHead>
-              <TableHead>Valid From</TableHead>
-              <TableHead>Valid To</TableHead>
+              <TableHead className="whitespace-nowrap">Başlık</TableHead>
+              <TableHead className="whitespace-nowrap">Site</TableHead>
+              <TableHead className="whitespace-nowrap">Tür</TableHead>
+              <TableHead className="whitespace-nowrap">Duygu</TableHead>
+              <TableHead className="whitespace-nowrap">Durum</TableHead>
+              <TableHead className="whitespace-nowrap">Başlangıç</TableHead>
+              <TableHead className="whitespace-nowrap">Bitiş</TableHead>
             </TableRow>
           </TableHeader>
           <TableBody>
           {campaigns.map((campaign) => {
             const sentimentClass = getSentimentColor(campaign.sentiment || campaign.aiSentiment || 'neutral')
             const statusClass = getStatusColor(campaign.status)
+            const startDate = resolveCampaignDateDisplay(
+              campaign.validFrom,
+              campaign.validFromSource,
+              campaign.body,
+              'start'
+            )
+            const endDate = resolveCampaignDateDisplay(
+              campaign.validTo,
+              campaign.validToSource,
+              campaign.body,
+              'end'
+            )
+            const qualitySignals = getCampaignQualitySignals(campaign)
 
             return (
               <TableRow key={campaign.id}>
-                <TableCell>
+                <TableCell className="w-10">
                   <button
                     onClick={(e) => onToggleFavorite?.(campaign.id, e)}
                     className="p-1 hover:bg-accent rounded"
@@ -100,35 +116,55 @@ export function CampaignTable({ campaigns, isLoading, favorites = [], onToggleFa
                     />
                   </button>
                 </TableCell>
-                <TableCell>
+                <TableCell className="min-w-[280px] max-w-[380px]">
                   <Link
                     href={`/campaigns/${campaign.id}`}
-                    className="hover:underline text-primary"
+                    className="block truncate hover:underline text-primary"
+                    title={campaign.title}
                   >
                     {campaign.title}
                   </Link>
+                  {qualitySignals.length > 0 && (
+                    <div className="mt-2 flex flex-wrap gap-1.5">
+                      {qualitySignals.map((signal) => (
+                        <DataQualityBadge key={signal.code} signal={signal} compact />
+                      ))}
+                    </div>
+                  )}
                 </TableCell>
-                <TableCell className="font-medium">
+                <TableCell className="font-medium whitespace-nowrap">
                   {campaign.site?.name || '-'}
                 </TableCell>
-                <TableCell>
-                  {(campaign.metadata as any)?.ai_analysis?.campaign_type || campaign.category || '-'}
+                <TableCell className="whitespace-nowrap">
+                  {getCampaignTypeLabel(campaign)}
                 </TableCell>
-                <TableCell>
+                <TableCell className="whitespace-nowrap">
                   <Badge className={sentimentClass}>
-                    {campaign.sentiment || campaign.aiSentiment || '-'}
+                    {campaign.sentiment || campaign.aiSentiment
+                      ? getDisplaySentimentLabel(campaign.sentiment || campaign.aiSentiment)
+                      : '-'}
                   </Badge>
                 </TableCell>
-                <TableCell>
+                <TableCell className="whitespace-nowrap">
                   <Badge className={cn('capitalize', statusClass)}>
                     {campaign.status}
                   </Badge>
                 </TableCell>
-                <TableCell>
-                  {campaign.validFrom ? formatDate(campaign.validFrom) : '-'}
+                <TableCell className="min-w-[160px] align-top">
+                  <div className="leading-tight">
+                    <div>{startDate.value || '-'}</div>
+                    {startDate.value && (
+                      <div className="mt-1 text-xs text-muted-foreground">{startDate.source}</div>
+                    )}
+                  </div>
                 </TableCell>
-                <TableCell>
-                  {campaign.validTo ? formatDate(campaign.validTo) : '-'}
+                <TableCell className="min-w-[160px] align-top">
+                  <div className="leading-tight">
+                    <div>{endDate.value || '-'}</div>
+                    {endDate.value && (
+                      <div className="mt-1 text-xs text-muted-foreground">{endDate.source}</div>
+                    )}
+                  </div>
                 </TableCell>
               </TableRow>
             )
