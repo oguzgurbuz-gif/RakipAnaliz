@@ -35,7 +35,7 @@ export function Sidebar() {
   return (
     <>
       <button
-        className="fixed left-4 top-4 z-50 rounded-md bg-background p-2 shadow-md md:hidden"
+        className="fixed left-4 top-4 z-50 rounded-xl border border-border/70 bg-background/90 p-2 shadow-lg backdrop-blur md:hidden"
         onClick={() => setIsMobileOpen(!isMobileOpen)}
       >
         {isMobileOpen ? <X className="h-5 w-5" /> : <Menu className="h-5 w-5" />}
@@ -50,13 +50,19 @@ export function Sidebar() {
 
       <aside
         className={cn(
-          'fixed inset-y-0 left-0 z-50 w-64 bg-card border-r transform transition-transform duration-200 ease-in-out md:translate-x-0',
+          'fixed inset-y-0 left-0 z-50 w-64 border-r border-border/70 bg-card/95 shadow-xl backdrop-blur transform transition-transform duration-200 ease-in-out md:translate-x-0',
           isMobileOpen ? 'translate-x-0' : '-translate-x-full'
         )}
       >
-        <div className="flex h-16 items-center border-b px-6">
-          <Link href="/" className="flex items-center gap-2">
-            <span className="text-xl font-bold">Bitalih</span>
+        <div className="flex h-20 items-center border-b border-border/70 px-6">
+          <Link href="/" className="flex items-center gap-3">
+            <div className="flex h-10 w-10 items-center justify-center rounded-2xl bg-primary text-primary-foreground shadow-sm">
+              <span className="text-sm font-bold">B</span>
+            </div>
+            <div>
+              <span className="block text-lg font-bold tracking-tight">Bitalih</span>
+              <span className="block text-xs text-muted-foreground">Rakip Analiz Platformu</span>
+            </div>
           </Link>
         </div>
 
@@ -71,9 +77,9 @@ export function Sidebar() {
                 href={item.href}
                 onClick={() => setIsMobileOpen(false)}
                 className={cn(
-                  'flex items-center gap-3 rounded-md px-3 py-2 text-sm font-medium transition-colors',
+                  'flex items-center gap-3 rounded-xl px-3 py-2.5 text-sm font-medium transition-colors',
                   isActive
-                    ? 'bg-primary text-primary-foreground'
+                    ? 'bg-primary text-primary-foreground shadow-sm'
                     : 'text-muted-foreground hover:bg-accent hover:text-accent-foreground'
                 )}
               >

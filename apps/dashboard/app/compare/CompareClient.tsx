@@ -6,12 +6,18 @@ import { fetchCampaigns } from '@/lib/api'
 import { Button } from '@/components/ui/button'
 import { Badge } from '@/components/ui/badge'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
+import { EmptyState } from '@/components/ui/empty-state'
+import { Input } from '@/components/ui/input'
+import { PageHeader } from '@/components/ui/page-header'
+import { resolveCampaignDateDisplay } from '@/lib/campaign-dates'
+import { getCampaignTypeLabel, getCampaignQualitySignals, getDisplaySentimentLabel } from '@/lib/campaign-presentation'
 import { formatDate, getSentimentColor, getStatusColor, cn } from '@/lib/utils'
-import { Star, X } from 'lucide-react'
+import { Search, Star, X } from 'lucide-react'
 
 function CompareClient() {
   const [selectedIds, setSelectedIds] = useState<string[]>([])
   const [favorites, setFavorites] = useState<string[]>([])
+  const [search, setSearch] = useState('')
   const { data, isLoading } = useQuery({
     queryKey: ['campaigns', { limit: 100 }],
     queryFn: () => fetchCampaigns({ limit: 100 }),
@@ -28,20 +34,81 @@ function CompareClient() {
   }
 
   const selectedCampaigns = data?.data.filter(c => selectedIds.includes(c.id)) || []
+  const filteredCampaigns = (data?.data || []).filter((campaign) =>
+    !search ||
+    campaign.title.toLowerCase().includes(search.toLowerCase()) ||
+    campaign.site?.name?.toLowerCase().includes(search.toLowerCase())
+  )
+
+  const compareRows = selectedCampaigns.length >= 2
+    ? [
+        {
+          label: 'Site',
+          values: selectedCampaigns.map((c) => c.site?.name || '-'),
+        },
+        {
+          label: 'Tür',
+          values: selectedCampaigns.map((c) => getCampaignTypeLabel(c)),
+        },
+        {
+          label: 'Duygu',
+          values: selectedCampaigns.map((c) => getDisplaySentimentLabel(c.sentiment || c.aiSentiment)),
+        },
+        {
+          label: 'Durum',
+          values: selectedCampaigns.map((c) => c.status),
+        },
+        {
+          label: 'Başlangıç',
+          values: selectedCampaigns.map((c) => resolveCampaignDateDisplay(c.validFrom, c.validFromSource, c.body, 'start').value || '-'),
+        },
+        {
+          label: 'Bitiş',
+          values: selectedCampaigns.map((c) => resolveCampaignDateDisplay(c.validTo, c.validToSource, c.body, 'end').value || '-'),
+        },
+      ]
+    : []
 
   return (
     <div className="min-h-screen bg-background">
-      <header className="sticky top-0 z-30 flex h-16 items-center gap-4 border-b bg-background px-6">
-        <h1 className="text-lg font-semibold">Kampanya Karşılaştırma</h1>
-        {selectedIds.length > 0 && (
+      <PageHeader
+        title="Kampanya Karşılaştırma"
+        description="Kampanyaları seçin, filtreleyin ve farkları aynı tabloda hızlıca görün."
+        actions={selectedIds.length > 0 && (
           <Button variant="ghost" size="sm" onClick={() => setSelectedIds([])}>
             <X className="h-4 w-4 mr-1" />
             Temizle ({selectedIds.length})
           </Button>
         )}
-      </header>
+      >
+        <div className="relative w-full max-w-sm">
+          <Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
+          <Input
+            value={search}
+            onChange={(e) => setSearch(e.target.value)}
+            placeholder="Kampanya veya site ara..."
+            className="pl-9"
+          />
+        </div>
+      </PageHeader>
 
-      <main className="p-6">
+      <main className="p-6 space-y-6">
+        {selectedCampaigns.length > 0 && (
+          <div className="sticky top-24 z-20 rounded-2xl border border-border/70 bg-background/95 p-4 shadow-sm backdrop-blur">
+            <div className="flex flex-wrap items-center gap-2">
+              <span className="text-sm font-medium">Seçili Kampanyalar:</span>
+              {selectedCampaigns.map((campaign) => (
+                <Badge key={campaign.id} variant="secondary" className="gap-2 px-3 py-1">
+                  <span className="max-w-[220px] truncate">{campaign.title}</span>
+                  <button onClick={() => toggleSelect(campaign.id)} className="opacity-70 hover:opacity-100">
+                    <X className="h-3 w-3" />
+                  </button>
+                </Badge>
+              ))}
+            </div>
+          </div>
+        )}
+
         <div className="grid gap-6 lg:grid-cols-2 xl:grid-cols-3">
           {isLoading ? (
             Array.from({ length: 3 }).map((_, i) => (
@@ -51,8 +118,11 @@ function CompareClient() {
               </Card>
             ))
           ) : (
-            data?.data.slice(0, 50).map(campaign => {
+            filteredCampaigns.slice(0, 50).map(campaign => {
               const isSelected = selectedIds.includes(campaign.id)
+              const qualitySignals = getCampaignQualitySignals(campaign)
+              const startDate = resolveCampaignDateDisplay(campaign.validFrom, campaign.validFromSource, campaign.body, 'start')
+              const endDate = resolveCampaignDateDisplay(campaign.validTo, campaign.validToSource, campaign.body, 'end')
               return (
                 <Card
                   key={campaign.id}
@@ -71,21 +141,23 @@ function CompareClient() {
                     <p className="text-sm text-muted-foreground">{campaign.site?.name}</p>
                   </CardHeader>
                   <CardContent className="space-y-2">
-                    {(campaign.metadata as any)?.ai_analysis?.campaign_type ? (
-                      <div className="text-sm"><span className="font-medium">Tür:</span> {(campaign.metadata as any)?.ai_analysis?.campaign_type}</div>
-                    ) : campaign.category && (
-                      <div className="text-sm"><span className="font-medium">Kategori:</span> {campaign.category}</div>
-                    )}
+                    <div className="text-sm"><span className="font-medium">Tür:</span> {getCampaignTypeLabel(campaign)}</div>
                     <div className="flex gap-2 flex-wrap">
                       {(campaign.sentiment || campaign.aiSentiment) && (
                         <Badge className={getSentimentColor(campaign.sentiment || campaign.aiSentiment || 'neutral')}>
-                          {campaign.sentiment || campaign.aiSentiment}
+                          {getDisplaySentimentLabel(campaign.sentiment || campaign.aiSentiment)}
                         </Badge>
                       )}
                       <Badge className={cn(getStatusColor(campaign.status))}>{campaign.status}</Badge>
+                      {qualitySignals.slice(0, 1).map((signal) => (
+                        <Badge key={signal.code} variant={signal.variant === 'warning' ? 'warning' : 'info'}>
+                          {signal.label}
+                        </Badge>
+                      ))}
                     </div>
                     <div className="text-xs text-muted-foreground">
-                      <div>Geçerlilik: {formatDate(campaign.validFrom || campaign.firstSeen)} - {formatDate(campaign.validTo || campaign.lastSeen)}</div>
+                      <div>Başlangıç: {startDate.value || 'Belirsiz'}</div>
+                      <div>Bitiş: {endDate.value || 'Belirsiz'}</div>
                     </div>
                     <div className="flex items-center gap-2 mt-2">
                       <input
@@ -103,6 +175,10 @@ function CompareClient() {
           )}
         </div>
 
+        {!isLoading && filteredCampaigns.length === 0 && (
+          <EmptyState title="Karşılaştırılacak kampanya bulunamadı" description="Arama ifadenizi veya filtre yaklaşımınızı değiştirin." />
+        )}
+
         {selectedCampaigns.length >= 2 && (
           <div className="mt-8">
             <h2 className="text-xl font-semibold mb-4">Karşılaştırma Görünümü</h2>
@@ -117,40 +193,30 @@ function CompareClient() {
                   </tr>
                 </thead>
                 <tbody>
-                  <tr>
-                    <td className="border p-3 font-medium">Site</td>
-                    {selectedCampaigns.map(c => <td key={c.id} className="border p-3">{c.site?.name}</td>)}
-                  </tr>
-                  <tr className="bg-muted/50">
-                    <td className="border p-3 font-medium">Tür</td>
-                    {selectedCampaigns.map(c => <td key={c.id} className="border p-3">{c.category || '-'}</td>)}
-                  </tr>
-                  <tr>
-                    <td className="border p-3 font-medium">Duygu</td>
-                    {selectedCampaigns.map(c => (
-                      <td key={c.id} className="border p-3">
-                        <Badge className={getSentimentColor(c.sentiment || c.aiSentiment || 'neutral')}>
-                          {c.sentiment || c.aiSentiment || '-'}
-                        </Badge>
-                      </td>
-                    ))}
-                  </tr>
-                  <tr className="bg-muted/50">
-                    <td className="border p-3 font-medium">Durum</td>
-                    {selectedCampaigns.map(c => (
-                      <td key={c.id} className="border p-3">
-                        <Badge className={cn(getStatusColor(c.status))}>{c.status}</Badge>
-                      </td>
-                    ))}
-                  </tr>
-                  <tr>
-                    <td className="border p-3 font-medium">Başlangıç</td>
-                    {selectedCampaigns.map(c => <td key={c.id} className="border p-3">{formatDate(c.validFrom || c.firstSeen)}</td>)}
-                  </tr>
-                  <tr className="bg-muted/50">
-                    <td className="border p-3 font-medium">Bitiş</td>
-                    {selectedCampaigns.map(c => <td key={c.id} className="border p-3">{formatDate(c.validTo || c.lastSeen)}</td>)}
-                  </tr>
+                  {compareRows.map((row, index) => {
+                    const normalizedValues = row.values.map((value) => value || '-')
+                    const hasMissing = normalizedValues.some((value) => value === '-')
+                    const allSame = new Set(normalizedValues).size === 1
+
+                    return (
+                      <tr key={row.label} className={index % 2 === 1 ? 'bg-muted/40' : ''}>
+                        <td className="border p-3 font-medium">{row.label}</td>
+                        {normalizedValues.map((value, valueIndex) => (
+                          <td
+                            key={`${row.label}-${valueIndex}`}
+                            className={cn(
+                              'border p-3',
+                              hasMissing && value === '-' && 'bg-amber-50 text-amber-800',
+                              !hasMissing && allSame && 'bg-emerald-50 text-emerald-800',
+                              !allSame && value !== '-' && 'bg-blue-50/60'
+                            )}
+                          >
+                            {value}
+                          </td>
+                        ))}
+                      </tr>
+                    )
+                  })}
                 </tbody>
               </table>
             </div>

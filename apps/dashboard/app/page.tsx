@@ -4,11 +4,17 @@ import { useQuery } from '@tanstack/react-query'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { Skeleton } from '@/components/ui/skeleton'
 import { ErrorDisplay } from '@/components/ui/error'
+import { EmptyState } from '@/components/ui/empty-state'
+import { InsightCard } from '@/components/ui/insight-card'
+import { PageHeader } from '@/components/ui/page-header'
+import { SectionHeader } from '@/components/ui/section-header'
 import { fetchReportSummary, fetchCompetition } from '@/lib/api'
 import { useState } from 'react'
 import { Input } from '@/components/ui/input'
 import { Button } from '@/components/ui/button'
 import { Badge } from '@/components/ui/badge'
+import { getCategoryLabel } from '@/lib/category-labels'
+import { AlertTriangle, BarChart3, Crown, Target, TrendingUp, ShieldAlert, Sparkles } from 'lucide-react'
 
 export default function DashboardPage() {
   const [dateFrom, setDateFrom] = useState('')
@@ -58,40 +64,91 @@ export default function DashboardPage() {
     },
   ]
 
+  const dashboardInsights = data
+    ? [
+        `${data.startedCount} kampanya son aralıkta başladı ve ${data.activeCount} kampanya halen görünür durumda.`,
+        data.topCategories?.[0]
+          ? `En görünür tema ${data.topCategories[0].label || getCategoryLabel(data.topCategories[0].category)} olarak öne çıkıyor.`
+          : 'Kategori dağılımı zayıf; veri kalitesi düşük olabilir.',
+        bestCompetitor
+          ? `${bestCompetitor.site_name} ortalama bonus değerinde en agresif rakip görünüyor.`
+          : 'Rakip bonus kıyaslaması için yeterli veri yok.',
+      ]
+    : []
+
+  const focusTone = (bitalihData?.total_campaigns ?? 0) >= avgCompetitorCampaigns ? 'positive' : 'warning'
+  const focusMessage = (bitalihData?.total_campaigns ?? 0) >= avgCompetitorCampaigns
+    ? 'Bitalih kampanya hacminde rakip ortalamasının üzerinde.'
+    : 'Bitalih kampanya hacminde rakip ortalamasının gerisinde.'
+
   if (error) {
     return <ErrorDisplay error={error} onRetry={handleRefresh} />
   }
 
   return (
     <div className="min-h-screen bg-background">
-      <header className="sticky top-0 z-30 flex h-16 items-center gap-4 border-b bg-background px-6">
-        <h1 className="text-lg font-semibold">Dashboard</h1>
-        <div className="ml-auto flex items-center gap-2">
+      <PageHeader
+        title="Dashboard"
+        description="Kampanya hareketliliğini, kategori dağılımını ve Bitalih'in rakipler karşısındaki pozisyonunu tek bakışta takip edin."
+        actions={
           <Button variant="outline" size="sm" onClick={handleRefresh}>
             Yenile
           </Button>
+        }
+      >
+        <div className="flex flex-wrap items-center gap-2 text-sm text-muted-foreground">
+          <span>Tarih Aralığı:</span>
+          <Input
+            type="date"
+            value={dateFrom}
+            onChange={(e) => setDateFrom(e.target.value)}
+            className="w-40 bg-background"
+          />
+          <span>-</span>
+          <Input
+            type="date"
+            value={dateTo}
+            onChange={(e) => setDateTo(e.target.value)}
+            className="w-40 bg-background"
+          />
         </div>
-      </header>
+      </PageHeader>
 
       <main className="p-6 space-y-6">
-        <div className="flex items-center gap-4">
-          <div className="flex items-center gap-2">
-            <label className="text-sm font-medium">Tarih Aralığı:</label>
-            <Input
-              type="date"
-              value={dateFrom}
-              onChange={(e) => setDateFrom(e.target.value)}
-              className="w-40"
-            />
-            <span>-</span>
-            <Input
-              type="date"
-              value={dateTo}
-              onChange={(e) => setDateTo(e.target.value)}
-              className="w-40"
+        {!isLoading && data && (
+          <div className="grid gap-4 lg:grid-cols-[1.4fr_1fr]">
+            <Card className="overflow-hidden border-primary/20 bg-gradient-to-br from-card via-card to-blue-50/50">
+              <CardContent className="p-6">
+                <div className="flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
+                  <div className="space-y-2">
+                    <Badge variant="info" className="w-fit">Haftalık Özet</Badge>
+                    <h2 className="text-2xl font-semibold tracking-tight">
+                      Bu dönemde odak alanı: {data.topCategories?.[0]?.label || 'kategori görünürlüğü'}
+                    </h2>
+                    <p className="max-w-2xl text-sm text-muted-foreground">
+                      {dashboardInsights[0]} {dashboardInsights[1]}
+                    </p>
+                  </div>
+                  <div className="min-w-[220px] rounded-2xl border border-border/70 bg-background/80 p-4">
+                    <div className="text-xs uppercase tracking-wide text-muted-foreground">Öne Çıkan Not</div>
+                    <div className="mt-2 flex items-start gap-2">
+                      <ShieldAlert className="mt-0.5 h-4 w-4 text-amber-600" />
+                      <p className="text-sm">{dashboardInsights[2]}</p>
+                    </div>
+                  </div>
+                </div>
+              </CardContent>
+            </Card>
+
+            <InsightCard
+              icon={focusTone === 'positive' ? Sparkles : AlertTriangle}
+              title="Bitalih Odak Notu"
+              description={focusMessage}
+              value={`${Number(bitalihData?.total_campaigns ?? 0)} kampanya`}
+              tone={focusTone}
             />
           </div>
-        </div>
+        )}
 
         {isLoading ? (
           <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-5">
@@ -165,10 +222,22 @@ export default function DashboardPage() {
           </div>
         )}
 
+        {!isLoading && (
+          <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-4">
+            <InsightCard icon={TrendingUp} title="Başlayan" value={data?.startedCount ?? 0} description="Seçilen aralıkta ilk kez görülen kampanyalar" />
+            <InsightCard icon={BarChart3} title="Aktif Kampanya" value={data?.activeCount ?? 0} description="Şu anda görünür ve devam eden kampanyalar" />
+            <InsightCard icon={Target} title="Rakip Ortalama" value={Math.round(avgCompetitorCampaigns)} description="Rakip başına ortalama kampanya sayısı" tone="info" />
+            <InsightCard icon={Crown} title="En Güçlü Rakip" value={bestCompetitor?.site_name || '-'} description={bestCompetitor ? `Ort. bonus ₺${Number(bestCompetitor.avg_bonus).toFixed(0)}` : 'Yeterli veri yok'} tone="warning" />
+          </div>
+        )}
+
         <div className="grid gap-4 md:grid-cols-2">
           <Card>
             <CardHeader>
-              <CardTitle>En Çok Görülen Kategoriler</CardTitle>
+              <SectionHeader
+                title="En Çok Görülen Kategoriler"
+                description="Junk kayıtlar filtrelenerek, en görünür kampanya tipleri özetlenir."
+              />
             </CardHeader>
             <CardContent>
               {isLoading ? (
@@ -182,7 +251,7 @@ export default function DashboardPage() {
                   {data?.topCategories?.slice(0, 10).map((item, index) => (
                     <div key={index} className="rounded-lg border p-3">
                       <div className="flex items-center justify-between gap-3 text-sm">
-                        <span className="font-medium">{item.label || item.category}</span>
+                        <span className="font-medium">{item.label || getCategoryLabel(item.category)}</span>
                         <div className="text-right">
                           <div>{item.count}</div>
                           {item.share !== undefined && (
@@ -201,7 +270,7 @@ export default function DashboardPage() {
                     </div>
                   ))}
                   {(!data?.topCategories || data.topCategories.length === 0) && (
-                    <p className="text-sm text-muted-foreground">Veri yok</p>
+                    <EmptyState title="Anlamlı kategori verisi yok" description="Bu aralıkta güvenilir kategori dağılımı üretilemedi." />
                   )}
                 </div>
               )}
@@ -210,7 +279,10 @@ export default function DashboardPage() {
 
           <Card>
             <CardHeader>
-              <CardTitle>En Çok Kampanya Olan Siteler</CardTitle>
+              <SectionHeader
+                title="En Çok Kampanya Olan Siteler"
+                description="Seçilen tarih aralığında en yoğun kampanya üreten siteler."
+              />
             </CardHeader>
             <CardContent>
               {isLoading ? (
@@ -228,7 +300,7 @@ export default function DashboardPage() {
                     </div>
                   ))}
                   {(!data?.topSites || data.topSites.length === 0) && (
-                    <p className="text-sm text-muted-foreground">Veri yok</p>
+                    <EmptyState title="Site özeti yok" description="Bu tarih aralığında listelenecek site yoğunluğu bulunamadı." />
                   )}
                 </div>
               )}
@@ -238,10 +310,11 @@ export default function DashboardPage() {
 
         <Card>
           <CardHeader>
-            <CardTitle className="flex items-center gap-2">
-              AI Karşılaştırma Paneli
-              <Badge variant="outline">Bitalih vs Rakipler</Badge>
-            </CardTitle>
+            <SectionHeader
+              title="AI Karşılaştırma Paneli"
+              description="Bitalih'in kampanya hacmi ve bonus agresifliği açısından rakiplerle konumunu karşılaştırın."
+              action={<Badge variant="outline">Bitalih vs Rakipler</Badge>}
+            />
           </CardHeader>
           <CardContent className="space-y-6">
             <div className="flex items-center gap-4">
@@ -253,7 +326,7 @@ export default function DashboardPage() {
               >
                 <option value="">Tüm Kategoriler</option>
                 {competitionData?.categories?.map((cat) => (
-                  <option key={cat} value={cat}>{cat}</option>
+                  <option key={cat} value={cat}>{getCategoryLabel(cat)}</option>
                 ))}
               </select>
             </div>
@@ -266,6 +339,32 @@ export default function DashboardPage() {
               </div>
             ) : (
               <>
+                <div className="grid gap-4 lg:grid-cols-3">
+                  <InsightCard
+                    icon={Crown}
+                    title="Bitalih'in Öne Çıktığı Alan"
+                    value={bitalihComparisonCards[0].better === 'bitalih' ? 'Hacim' : 'Sınırlı'}
+                    description={bitalihComparisonCards[0].better === 'bitalih'
+                      ? 'Kampanya sayısında rakip ortalamasının üzerinde.'
+                      : 'Kampanya hacminde rakip ortalamasını yakalamak gerekiyor.'}
+                    tone={bitalihComparisonCards[0].better === 'bitalih' ? 'positive' : 'warning'}
+                  />
+                  <InsightCard
+                    icon={Target}
+                    title="En Agresif Rakip"
+                    value={bestCompetitor?.site_name || '-'}
+                    description={bestCompetitor ? `Ort. bonus ₺${Number(bestCompetitor.avg_bonus).toFixed(0)}` : 'Bonus verisi sınırlı'}
+                    tone="warning"
+                  />
+                  <InsightCard
+                    icon={TrendingUp}
+                    title="Odaklanılacak Tür"
+                    value={data?.topCategories?.[0]?.label || 'Belirsiz'}
+                    description="Kampanya görünürlüğünün en yoğun olduğu kategori."
+                    tone="info"
+                  />
+                </div>
+
                 <div className="grid gap-4 md:grid-cols-3">
                   {bitalihComparisonCards.map((card, index) => (
                     <Card key={index} className={card.better === 'bitalih' ? 'border-green-500' : 'border-orange-500'}>

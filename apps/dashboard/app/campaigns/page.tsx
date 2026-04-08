@@ -2,14 +2,18 @@
 
 import { useQuery } from '@tanstack/react-query'
 import { useState, useEffect } from 'react'
+import { CampaignCard } from '@/components/campaign/campaign-card'
 import { CampaignTable } from '@/components/campaign/campaign-table'
 import { CampaignFilters } from '@/components/campaign/campaign-filters'
 import { Button } from '@/components/ui/button'
-import { Skeleton } from '@/components/ui/skeleton'
+import { EmptyState } from '@/components/ui/empty-state'
 import { ErrorDisplay } from '@/components/ui/error'
+import { InsightCard } from '@/components/ui/insight-card'
+import { PageHeader } from '@/components/ui/page-header'
+import { getCampaignQualitySignals } from '@/lib/campaign-presentation'
 import { fetchCampaigns } from '@/lib/api'
 import type { CampaignFilters as CampaignFiltersType, Campaign } from '@/types'
-import { ChevronLeft, ChevronRight, Star, Download, Filter } from 'lucide-react'
+import { ChevronLeft, ChevronRight, Star, Download, LayoutGrid, TableProperties, CalendarClock, ShieldAlert, Activity } from 'lucide-react'
 
 export default function CampaignsPage() {
   const [filters, setFilters] = useState<CampaignFiltersType>({})
@@ -17,6 +21,7 @@ export default function CampaignsPage() {
   const [showFavoritesOnly, setShowFavoritesOnly] = useState(false)
   const [favorites, setFavorites] = useState<string[]>([])
   const [sites, setSites] = useState<{id: string, name: string}[]>([])
+  const [viewMode, setViewMode] = useState<'table' | 'cards'>('table')
 
   const { data: sitesData } = useQuery({
     queryKey: ['sites'],
@@ -55,8 +60,20 @@ export default function CampaignsPage() {
     setPage(1)
   }
 
+  const activeFilterEntries = Object.entries(filters).filter(([, value]) => value !== undefined && value !== '')
+  const visibleCampaigns = showFavoritesOnly
+    ? (data?.data.filter(c => favorites.includes(c.id)) || [])
+    : (data?.data || [])
+  const suspiciousCount = visibleCampaigns.filter((campaign) =>
+    getCampaignQualitySignals(campaign).some((signal) => signal.code === 'suspicious')
+  ).length
+  const missingDateCount = visibleCampaigns.filter((campaign) =>
+    getCampaignQualitySignals(campaign).some((signal) => signal.code === 'missing_dates')
+  ).length
+  const activeCount = visibleCampaigns.filter((campaign) => campaign.status === 'active').length
+
   const exportCSV = () => {
-    const campaignsToExport = (showFavoritesOnly ? data?.data.filter(c => favorites.includes(c.id)) : data?.data) || []
+    const campaignsToExport = visibleCampaigns
     const headers = ['title', 'site', 'category', 'sentiment', 'valid_from', 'valid_to']
     const csvRows = [
       headers.join(','),
@@ -81,9 +98,7 @@ export default function CampaignsPage() {
   if (error) {
     return (
       <div className="min-h-screen bg-background">
-        <header className="sticky top-0 z-30 flex h-16 items-center gap-4 border-b bg-background px-6">
-          <h1 className="text-lg font-semibold">Kampanyalar</h1>
-        </header>
+        <PageHeader title="Kampanyalar" description="Kampanya havuzunu filtreleyin, veri kalitesini denetleyin ve detaylara hızla inin." />
         <main className="p-6">
           <ErrorDisplay error={error} onRetry={() => refetch()} />
         </main>
@@ -93,50 +108,85 @@ export default function CampaignsPage() {
 
   return (
     <div className="min-h-screen bg-background">
-      <header className="sticky top-0 z-30 flex h-16 items-center gap-4 border-b bg-background px-6">
-        <h1 className="text-lg font-semibold">Kampanyalar</h1>
-        <div className="ml-auto flex items-center gap-2">
-          <span className="text-sm text-muted-foreground">
-            Toplam: {data?.total ?? 0}
-            {showFavoritesOnly && ` (${favorites.length} favoriler)`}
-          </span>
-          <Button
-            variant={showFavoritesOnly ? 'default' : 'outline'}
-            size="sm"
-            onClick={() => setShowFavoritesOnly(!showFavoritesOnly)}
-          >
-            <Star className="h-4 w-4 mr-1" />
-            Favoriler
-          </Button>
-          <Button variant="outline" size="sm" onClick={exportCSV}>
-            <Download className="h-4 w-4 mr-1" />
-            Export
-          </Button>
-          <Button variant="outline" size="sm" onClick={() => refetch()}>
-            Yenile
-          </Button>
-        </div>
-      </header>
+      <PageHeader
+        title="Kampanyalar"
+        description="Liste, tarih tamamlığı, veri kalitesi ve favori seçimleri üzerinden kampanyaları hızlıca tarayın."
+        actions={
+          <>
+            <span className="text-sm text-muted-foreground">
+              Toplam: {data?.total ?? 0}
+              {showFavoritesOnly && ` (${favorites.length} favoriler)`}
+            </span>
+            <div className="flex items-center rounded-xl border border-border/70 bg-background p-1">
+              <Button variant={viewMode === 'table' ? 'default' : 'ghost'} size="sm" onClick={() => setViewMode('table')}>
+                <TableProperties className="h-4 w-4" />
+              </Button>
+              <Button variant={viewMode === 'cards' ? 'default' : 'ghost'} size="sm" onClick={() => setViewMode('cards')}>
+                <LayoutGrid className="h-4 w-4" />
+              </Button>
+            </div>
+            <Button
+              variant={showFavoritesOnly ? 'default' : 'outline'}
+              size="sm"
+              onClick={() => setShowFavoritesOnly(!showFavoritesOnly)}
+            >
+              <Star className="h-4 w-4 mr-1" />
+              Favoriler
+            </Button>
+            <Button variant="outline" size="sm" onClick={exportCSV}>
+              <Download className="h-4 w-4 mr-1" />
+              Export
+            </Button>
+            <Button variant="outline" size="sm" onClick={() => refetch()}>
+              Yenile
+            </Button>
+          </>
+        }
+      />
 
       <main className="p-6 space-y-4">
+        <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
+          <InsightCard title="Toplam Görünür Sonuç" value={data?.total ?? 0} description="Mevcut filtrelerle eşleşen toplam kayıt" />
+          <InsightCard icon={Activity} title="Bu Sayfada Aktif" value={activeCount} description="Şu an aktif durumdaki kayıtlar" tone="positive" />
+          <InsightCard icon={CalendarClock} title="Tarih Eksik" value={missingDateCount} description="Başlangıç veya bitiş tarihi eksik" tone="warning" />
+          <InsightCard icon={ShieldAlert} title="Şüpheli Kayıt" value={suspiciousCount} description="Junk veya düşük güvenli scrape sonuçları" tone="warning" />
+        </div>
+
         <CampaignFilters
           filters={filters}
           onFiltersChange={handleFiltersChange}
           sites={sites}
         />
 
+        {activeFilterEntries.length > 0 && (
+          <div className="flex flex-wrap gap-2">
+            {activeFilterEntries.map(([key, value]) => (
+              <span key={key} className="rounded-full border border-border/80 bg-background px-3 py-1 text-xs text-muted-foreground">
+                {key}: {String(value)}
+              </span>
+            ))}
+          </div>
+        )}
+
         {isLoading ? (
           <CampaignTable campaigns={[]} isLoading />
-        ) : (
-          <CampaignTable 
-            campaigns={
-              showFavoritesOnly 
-                ? (data?.data.filter(c => favorites.includes(c.id)) || [])
-                : (data?.data || [])
-            } 
+        ) : visibleCampaigns.length === 0 ? (
+          <EmptyState
+            title="Kampanya bulunamadı"
+            description="Seçili filtreler ve favori görünümü ile eşleşen kayıt yok. Filtreleri gevşetmeyi deneyin."
+          />
+        ) : viewMode === 'table' ? (
+          <CampaignTable
+            campaigns={visibleCampaigns}
             favorites={favorites}
             onToggleFavorite={toggleFavorite}
           />
+        ) : (
+          <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-3">
+            {visibleCampaigns.map((campaign) => (
+              <CampaignCard key={campaign.id} campaign={campaign} />
+            ))}
+          </div>
         )}
 
         {data && data.totalPages > 1 && !showFavoritesOnly && (

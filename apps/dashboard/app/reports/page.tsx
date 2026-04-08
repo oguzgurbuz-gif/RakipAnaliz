@@ -3,7 +3,8 @@
 import Link from 'next/link'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
 import { Button } from '@/components/ui/button'
-import { BarChart3, Calendar, Download } from 'lucide-react'
+import { PageHeader } from '@/components/ui/page-header'
+import { BarChart3, Calendar, Download, Sparkles } from 'lucide-react'
 import { useQuery } from '@tanstack/react-query'
 import { fetchCampaigns } from '@/lib/api'
 
@@ -38,15 +39,21 @@ export default function ReportsPage() {
 
   return (
     <div className="min-h-screen bg-background">
-      <header className="sticky top-0 z-30 flex h-16 items-center gap-4 border-b bg-background px-6">
-        <h1 className="text-lg font-semibold">Raporlar</h1>
-        <div className="ml-auto flex items-center gap-2">
+      <PageHeader
+        title="Raporlar"
+        description="Özet, haftalık ve dışa aktarılabilir rapor yüzeylerinden kampanya performansını takip edin."
+        actions={
           <Button variant="outline" size="sm" onClick={exportReportCSV}>
             <Download className="h-4 w-4 mr-1" />
             Export CSV
           </Button>
+        }
+      >
+        <div className="inline-flex items-center gap-2 rounded-full border border-border/70 bg-background px-3 py-1 text-xs text-muted-foreground">
+          <Sparkles className="h-3.5 w-3.5" />
+          Rapor yüzeyleri karar desteği için yeniden düzenlendi.
         </div>
-      </header>
+      </PageHeader>
 
       <main className="p-6">
         <div className="grid gap-6 md:grid-cols-2 lg:grid-cols-3">
@@ -65,7 +72,7 @@ export default function ReportsPage() {
               </CardHeader>
               <CardContent>
                 <p className="text-sm text-muted-foreground">
-                  Detaylı analizler, trendler ve performans metrikleri içeren haftalık raporlara erişin.
+                  Hangi haftada ne değiştiğini, riskleri ve önerileri tek raporda görün.
                 </p>
               </CardContent>
             </Card>
@@ -86,7 +93,7 @@ export default function ReportsPage() {
               </CardHeader>
               <CardContent>
                 <p className="text-sm text-muted-foreground">
-                  Belirli bir tarih aralığı için toplam satış, sipariş ve kar metriklerini görüntüleyin.
+                  Seçtiğiniz aralık için kategori, site ve kampanya yoğunluğu özetini alın.
                 </p>
               </CardContent>
             </Card>

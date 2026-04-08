@@ -6,7 +6,11 @@ import Link from 'next/link'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
+import { DataQualityBadge } from '@/components/ui/data-quality-badge'
+import { InsightCard } from '@/components/ui/insight-card'
 import { Input } from '@/components/ui/input'
+import { PageHeader } from '@/components/ui/page-header'
+import { SectionHeader } from '@/components/ui/section-header'
 import { Textarea } from '@/components/ui/textarea'
 import { Skeleton } from '@/components/ui/skeleton'
 import { ErrorDisplay } from '@/components/ui/error'
@@ -18,9 +22,10 @@ import {
   updateCampaign,
 } from '@/lib/api'
 import { extractBodyDateRange, getDateSourceLabel } from '@/lib/campaign-dates'
+import { getCampaignQualitySignals, getCampaignTypeLabel, getDisplaySentimentLabel } from '@/lib/campaign-presentation'
 import type { Campaign } from '@/types'
 import { formatDate, formatDateTime, formatDateRange, getSentimentColor } from '@/lib/utils'
-import { ArrowLeft, Calendar, AlertTriangle, CheckCircle, MessageSquare, Plus, Pencil, X, Save } from 'lucide-react'
+import { ArrowLeft, Calendar, AlertTriangle, CheckCircle, MessageSquare, Plus, Pencil, X, Save, Flag, Shapes, TimerReset } from 'lucide-react'
 import { useState, useEffect } from 'react'
 
 const extractedTagLabels: Record<string, string> = {
@@ -225,16 +230,12 @@ export default function CampaignDetailPage({ params }: { params: { id: string } 
   )
   const organizedDescriptionSummary = organizedDescriptionLines.slice(0, 3)
   const organizedDescriptionRest = organizedDescriptionLines.slice(3)
+  const qualitySignals = campaign ? getCampaignQualitySignals(campaign) : []
 
   if (campaignError) {
     return (
       <div className="min-h-screen bg-background">
-        <header className="sticky top-0 z-30 flex h-16 items-center gap-4 border-b bg-background px-6">
-          <Link href="/campaigns" className="flex items-center gap-2 text-muted-foreground hover:text-foreground">
-            <ArrowLeft className="h-4 w-4" />
-            <span>Geri</span>
-          </Link>
-        </header>
+        <PageHeader title="Kampanya Detay" actions={<Link href="/campaigns" className="flex items-center gap-2 text-muted-foreground hover:text-foreground"><ArrowLeft className="h-4 w-4" /><span>Geri</span></Link>} />
         <main className="p-6">
           <ErrorDisplay error={campaignError} onRetry={() => window.location.reload()} />
         </main>
@@ -244,13 +245,24 @@ export default function CampaignDetailPage({ params }: { params: { id: string } 
 
   return (
     <div className="min-h-screen bg-background">
-      <header className="sticky top-0 z-30 flex h-16 items-center gap-4 border-b bg-background px-6">
-        <Link href="/campaigns" className="flex items-center gap-2 text-muted-foreground hover:text-foreground">
-          <ArrowLeft className="h-4 w-4" />
-          <span>Geri</span>
-        </Link>
-        <h1 className="text-lg font-semibold">Kampanya Detay</h1>
-      </header>
+      <PageHeader
+        title="Kampanya Detay"
+        description="Kampanya türü, tarihleri, katılım şartları ve veri kalitesi sinyallerini tek görünümde inceleyin."
+        actions={
+          <>
+            <Link href="/campaigns" className="flex items-center gap-2 text-muted-foreground hover:text-foreground">
+              <ArrowLeft className="h-4 w-4" />
+              <span>Geri</span>
+            </Link>
+            {!isEditing && campaign && (
+              <Button variant="outline" size="sm" onClick={() => setIsEditing(true)}>
+                <Pencil className="h-4 w-4 mr-1" />
+                Düzenle
+              </Button>
+            )}
+          </>
+        }
+      />
 
       <main className="p-6 space-y-6">
         {campaignLoading ? (
@@ -261,33 +273,45 @@ export default function CampaignDetailPage({ params }: { params: { id: string } 
           </div>
         ) : campaign ? (
           <>
-            <div className="flex items-start justify-between gap-4">
-              <div>
-                <h2 className="text-2xl font-bold">{campaign.title}</h2>
-                <div className="flex items-center gap-2 mt-2">
-                  {campaign.site && (
-                    <span className="text-muted-foreground">{campaign.site.name}</span>
-                  )}
-                  <StatusBadge status={campaign.status} />
-                  {aiSentiment && (
-                    <Badge className={getSentimentColor(aiSentiment || 'neutral')}>
-                      {aiSentiment}
-                    </Badge>
-                  )}
+            <div className="rounded-2xl border border-border/80 bg-card/90 p-6 shadow-sm">
+              <div className="flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
+                <div className="space-y-3">
+                  <div>
+                    <h2 className="text-2xl font-bold tracking-tight">{campaign.title}</h2>
+                    <div className="mt-2 flex flex-wrap items-center gap-2">
+                      {campaign.site && (
+                        <span className="text-muted-foreground">{campaign.site.name}</span>
+                      )}
+                      <StatusBadge status={campaign.status} />
+                      {aiSentiment && (
+                        <Badge className={getSentimentColor(aiSentiment || 'neutral')}>
+                          {getDisplaySentimentLabel(aiSentiment)}
+                        </Badge>
+                      )}
+                      {qualitySignals.map((signal) => (
+                        <DataQualityBadge key={signal.code} signal={signal} />
+                      ))}
+                    </div>
+                  </div>
+                  <p className="max-w-3xl text-sm text-muted-foreground">
+                    {aiSummary || 'Bu kampanya için özet henüz sınırlı. Şartlar ve ham açıklama üzerinden inceleme yapılabilir.'}
+                  </p>
                 </div>
               </div>
-              {!isEditing && (
-                <Button variant="outline" size="sm" onClick={() => setIsEditing(true)}>
-                  <Pencil className="h-4 w-4 mr-1" />
-                  Düzenle
-                </Button>
-              )}
+            </div>
+
+            <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-5">
+              <InsightCard icon={Shapes} title="Kampanya Türü" value={getCampaignTypeLabel(campaign)} description="Normalize edilmiş görünüm" />
+              <InsightCard icon={Calendar} title="Başlangıç" value={startDateDisplay || 'Belirsiz'} description={startDateSource} tone="info" />
+              <InsightCard icon={TimerReset} title="Bitiş" value={endDateDisplay || 'Belirsiz'} description={endDateSource} tone="info" />
+              <InsightCard icon={Flag} title="Durum" value={campaign.status} description="Canlı durum etiketi" tone="default" />
+              <InsightCard icon={AlertTriangle} title="Kalite Sinyali" value={qualitySignals.length} description={qualitySignals.length > 0 ? qualitySignals.map((signal) => signal.label).join(', ') : 'Önemli uyarı yok'} tone={qualitySignals.length > 0 ? 'warning' : 'positive'} />
             </div>
 
             {(aiSummary || aiKeyPoints.length > 0 || aiRiskFlags.length > 0) && (
               <Card>
                 <CardHeader>
-                  <CardTitle>AI Analizi</CardTitle>
+                  <SectionHeader title="Overview" description="AI özeti, ana noktalar ve risk sinyalleri." />
                 </CardHeader>
                 <CardContent className="space-y-4">
                   {aiSummary && (
@@ -328,7 +352,7 @@ export default function CampaignDetailPage({ params }: { params: { id: string } 
             {hasExtractedDetails && (
               <Card>
                 <CardHeader>
-                  <CardTitle>Kampanya Detayları</CardTitle>
+                  <SectionHeader title="Campaign Details" description="Bonus, limit ve kampanya mekaniklerinin normalize özeti." />
                 </CardHeader>
                 <CardContent>
                   <div className="grid grid-cols-2 gap-4">
@@ -365,7 +389,7 @@ export default function CampaignDetailPage({ params }: { params: { id: string } 
             {aiCampaignType && (
               <Card>
                 <CardHeader>
-                  <CardTitle>Kampanya Türü</CardTitle>
+                  <SectionHeader title="Type Classification" description="AI sınıflandırmasının kampanya tipi kararı." />
                 </CardHeader>
                 <CardContent>
                   <div className="flex items-center gap-2">
@@ -390,7 +414,7 @@ export default function CampaignDetailPage({ params }: { params: { id: string } 
             {hasConditionDetails && (
               <Card>
                 <CardHeader>
-                  <CardTitle>Katılım Koşulları</CardTitle>
+                  <SectionHeader title="Participation Conditions" description="Kampanyaya dahil olma ve kullanım şartları." />
                 </CardHeader>
                 <CardContent>
                   <ul className="space-y-2 text-sm">
@@ -455,7 +479,7 @@ export default function CampaignDetailPage({ params }: { params: { id: string } 
 
             <Card>
               <CardHeader>
-                <CardTitle>Temel Bilgiler</CardTitle>
+                <SectionHeader title="Dates" description="Kampanyanın başlangıç, bitiş ve görünürlük bilgileri." />
               </CardHeader>
               <CardContent className="space-y-4">
                 <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
@@ -534,7 +558,7 @@ export default function CampaignDetailPage({ params }: { params: { id: string } 
             {campaign.body && (
               <Card>
                 <CardHeader>
-                  <CardTitle>Açıklama</CardTitle>
+                  <SectionHeader title="Raw Description" description="Scrape edilen açıklama, gürültü azaltılmış görünümle listelenir." />
                 </CardHeader>
                 <CardContent className="space-y-4">
                   {isEditing ? (

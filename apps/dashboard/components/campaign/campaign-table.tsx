@@ -11,7 +11,9 @@ import {
   TableRow,
 } from '@/components/ui/table'
 import { Badge } from '@/components/ui/badge'
+import { DataQualityBadge } from '@/components/ui/data-quality-badge'
 import { resolveCampaignDateDisplay } from '@/lib/campaign-dates'
+import { getCampaignQualitySignals, getCampaignTypeLabel, getDisplaySentimentLabel } from '@/lib/campaign-presentation'
 import { getSentimentColor, getStatusColor, cn } from '@/lib/utils'
 import { Star } from 'lucide-react'
 import type { Campaign } from '@/types'
@@ -95,6 +97,7 @@ export function CampaignTable({ campaigns, isLoading, favorites = [], onToggleFa
               campaign.body,
               'end'
             )
+            const qualitySignals = getCampaignQualitySignals(campaign)
 
             return (
               <TableRow key={campaign.id}>
@@ -121,16 +124,25 @@ export function CampaignTable({ campaigns, isLoading, favorites = [], onToggleFa
                   >
                     {campaign.title}
                   </Link>
+                  {qualitySignals.length > 0 && (
+                    <div className="mt-2 flex flex-wrap gap-1.5">
+                      {qualitySignals.map((signal) => (
+                        <DataQualityBadge key={signal.code} signal={signal} compact />
+                      ))}
+                    </div>
+                  )}
                 </TableCell>
                 <TableCell className="font-medium whitespace-nowrap">
                   {campaign.site?.name || '-'}
                 </TableCell>
                 <TableCell className="whitespace-nowrap">
-                  {(campaign.metadata as any)?.ai_analysis?.campaign_type || campaign.category || '-'}
+                  {getCampaignTypeLabel(campaign)}
                 </TableCell>
                 <TableCell className="whitespace-nowrap">
                   <Badge className={sentimentClass}>
-                    {campaign.sentiment || campaign.aiSentiment || '-'}
+                    {campaign.sentiment || campaign.aiSentiment
+                      ? getDisplaySentimentLabel(campaign.sentiment || campaign.aiSentiment)
+                      : '-'}
                   </Badge>
                 </TableCell>
                 <TableCell className="whitespace-nowrap">

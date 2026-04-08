@@ -5,8 +5,13 @@ import { useState } from 'react'
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card'
 import { Badge } from '@/components/ui/badge'
 import { Select } from '@/components/ui/select'
+import { EmptyState } from '@/components/ui/empty-state'
+import { InsightCard } from '@/components/ui/insight-card'
+import { PageHeader } from '@/components/ui/page-header'
+import { SectionHeader } from '@/components/ui/section-header'
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table'
 import { Trophy, Target, TrendingUp, Award, Crown } from 'lucide-react'
+import { getCategoryLabel } from '@/lib/category-labels'
 import { cn } from '@/lib/utils'
 import { fetchCompetition, CompetitionData } from '@/lib/api'
 
@@ -73,9 +78,10 @@ export default function CompetitionPage() {
 
   return (
     <div className="min-h-screen bg-background">
-      <header className="sticky top-0 z-30 flex h-16 items-center gap-4 border-b bg-background px-6">
-        <h1 className="text-lg font-semibold">Rekabet Analizi</h1>
-        <div className="ml-auto flex items-center gap-4">
+      <PageHeader
+        title="Rekabet Analizi"
+        description="Rakiplerin kampanya yoğunluğu, bonus agresifliği ve kategori hakimiyetini karşılaştırın."
+        actions={
           <div className="flex items-center gap-2">
             <label htmlFor="category" className="text-sm text-muted-foreground">Tür:</label>
             <Select
@@ -86,12 +92,12 @@ export default function CompetitionPage() {
             >
               <option value="">Tüm Türler</option>
               {allCategories.map(cat => (
-                <option key={cat} value={cat}>{cat}</option>
+                <option key={cat} value={cat}>{getCategoryLabel(cat)}</option>
               ))}
             </Select>
           </div>
-        </div>
-      </header>
+        }
+      />
 
       <main className="p-6 space-y-6">
         {isLoading ? (
@@ -102,6 +108,30 @@ export default function CompetitionPage() {
           </div>
         ) : (
           <>
+            <div className="grid gap-4 lg:grid-cols-3">
+              <InsightCard
+                icon={Crown}
+                title="Pazar Lideri"
+                value={topCampaignSite?.site_name || '-'}
+                description={`${topCampaignSite?.total_campaigns || 0} kampanya ile hacim lideri`}
+                tone="positive"
+              />
+              <InsightCard
+                icon={Target}
+                title="Bonus Lideri"
+                value={topBonusSite?.site_name || '-'}
+                description={`Ort. bonus ₺${(Number(topBonusSite?.avg_bonus) || 0).toFixed(0)}`}
+                tone="warning"
+              />
+              <InsightCard
+                icon={TrendingUp}
+                title="En Aktif Tür"
+                value={data?.comparisonTable[0] ? getCategoryLabel(data.comparisonTable[0].category) : '-'}
+                description={`${data?.comparisonTable[0]?.total_campaigns || 0} kampanya ile en yoğun kategori`}
+                tone="info"
+              />
+            </div>
+
             <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-4">
               <StatCard
                 icon={Trophy}
@@ -119,7 +149,7 @@ export default function CompetitionPage() {
               <StatCard
                 icon={TrendingUp}
                 label="En Aktif Tür"
-                value={data?.comparisonTable[0]?.category || '-'}
+                value={data?.comparisonTable[0] ? getCategoryLabel(data.comparisonTable[0].category) : '-'}
                 subValue={`${data?.comparisonTable[0]?.total_campaigns || 0} kampanya`}
               />
               <StatCard
@@ -133,8 +163,7 @@ export default function CompetitionPage() {
             <div className="grid gap-6 lg:grid-cols-2">
               <Card>
                 <CardHeader>
-                  <CardTitle>Tür Bazlı Karşılaştırma</CardTitle>
-                  <CardDescription>Her türde en iyi performans gösteren site</CardDescription>
+                  <SectionHeader title="Tür Bazlı Karşılaştırma" description="Her kategoride en güçlü site ve kategori yoğunluğu." />
                 </CardHeader>
                 <CardContent>
                   <Table>
@@ -149,7 +178,7 @@ export default function CompetitionPage() {
                     <TableBody>
                       {data?.comparisonTable.slice(0, 10).map((row) => (
                         <TableRow key={row.category}>
-                          <TableCell className="font-medium">{row.category}</TableCell>
+                          <TableCell className="font-medium">{getCategoryLabel(row.category)}</TableCell>
                           <TableCell>
                             <div className="flex items-center gap-2">
                               {row.best_site}
@@ -167,8 +196,7 @@ export default function CompetitionPage() {
 
               <Card>
                 <CardHeader>
-                  <CardTitle>Site Sıralaması</CardTitle>
-                  <CardDescription>Kampanya sayısına göre genel performans</CardDescription>
+                  <SectionHeader title="Site Sıralaması" description="Kampanya hacmi ve aktif oranına göre sıralama." />
                 </CardHeader>
                 <CardContent>
                   <Table>
@@ -204,8 +232,7 @@ export default function CompetitionPage() {
 
             <Card>
               <CardHeader>
-                <CardTitle>Site vs Site Matrisi</CardTitle>
-                <CardDescription>Türlerdeki site performansları</CardDescription>
+                <SectionHeader title="Site vs Site Matrisi" description="Kategori bazında hangi sitenin daha yoğun kampanya sunduğunu gösterir." />
               </CardHeader>
               <CardContent>
                 <div className="overflow-x-auto">
@@ -221,13 +248,22 @@ export default function CompetitionPage() {
                     <TableBody>
                       {data?.categories.slice(0, 12).map(cat => (
                         <TableRow key={cat}>
-                          <TableCell className="font-medium sticky left-0 bg-background">{cat}</TableCell>
+                          <TableCell className="font-medium sticky left-0 bg-background">{getCategoryLabel(cat)}</TableCell>
                           {siteCodes.slice(0, 8).map(code => {
                             const cell = data?.siteMatrix[cat]?.[code]
+                            const intensity = Math.min(1, (cell?.campaign_count || 0) / Math.max(1, Number(topCampaignSite?.total_campaigns || 1)))
                             return (
                               <TableCell key={code} className="text-center">
                                 {cell ? (
-                                  <div className={cn('inline-flex flex-col items-center', cell.is_winner && 'bg-yellow-100 rounded px-2 py-1')}>
+                                  <div
+                                    className={cn(
+                                      'inline-flex min-w-[58px] flex-col items-center rounded-lg px-2 py-1',
+                                      cell.is_winner && 'ring-1 ring-yellow-300'
+                                    )}
+                                    style={{
+                                      backgroundColor: `rgba(37, 99, 235, ${0.12 + intensity * 0.25})`,
+                                    }}
+                                  >
                                     <span className={cn('text-lg font-bold', cell.campaign_count === 0 && 'text-muted-foreground')}>
                                       {cell.campaign_count}
                                     </span>
@@ -249,53 +285,51 @@ export default function CompetitionPage() {
 
             <Card>
               <CardHeader>
-                <CardTitle>En İyi Bonus / Fırsatlar</CardTitle>
-                <CardDescription>En yüksek bonus sunan kampanyalar</CardDescription>
+                <SectionHeader title="En İyi Bonus / Fırsatlar" description="En yüksek değerli bonusları sunan kampanyalar." />
               </CardHeader>
               <CardContent>
-                <Table>
-                  <TableHeader>
-                    <TableRow>
-                      <TableHead>Kampanya</TableHead>
-                      <TableHead>Site</TableHead>
-                      <TableHead>Tür</TableHead>
-                      <TableHead className="text-right">Bonus Miktar</TableHead>
-                      <TableHead className="text-right">Bonus %</TableHead>
-                      <TableHead>Durum</TableHead>
-                    </TableRow>
-                  </TableHeader>
-                  <TableBody>
-                    {data?.bestDeals.map(deal => (
-                      <TableRow key={deal.campaign_id}>
-                        <TableCell className="font-medium max-w-xs truncate">{deal.campaign_title}</TableCell>
-                        <TableCell>{deal.site_name}</TableCell>
-                        <TableCell><Badge variant="outline">{deal.category}</Badge></TableCell>
-                        <TableCell className="text-right font-mono">
-                          {deal.bonus_amount ? `₺${deal.bonus_amount.toLocaleString()}` : '-'}
-                        </TableCell>
-                        <TableCell className="text-right font-mono">
-                          {deal.bonus_percentage ? `%${deal.bonus_percentage}` : '-'}
-                        </TableCell>
-                        <TableCell>
-                          <Badge className={cn(
-                            deal.status === 'active' && 'bg-green-100 text-green-800',
-                            deal.status === 'ended' && 'bg-gray-100 text-gray-800',
-                          )}>
-                            {deal.status}
-                          </Badge>
-                        </TableCell>
-                      </TableRow>
+                {data?.bestDeals?.length ? (
+                  <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-3">
+                    {data.bestDeals.slice(0, 6).map((deal) => (
+                      <Card key={deal.campaign_id} className="border-border/70 bg-muted/10">
+                        <CardContent className="space-y-3 p-5">
+                          <div className="space-y-1">
+                            <div className="text-sm text-muted-foreground">{deal.site_name}</div>
+                            <div className="font-medium line-clamp-2">{deal.campaign_title}</div>
+                          </div>
+                          <div className="flex flex-wrap gap-2">
+                            <Badge variant="outline">{getCategoryLabel(deal.category)}</Badge>
+                            <Badge className={cn(
+                              deal.status === 'active' && 'bg-green-100 text-green-800',
+                              deal.status === 'ended' && 'bg-gray-100 text-gray-800',
+                            )}>
+                              {deal.status}
+                            </Badge>
+                          </div>
+                          <div className="grid grid-cols-2 gap-3 text-sm">
+                            <div>
+                              <div className="text-muted-foreground">Bonus</div>
+                              <div className="font-semibold">{deal.bonus_amount ? `₺${deal.bonus_amount.toLocaleString()}` : '-'}</div>
+                            </div>
+                            <div>
+                              <div className="text-muted-foreground">Bonus %</div>
+                              <div className="font-semibold">{deal.bonus_percentage ? `%${deal.bonus_percentage}` : '-'}</div>
+                            </div>
+                          </div>
+                        </CardContent>
+                      </Card>
                     ))}
-                  </TableBody>
-                </Table>
+                  </div>
+                ) : (
+                  <EmptyState title="Fırsat verisi yok" description="Bonus karşılaştırması için yeterli kampanya verisi bulunamadı." />
+                )}
               </CardContent>
             </Card>
 
             <div className="grid gap-6 lg:grid-cols-2">
               <Card>
                 <CardHeader>
-                  <CardTitle>En Çok Kampanya Sunan Siteler</CardTitle>
-                  <CardDescription>Tür bazlı kampanya sayıları</CardDescription>
+                  <SectionHeader title="En Çok Kampanya Sunan Siteler" description="Kampanya hacmi yüksek siteleri öne çıkarır." />
                 </CardHeader>
                 <CardContent>
                   <Table>
@@ -326,8 +360,7 @@ export default function CompetitionPage() {
 
               <Card>
                 <CardHeader>
-                  <CardTitle>Ortalama Bonus Miktarı by Site</CardTitle>
-                  <CardDescription>Sitelerin ortalama bonus değerleri</CardDescription>
+                  <SectionHeader title="Ortalama Bonus Miktarı by Site" description="Sitelerin toplam ve ortalama bonus hacmini karşılaştırır." />
                 </CardHeader>
                 <CardContent>
                   <Table>

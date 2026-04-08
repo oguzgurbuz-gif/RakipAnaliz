@@ -31,58 +31,85 @@ export async function GET(request: NextRequest) {
     const dateFrom = new Date();
     dateFrom.setDate(dateFrom.getDate() - days);
 
+    const qualityFilter = `
+      COALESCE(BTRIM(c.title), '') <> ''
+      AND LOWER(BTRIM(c.title)) NOT IN ('kampanyalar', 'güncel kampanyalar')
+      AND c.title NOT ILIKE '%tarayıcı sürümü%'
+      AND COALESCE(c.body, '') NOT ILIKE '%desteklenmemektedir%'
+      AND COALESCE(c.body, '') NOT ILIKE '%güncel kampanya bulunmamaktadır%'
+    `;
+
     const campaignsOverTimeQuery = `
       SELECT 
         DATE(c.created_at) as date,
         COUNT(*) as count
       FROM campaigns c
       WHERE c.created_at >= $1
+        AND ${qualityFilter}
       GROUP BY DATE(c.created_at)
       ORDER BY date ASC
     `;
 
     const categoryTrendQuery = `
+      WITH latest_ai AS (
+        SELECT DISTINCT ON (ai2.campaign_id)
+          ai2.campaign_id,
+          ai2.category_code,
+          ai2.sentiment_label
+        FROM campaign_ai_analyses ai2
+        ORDER BY ai2.campaign_id, ai2.created_at DESC
+      )
       SELECT 
         DATE(c.created_at) as date,
-        ai.category_code as category,
+        COALESCE(
+          NULLIF(c.metadata->'ai_analysis'->>'campaign_type', ''),
+          NULLIF(c.metadata->'ai_analysis'->>'category', ''),
+          NULLIF(ai.category_code, ''),
+          'unknown'
+        ) as category,
         COUNT(*) as count
       FROM campaigns c
-      LEFT JOIN LATERAL (
-        SELECT ai2.category_code
-        FROM campaign_ai_analyses ai2
-        WHERE ai2.campaign_id = c.id
-        ORDER BY ai2.created_at DESC
-        LIMIT 1
-      ) ai ON true
+      LEFT JOIN latest_ai ai ON ai.campaign_id = c.id
       WHERE c.created_at >= $1
-      GROUP BY DATE(c.created_at), ai.category_code
+        AND ${qualityFilter}
+      GROUP BY DATE(c.created_at), 2
       ORDER BY date ASC, count DESC
     `;
 
     const sentimentDistributionQuery = `
+      WITH latest_ai AS (
+        SELECT DISTINCT ON (ai2.campaign_id)
+          ai2.campaign_id,
+          ai2.sentiment_label
+        FROM campaign_ai_analyses ai2
+        ORDER BY ai2.campaign_id, ai2.created_at DESC
+      )
       SELECT 
-        ai.sentiment_label as sentiment,
+        COALESCE(
+          NULLIF(c.metadata->'ai_analysis'->>'sentiment', ''),
+          NULLIF(ai.sentiment_label, ''),
+          'unknown'
+        ) as sentiment,
         COUNT(*) as count
       FROM campaigns c
-      LEFT JOIN LATERAL (
-        SELECT ai2.sentiment_label
-        FROM campaign_ai_analyses ai2
-        WHERE ai2.campaign_id = c.id
-        ORDER BY ai2.created_at DESC
-        LIMIT 1
-      ) ai ON true
+      LEFT JOIN latest_ai ai ON ai.campaign_id = c.id
       WHERE c.created_at >= $1
-      GROUP BY ai.sentiment_label
+        AND ${qualityFilter}
+      GROUP BY 1
     `;
 
     const topCategoriesQuery = `
       SELECT 
-        c.metadata->'ai_analysis'->>'category' as category,
+        COALESCE(
+          NULLIF(c.metadata->'ai_analysis'->>'campaign_type', ''),
+          NULLIF(c.metadata->'ai_analysis'->>'category', ''),
+          'unknown'
+        ) as category,
         COUNT(*) as count
       FROM campaigns c
       WHERE c.created_at >= $1
-        AND c.metadata->'ai_analysis'->>'category' IS NOT NULL
-      GROUP BY c.metadata->'ai_analysis'->>'category'
+        AND ${qualityFilter}
+      GROUP BY 1
       ORDER BY count DESC
       LIMIT 10
     `;
@@ -94,6 +121,7 @@ export async function GET(request: NextRequest) {
       FROM campaigns c
       JOIN sites s ON s.id = c.site_id
       WHERE c.created_at >= $1
+        AND ${qualityFilter}
       GROUP BY s.name
       ORDER BY campaign_count DESC
       LIMIT 10
@@ -107,6 +135,7 @@ export async function GET(request: NextRequest) {
       JOIN sites s ON s.id = c.site_id
       WHERE c.created_at >= $1
         AND (c.metadata->'ai_analysis'->>'valueScore') IS NOT NULL
+        AND ${qualityFilter}
       GROUP BY s.name
       ORDER BY avg_value_score DESC
       LIMIT 10
@@ -114,13 +143,17 @@ export async function GET(request: NextRequest) {
 
     const weeklyTopCategoriesQuery = `
       SELECT 
-        c.metadata->'ai_analysis'->>'category' as category,
+        COALESCE(
+          NULLIF(c.metadata->'ai_analysis'->>'campaign_type', ''),
+          NULLIF(c.metadata->'ai_analysis'->>'category', ''),
+          'unknown'
+        ) as category,
         COUNT(*) as count
       FROM campaigns c
       WHERE c.created_at >= $1
-        AND c.metadata->'ai_analysis'->>'category' IS NOT NULL
         AND c.created_at >= NOW() - INTERVAL '7 days'
-      GROUP BY c.metadata->'ai_analysis'->>'category'
+        AND ${qualityFilter}
+      GROUP BY 1
       ORDER BY count DESC
       LIMIT 10
     `;
@@ -189,7 +222,7 @@ export async function GET(request: NextRequest) {
       {
         success: true,
         data: {
-          campaignsOverTime,
+          campaignsOverTime: campaignsByDate,
           categoryByDate,
           categoryDistribution,
           sentimentDistribution: sentimentDist,
