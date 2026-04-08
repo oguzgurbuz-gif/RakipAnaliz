@@ -1,6 +1,6 @@
 {
   "$schema": "https://openapi.vercel.sh/vercel.json",
-  "buildCommand": "pnpm --filter @bitalih/dashboard build",
+  "buildCommand": "pnpm build",
   "installCommand": "pnpm install",
   "framework": "nextjs",
   "regions": ["fra1"]
