@@ -332,7 +332,7 @@ function mapRowToVersion(
   return {
     id: row.id as string,
     campaignId: row.campaign_id as string,
-    versionNumber: (row.content_version ?? 1) as number,
+    versionNumber: (row.version_no ?? row.content_version ?? 1) as number,
     title: row.title as string,
     description: row.body as string | null,
     bonusType: 'percentage' as const,

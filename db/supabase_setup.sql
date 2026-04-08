@@ -457,7 +457,7 @@ BEGIN
   INTO v_record
   FROM campaign_versions cv
   WHERE cv.campaign_id = recalculate_campaign_status.campaign_id
-  ORDER BY cv.content_version DESC
+  ORDER BY cv.version_no DESC
   LIMIT 1;
 
   IF NOT FOUND THEN

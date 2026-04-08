@@ -1,0 +1,14 @@
+{
+  "version": 2,
+  "buildCommand": "pnpm install && pnpm --filter @bitalih/dashboard build",
+  "installCommand": "pnpm install",
+  "framework": null,
+  "regions": ["fra1"],
+  "projects": [
+    {
+      "path": "apps/dashboard",
+      "name": "bitalih-dashboard",
+      "sku": "swe1"
+    }
+  ]
+}

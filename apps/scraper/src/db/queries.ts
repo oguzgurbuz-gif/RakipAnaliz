@@ -53,7 +53,7 @@ export async function insertCampaign(
       body: data.body,
       normalized_text: data.normalizedText ?? '',
       fingerprint: data.fingerprint,
-      content_version: data.contentVersion,
+      version_no: data.contentVersion,
       primary_image_url: data.primaryImageUrl,
       valid_from: data.validFrom?.toISOString() ?? null,
       valid_to: data.validTo?.toISOString() ?? null,
@@ -147,7 +147,7 @@ export async function getLatestVersion(
     .from('campaign_versions')
     .select('*')
     .eq('campaign_id', campaignId)
-    .order('content_version', { ascending: false })
+    .order('version_no', { ascending: false })
     .limit(1)
     .maybeSingle();
   if (error && error.code !== 'PGRST116') throw error;
@@ -189,7 +189,8 @@ export async function getActiveCampaignsBySite(
     .from('campaigns')
     .select('*, sites!inner(code)')
     .eq('sites.code', siteCode)
-    .not('status', 'in', '("expired","hidden")');
+    .not('status', 'eq', 'expired')
+    .not('status', 'eq', 'hidden');
   if (error) throw error;
   return (data ?? []) as Record<string, unknown>[];
 }
@@ -924,9 +925,9 @@ export async function getCampaignForDateExtraction(
 ): Promise<Record<string, unknown> | null> {
   const { data, error } = await db
     .from('campaign_versions')
-    .select('title, body, source_url')
+    .select('campaign_id, title, body, source_url')
     .eq('campaign_id', campaignId)
-    .order('content_version', { ascending: false })
+    .order('version_no', { ascending: false })
     .limit(1)
     .maybeSingle();
   if (error && error.code !== 'PGRST116') throw error;
