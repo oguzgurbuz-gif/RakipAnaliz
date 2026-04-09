@@ -180,13 +180,6 @@ export async function GET(request: NextRequest) {
       SELECT COUNT(DISTINCT c.id) as total
       FROM campaigns c
       LEFT JOIN sites s ON s.id = c.site_id
-      LEFT JOIN LATERAL (
-        SELECT ai.sentiment_label, ai.category_code
-        FROM campaign_ai_analyses ai
-        WHERE ai.campaign_id = c.id
-        ORDER BY ai.created_at DESC
-        LIMIT 1
-      ) ai ON true
       ${whereClause}
     `;
 
@@ -194,7 +187,7 @@ export async function GET(request: NextRequest) {
     const total = parseInt(countResult[0]?.total || '0', 10);
 
     const dataQuery = `
-      SELECT 
+      SELECT
         c.id,
         c.site_id,
         c.title,
@@ -204,27 +197,20 @@ export async function GET(request: NextRequest) {
         c.valid_to,
         c.metadata->'ai_analysis'->>'valid_from' as ai_valid_from,
         c.metadata->'ai_analysis'->>'valid_to' as ai_valid_to,
-        c.first_seen_at,
+        c.created_at as first_seen_at,
         c.last_seen_at,
         c.primary_image_url,
         c.fingerprint,
         c.metadata,
         s.name as site_name,
         s.code as site_code,
-        COALESCE(ai.sentiment_label, c.metadata->'ai_analysis'->>'sentiment') as ai_sentiment_label,
-        COALESCE(ai.category_code, c.metadata->'ai_analysis'->>'category', c.metadata->'ai_analysis'->>'campaign_type') as ai_category_code,
-        COALESCE(ai.summary_text, c.metadata->'ai_analysis'->>'summary') as ai_summary_text,
-        COALESCE(ai.key_points, c.metadata->'ai_analysis'->'key_points', c.metadata->'ai_analysis'->'keyPoints') as ai_key_points,
-        COALESCE(ai.risk_flags, c.metadata->'ai_analysis'->'risk_flags', c.metadata->'ai_analysis'->'riskFlags') as ai_risk_flags
+        c.metadata->'ai_analysis'->>'sentiment' as ai_sentiment_label,
+        COALESCE(c.metadata->'ai_analysis'->>'category', c.metadata->'ai_analysis'->>'campaign_type') as ai_category_code,
+        c.metadata->'ai_analysis'->>'summary' as ai_summary_text,
+        c.metadata->'ai_analysis'->>'key_points' as ai_key_points,
+        c.metadata->'ai_analysis'->'risk_flags' as ai_risk_flags
       FROM campaigns c
-      JOIN sites s ON s.id = c.site_id
-      LEFT JOIN LATERAL (
-        SELECT ai2.sentiment_label, ai2.category_code, ai2.summary_text, ai2.key_points, ai2.risk_flags
-        FROM campaign_ai_analyses ai2
-        WHERE ai2.campaign_id = c.id
-        ORDER BY ai2.created_at DESC
-        LIMIT 1
-      ) ai ON true
+      LEFT JOIN sites s ON s.id = c.site_id
       ${whereClause}
       ORDER BY c.${sortCol || 'last_seen_at'} ${sortDirection}
       LIMIT $${paramIndex} OFFSET $${paramIndex + 1}

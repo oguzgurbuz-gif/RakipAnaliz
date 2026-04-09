@@ -5,11 +5,11 @@ import { successResponse, errorResponse, handleApiError, getCorsHeaders } from '
 import { NotFoundError } from '@bitalih/shared/errors';
 
 const paramsSchema = z.object({
-  id: z.string(),
+  id: z.string().uuid({ message: 'Invalid report ID format' }),
 });
 
 type WeeklyReportRow = {
-  id: number;
+  id: string;
   period_start: Date;
   period_end: Date;
   summary: string;

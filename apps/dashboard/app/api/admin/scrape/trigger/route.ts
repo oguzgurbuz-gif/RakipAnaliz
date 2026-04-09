@@ -55,28 +55,25 @@ export async function POST(request: NextRequest) {
 
     const jobs: JobRow[] = [];
 
-    for (const site of sites) {
-      const result = await queryOne<JobRow>(`
-        INSERT INTO jobs (type, payload, status, priority, max_attempts, scheduled_at)
-        VALUES ('scrape', $1, 'pending', $2, 3, NOW())
-        RETURNING id::text, type as job_type, payload, status, priority, created_at
-      `, [
-        JSON.stringify({
-          siteCode: site.code,
-          siteId: site.id,
-          siteName: site.name,
-          runType,
-          triggeredBy: 'admin',
-          config: {
-            baseUrl: site.base_url,
-          },
-        }),
-        priority,
-      ]);
+    if (sites.length > 0) {
+      const jobPayloads = sites.map(site => `('scrape', '${JSON.stringify({
+        siteCode: site.code,
+        siteId: site.id,
+        siteName: site.name,
+        runType,
+        triggeredBy: 'admin',
+        config: {
+          baseUrl: site.base_url,
+        },
+      })}', 'pending', ${priority}, 3, NOW())`).join(', ');
 
-      if (result) {
-        jobs.push(result);
-      }
+      const result = await query<JobRow>(`
+        INSERT INTO jobs (type, payload, status, priority, max_attempts, scheduled_at)
+        VALUES ${jobPayloads}
+        RETURNING id::text, type as job_type, payload, status, priority, created_at
+      `);
+
+      jobs.push(...result);
     }
 
     const scrapeRun = await queryOne<{ id: string }>(`

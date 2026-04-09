@@ -466,21 +466,21 @@ export async function insertCampaignSimilarity(
     campaignId: string;
     similarCampaignId: string;
     similarityScore: number;
-    matchedFields: string[];
+    comparisonType?: string;
   }
 ): Promise<string> {
   const result = await db.query(
     `INSERT INTO campaign_similarities (
-      campaign_id, similar_campaign_id, similarity_score, matched_fields
+      campaign_id_1, campaign_id_2, similarity_score, comparison_type
     ) VALUES ($1, $2, $3, $4)
-    ON CONFLICT (campaign_id, similar_campaign_id) DO UPDATE
-    SET similarity_score = $3, matched_fields = $4
+    ON CONFLICT (campaign_id_1, campaign_id_2) DO UPDATE
+    SET similarity_score = $3, comparison_type = $4
     RETURNING id`,
     [
       data.campaignId,
       data.similarCampaignId,
       data.similarityScore,
-      JSON.stringify(data.matchedFields),
+      data.comparisonType ?? null,
     ]
   );
   return result.rows[0].id;
@@ -666,7 +666,7 @@ export async function insertRawSnapshot(
   }
 ): Promise<string> {
   const result = await db.query(
-    `INSERT INTO raw_snapshots (campaign_id, site_id, raw_data, created_at)
+    `INSERT INTO raw_campaign_snapshots (campaign_id, site_id, raw_data, created_at)
     VALUES ($1, $2, $3, NOW())
     RETURNING id`,
     [data.campaignId, data.siteId, JSON.stringify(data.rawData)]
@@ -681,7 +681,7 @@ export async function publishSseEvent(
   payload: Record<string, unknown>
 ): Promise<void> {
   await db.query(
-    `INSERT INTO sse_events (event_type, channel, payload, created_at)
+    `INSERT INTO sse_events (event_type, event_channel, payload, created_at)
     VALUES ($1, $2, $3, NOW())`,
     [eventType, channel, JSON.stringify(payload)]
   );

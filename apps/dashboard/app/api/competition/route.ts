@@ -159,7 +159,7 @@ export async function GET(request: NextRequest) {
 
     const siteRankingsQuery = `
       ${bonusMetricsCte}
-      SELECT 
+      SELECT
         cbv.site_id,
         s.name as site_name,
         s.code as site_code,
@@ -172,9 +172,14 @@ export async function GET(request: NextRequest) {
       FROM campaign_bonus_values cbv
       JOIN sites s ON s.id = cbv.site_id
       GROUP BY cbv.site_id, s.name, s.code
-      ORDER BY ${metric === 'avg_bonus' ? 'avg_bonus' : metric === 'total_bonus' ? 'total_bonus' : metric === 'active_rate' ? 'active_rate' : 'total_campaigns'} DESC
+      ORDER BY CASE
+        WHEN $1 = 'avg_bonus' THEN avg_bonus
+        WHEN $1 = 'total_bonus' THEN total_bonus
+        WHEN $1 = 'active_rate' THEN active_rate
+        ELSE total_campaigns
+      END DESC
     `;
-    const siteRankingsResult = await query<SiteRanking>(siteRankingsQuery);
+    const siteRankingsResult = await query<SiteRanking>(siteRankingsQuery, [metric || 'campaigns']);
 
     const bestDealsQuery = `
       ${bonusMetricsCte}

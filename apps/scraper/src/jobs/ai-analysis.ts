@@ -613,6 +613,7 @@ async function storeAiAnalysis(
     logger.error(`Failed to store AI analysis for campaign ${campaignId}`, {
       error: error instanceof Error ? error.message : 'Unknown error',
     });
+    throw error;
   }
 }
 
@@ -688,6 +689,7 @@ async function storeComprehensiveAiAnalysis(
     logger.error(`Failed to store comprehensive AI analysis for campaign ${campaignId}`, {
       error: error instanceof Error ? error.message : 'Unknown error',
     });
+    throw error;
   }
 }
 

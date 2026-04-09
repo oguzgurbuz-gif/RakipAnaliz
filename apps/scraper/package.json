@@ -12,7 +12,9 @@
     "migrate": "tsx src/db/migrate.ts",
     "seed": "tsx src/db/seed.ts",
     "scrape": "tsx src/cli.ts",
-    "clean": "rm -rf dist"
+    "clean": "rm -rf dist",
+    "test": "tsx --test",
+    "test:smoke": "tsx src/test/smoke-test.ts"
   },
   "dependencies": {
     "@bitalih/shared": "workspace:*",

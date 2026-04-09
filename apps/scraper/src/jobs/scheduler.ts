@@ -104,22 +104,32 @@ export class JobScheduler {
       return;
     }
 
-    if (this.activeJobs.size >= this.maxConcurrentJobs) {
+    const availableSlots = this.maxConcurrentJobs - this.activeJobs.size;
+    if (availableSlots <= 0) {
       return;
     }
 
     const db = getDb();
-    const pendingJobs = await queries.getPendingJobs(db, this.maxConcurrentJobs - this.activeJobs.size);
+    const pendingJobs = await queries.getPendingJobs(db, availableSlots);
 
-    for (const row of pendingJobs) {
-      const job = mapRowToJob(row);
-
-      if (this.activeJobs.has(job.id)) {
-        continue;
-      }
-
-      await this.processJob(job);
+    if (pendingJobs.length === 0) {
+      return;
     }
+
+    const jobPromises = pendingJobs.map((row) => {
+      const job = mapRowToJob(row);
+      if (this.activeJobs.has(job.id)) {
+        return Promise.resolve();
+      }
+      return this.processJob(job).catch((error) => {
+        logger.error('Job processing threw uncaught error', {
+          jobId: job.id,
+          error: error instanceof Error ? error.message : 'Unknown error',
+        });
+      });
+    });
+
+    await Promise.all(jobPromises);
   }
 
   private async processJob(job: JobRecord): Promise<void> {
@@ -202,8 +212,8 @@ export class JobScheduler {
 
   async getQueueDepth(): Promise<number> {
     const db = getDb();
-    const jobs = await queries.getPendingJobs(db, 1000);
-    return jobs.length + this.activeJobs.size;
+    const result = await db.query<{ count: string }>('SELECT COUNT(*) as count FROM jobs WHERE status = $1', ['pending']);
+    return parseInt(result.rows[0]?.count || '0', 10) + this.activeJobs.size;
   }
 
   isSchedulerRunning(): boolean {

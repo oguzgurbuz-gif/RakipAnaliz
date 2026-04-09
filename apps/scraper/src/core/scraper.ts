@@ -11,7 +11,7 @@ import { getInvalidCampaignReason } from '../normalizers/text';
 
 export class ScrapeManager {
   private browser: Browser | null = null;
-  private isRunning: boolean = false;
+  private activeSites: Map<string, boolean> = new Map();
   private activeRuns: Map<string, ScrapeRun> = new Map();
 
   async initialize(): Promise<void> {
@@ -20,7 +20,7 @@ export class ScrapeManager {
 
   async shutdown(): Promise<void> {
     logger.info('Shutting down ScrapeManager');
-    this.isRunning = false;
+    this.activeSites.clear();
 
     for (const [siteCode, run] of this.activeRuns) {
       if (run.status === 'running') {
@@ -41,15 +41,15 @@ export class ScrapeManager {
   }
 
   async processSite(siteCode: string, config: SiteConfig): Promise<ScrapeRun> {
-    if (this.isRunning) {
-      throw new Error(`ScrapeManager is already running a scrape operation`);
+    if (this.activeSites.get(siteCode)) {
+      throw new Error(`ScrapeManager is already running a scrape operation for site: ${siteCode}`);
     }
 
-    this.isRunning = true;
+    this.activeSites.set(siteCode, true);
     const startTime = Date.now();
 
     const run: ScrapeRun = {
-      id: Date.now(),
+      id: crypto.randomUUID(),
       siteCode,
       status: 'running',
       startedAt: new Date(),
@@ -95,7 +95,7 @@ export class ScrapeManager {
     } finally {
       run.completedAt = new Date();
       const duration = Date.now() - startTime;
-      this.isRunning = false;
+      this.activeSites.delete(siteCode);
 
       logger.info(`Scrape completed for site: ${siteCode}`, {
         siteCode,
@@ -204,7 +204,7 @@ export class ScrapeManager {
       });
 
       const existingCampaigns = await this.getExistingCampaignsForSite(run.siteCode);
-      for (const [fp] of existingCampaigns) {
+      for (const fp of Object.keys(existingCampaigns)) {
         tracking.previouslyVisible.add(fp);
       }
 
@@ -231,7 +231,7 @@ export class ScrapeManager {
           } else if (result.action === 'update') {
             run.updatedCampaigns++;
             tracking.currentlyVisible.add(normalized.fingerprint);
-          } else if (result.action === 'skip') {
+          } else if (result.action === 'skip' || result.action === 'ignore') {
             run.unchanged++;
             tracking.currentlyVisible.add(normalized.fingerprint);
           }
@@ -307,6 +307,7 @@ export class ScrapeManager {
         break;
 
       case 'skip':
+      case 'ignore':
         if (dedupResult.campaign) {
           await markCampaignSeen(dedupResult.campaign.id);
         }
@@ -397,8 +398,14 @@ export class ScrapeManager {
     }
   }
 
-  private async getExistingCampaignsForSite(siteCode: string): Promise<Map<string, import('../types').Campaign>> {
-    return await getActiveCampaignsBySite(siteCode);
+  private async getExistingCampaignsForSite(siteCode: string): Promise<Record<string, import('../types').Campaign>> {
+    const campaigns = await getActiveCampaignsBySite(siteCode);
+    const map: Record<string, import('../types').Campaign> = {};
+    for (const campaign of campaigns) {
+      const fp = campaign.fingerprint as string;
+      map[fp] = campaign as import('../types').Campaign;
+    }
+    return map;
   }
 
   private async updateSiteStats(siteCode: string, run: ScrapeRun): Promise<void> {
@@ -414,7 +421,7 @@ export class ScrapeManager {
   }
 
   isCurrentlyRunning(): boolean {
-    return this.isRunning;
+    return this.activeSites.size > 0;
   }
 
   getActiveRunCount(): number {

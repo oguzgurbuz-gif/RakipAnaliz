@@ -49,28 +49,25 @@ export async function POST(request: NextRequest) {
 
     const jobs: JobRow[] = [];
 
-    for (const campaign of validCampaigns) {
-      const result = await queryOne<JobRow>(`
-        INSERT INTO jobs (type, payload, status, priority, max_attempts, scheduled_at)
-        VALUES ('ai-analysis', $1, 'pending', $2, 3, NOW())
-        RETURNING id, type, payload, status, priority, created_at
-      `, [
-        JSON.stringify({
-          campaignId: campaign.id,
-          title: campaign.title,
-          description: campaign.body,
-          termsUrl: null,
-          termsText: null,
-          priority: priority >= 75 ? 'high' : priority >= 25 ? 'medium' : 'low',
-          validFrom: campaign.valid_from,
-          validTo: campaign.valid_to,
-        }),
-        priority,
-      ]);
+    if (validCampaigns.length > 0) {
+      const jobPayloads = validCampaigns.map(c => `('ai-analysis', '${JSON.stringify({
+        campaignId: c.id,
+        title: c.title,
+        description: c.body,
+        termsUrl: null,
+        termsText: null,
+        priority: priority >= 75 ? 'high' : priority >= 25 ? 'medium' : 'low',
+        validFrom: c.valid_from,
+        validTo: c.valid_to,
+      })}', 'pending', ${priority}, 3, NOW())`).join(', ');
 
-      if (result) {
-        jobs.push(result);
-      }
+      const result = await query<JobRow>(`
+        INSERT INTO jobs (type, payload, status, priority, max_attempts, scheduled_at)
+        VALUES ${jobPayloads}
+        RETURNING id, type, payload, status, priority, created_at
+      `);
+
+      jobs.push(...result);
     }
 
     await query(`

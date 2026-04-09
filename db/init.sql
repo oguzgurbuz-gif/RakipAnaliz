@@ -27,7 +27,9 @@ CREATE TABLE IF NOT EXISTS sites (
     last_scraped_at TIMESTAMP,
     last_scrape_status VARCHAR(32),
     last_scrape_error TEXT,
-    last_scrape_duration INTEGER
+    last_scrape_duration INTEGER,
+    campaign_count INTEGER DEFAULT 0,
+    last_visibility_check TIMESTAMPTZ
 );
 
 CREATE INDEX IF NOT EXISTS idx_sites_code ON sites(code);
@@ -38,13 +40,15 @@ CREATE INDEX IF NOT EXISTS idx_sites_is_active ON sites(is_active);
 -- ============================================================================
 CREATE TABLE IF NOT EXISTS scrape_runs (
     id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+    site_id UUID REFERENCES sites(id),
     status VARCHAR(32) NOT NULL DEFAULT 'running',
     started_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
     completed_at TIMESTAMPTZ,
-    total_sites INTEGER DEFAULT 0,
-    successful_sites INTEGER DEFAULT 0,
-    failed_sites INTEGER DEFAULT 0,
-    total_campaigns INTEGER DEFAULT 0,
+    cards_found INTEGER DEFAULT 0,
+    new_campaigns INTEGER DEFAULT 0,
+    updated_campaigns INTEGER DEFAULT 0,
+    unchanged INTEGER DEFAULT 0,
+    errors TEXT,
     created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
     updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
@@ -187,7 +191,8 @@ CREATE TABLE IF NOT EXISTS campaign_similarities (
     campaign_id_2 UUID NOT NULL REFERENCES campaigns(id) ON DELETE CASCADE,
     similarity_score NUMERIC(5,4) NOT NULL,
     comparison_type VARCHAR(50),
-    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    UNIQUE(campaign_id_1, campaign_id_2)
 );
 
 CREATE INDEX IF NOT EXISTS idx_campaign_similarities_campaign_1 ON campaign_similarities(campaign_id_1);

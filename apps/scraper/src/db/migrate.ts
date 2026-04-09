@@ -13,6 +13,7 @@ async function runMigrations() {
     '003_fix_schema.sql',
     '004_fix_bitalih_schema.sql',
     '005_add_performance_indexes.sql',
+    '006_add_search_indexes.sql',
   ];
   
   console.log('Running migrations...');

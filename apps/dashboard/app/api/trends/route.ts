@@ -142,7 +142,7 @@ export async function GET(request: NextRequest) {
     `;
 
     const weeklyTopCategoriesQuery = `
-      SELECT 
+      SELECT
         COALESCE(
           NULLIF(c.metadata->'ai_analysis'->>'campaign_type', ''),
           NULLIF(c.metadata->'ai_analysis'->>'category', ''),
@@ -151,7 +151,6 @@ export async function GET(request: NextRequest) {
         COUNT(*) as count
       FROM campaigns c
       WHERE c.created_at >= $1
-        AND c.created_at >= NOW() - INTERVAL '7 days'
         AND ${qualityFilter}
       GROUP BY 1
       ORDER BY count DESC
