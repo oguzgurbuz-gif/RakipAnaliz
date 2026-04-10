@@ -15,17 +15,24 @@ import {
   GitCompare,
   TrendingUp,
   BarChart3,
+  CalendarRange,
+  Bell,
+  AlertTriangle,
 } from 'lucide-react'
 
 const navItems = [
   { href: '/', label: 'Dashboard', icon: LayoutDashboard },
   { href: '/campaigns', label: 'Kampanyalar', icon: Megaphone },
+  { href: '/calendar', label: 'Takvim', icon: CalendarRange },
   { href: '/compare', label: 'Karşılaştır', icon: GitCompare },
   { href: '/competition', label: 'Rekabet Analizi', icon: BarChart3 },
   { href: '/gallery', label: 'Galeri', icon: Image },
   { href: '/reports', label: 'Raporlar', icon: FileText },
   { href: '/trends', label: 'Trendler', icon: TrendingUp },
   { href: '/runs', label: 'Scrape İşlemleri', icon: ListChecks },
+  { href: '/quality', label: 'Veri Kalitesi', icon: AlertTriangle },
+  { href: '/admin/jobs', label: 'İş Yönetimi', icon: ListChecks },
+  { href: '/notifications', label: 'Bildirimler', icon: Bell },
 ]
 
 export function Sidebar() {

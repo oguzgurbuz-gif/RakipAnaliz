@@ -37,9 +37,9 @@ export async function GET(request: NextRequest) {
       changed_count: string;
     }>(`
       SELECT 
-        COUNT(CASE WHEN status = 'active' AND (valid_from >= $1 AND valid_from <= $2 OR (valid_from IS NULL AND first_seen_at >= $1 AND first_seen_at <= $2)) THEN 1 END) as started_count,
+        COUNT(CASE WHEN status = 'active' AND (valid_from >= $1 AND valid_from <= $2 OR (valid_from IS NULL AND created_at >= $1 AND created_at <= $2)) THEN 1 END) as started_count,
         COUNT(CASE WHEN status = 'active' AND valid_to >= $1 AND valid_to <= $2 THEN 1 END) as ended_count,
-        COUNT(CASE WHEN status = 'active' AND (valid_from <= $2 AND (valid_to IS NULL OR valid_to >= $1) OR (valid_from IS NULL AND first_seen_at <= $2)) THEN 1 END) as active_count,
+        COUNT(CASE WHEN status = 'active' AND (valid_from <= $2 AND (valid_to IS NULL OR valid_to >= $1) OR (valid_from IS NULL AND created_at <= $2)) THEN 1 END) as active_count,
         COUNT(CASE WHEN status = 'pending' OR status = 'hidden' THEN 1 END) as passive_count,
         COUNT(CASE WHEN status = 'updated' AND updated_at >= $1 AND updated_at <= $2 THEN 1 END) as changed_count
       FROM campaigns
@@ -47,30 +47,21 @@ export async function GET(request: NextRequest) {
          OR (valid_to >= $1 AND valid_to <= $2)
          OR (valid_from <= $2 AND (valid_to IS NULL OR valid_to >= $1))
          OR (updated_at >= $1 AND updated_at <= $2)
-         OR (valid_from IS NULL AND first_seen_at >= $1 AND first_seen_at <= $2)
+         OR (valid_from IS NULL AND created_at >= $1 AND created_at <= $2)
     `, [dateFrom, dateTo]);
 
     const topCategoriesRaw = await query<{ category: string; count: string }>(`
-      WITH latest_ai AS (
-        SELECT DISTINCT ON (campaign_id)
-          campaign_id,
-          category_code
-        FROM campaign_ai_analyses
-        ORDER BY campaign_id, created_at DESC
-      )
       SELECT 
         COALESCE(
           NULLIF(c.metadata->'ai_analysis'->>'campaign_type', ''),
-          NULLIF(latest_ai.category_code, ''),
           NULLIF(c.metadata->'ai_analysis'->>'category', ''),
           'unknown'
         ) as category,
         COUNT(*) as count
       FROM campaigns c
-      LEFT JOIN latest_ai ON latest_ai.campaign_id = c.id
       WHERE (
             (c.valid_from >= $1 AND c.valid_from <= $2)
-         OR (c.valid_from IS NULL AND c.first_seen_at >= $1 AND c.first_seen_at <= $2)
+         OR (c.valid_from IS NULL AND c.created_at >= $1 AND c.created_at <= $2)
       )
         AND COALESCE(BTRIM(c.title), '') <> ''
         AND LOWER(BTRIM(c.title)) NOT IN ('kampanyalar', 'güncel kampanyalar')
@@ -89,7 +80,7 @@ export async function GET(request: NextRequest) {
       FROM campaigns c
       JOIN sites s ON s.id = c.site_id
       WHERE (c.valid_from >= $1 AND c.valid_from <= $2)
-         OR (c.valid_from IS NULL AND c.first_seen_at >= $1 AND c.first_seen_at <= $2)
+         OR (c.valid_from IS NULL AND c.created_at >= $1 AND c.created_at <= $2)
       GROUP BY s.name
       ORDER BY count DESC
       LIMIT 5

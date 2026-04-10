@@ -293,6 +293,8 @@ export async function recalculateCampaignStatus(campaignId: string): Promise<voi
   await queries.updateCampaignStatus(db, campaignId, newStatus, newVisibility);
 }
 
+export { insertScrapeRun, updateScrapeRun } from './queries';
+
 function mapRowToCampaign(row: Record<string, unknown>): Campaign {
   return {
     id: row.id as string,
@@ -338,4 +340,28 @@ function mapRowToVersion(row: Record<string, unknown>): CampaignVersion {
     diff: null,
     createdAt: new Date(row.created_at as string),
   };
+}
+
+export async function insertErrorLog(
+  errorCode: string,
+  errorMessage: string,
+  context?: Record<string, unknown>,
+  stackTrace?: string,
+  severity: 'debug' | 'info' | 'warn' | 'error' = 'error'
+): Promise<void> {
+  if (severity === 'debug' || severity === 'info') {
+    return; // Only log warn and error to DB
+  }
+  const db = getDb();
+  try {
+    await queries.insertErrorLog(db, {
+      errorCode,
+      errorMessage,
+      context,
+      stackTrace,
+      severity,
+    });
+  } catch (err) {
+    console.error('Failed to insert error log to DB:', err);
+  }
 }

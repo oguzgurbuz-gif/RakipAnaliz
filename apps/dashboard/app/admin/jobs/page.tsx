@@ -1,0 +1,251 @@
+'use client'
+
+import { useQuery } from '@tanstack/react-query'
+import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
+import { Badge } from '@/components/ui/badge'
+import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table'
+import { PageHeader } from '@/components/ui/page-header'
+import { SectionHeader } from '@/components/ui/section-header'
+import { RefreshCw, Loader2 } from 'lucide-react'
+
+type JobRow = {
+  id: string
+  type: string
+  status: string
+  priority: number
+  attempts: number
+  max_attempts: number
+  scheduled_at: string
+  started_at: string | null
+  completed_at: string | null
+  error: string | null
+  created_at: string
+}
+
+type ScrapeRunRow = {
+  id: string
+  run_type: string
+  trigger_source: string
+  status: string
+  total_sites: number
+  completed_sites: number
+  failed_sites: number
+  inserted_count: number
+  updated_count: number
+  started_at: string
+  completed_at: string | null
+}
+
+type AdminJobsData = {
+  queueDepth: number
+  runningScrapeRuns: number
+  completedScrapeRuns: number
+  scrapeRuns: ScrapeRunRow[]
+  jobs: JobRow[]
+}
+
+export default function AdminJobsPage() {
+  const { data, isLoading, refetch } = useQuery<AdminJobsData>({
+    queryKey: ['admin-jobs'],
+    queryFn: async () => {
+      const res = await fetch('/api/admin/jobs')
+      if (!res.ok) throw new Error('Failed to fetch')
+      return res.json()
+    },
+    refetchInterval: 10000,
+  })
+
+  const getJobStatusColor = (status: string) => {
+    switch (status) {
+      case 'completed': return 'bg-green-100 text-green-800'
+      case 'failed': return 'bg-red-100 text-red-800'
+      case 'running': return 'bg-blue-100 text-blue-800'
+      case 'pending': return 'bg-yellow-100 text-yellow-800'
+      default: return 'bg-gray-100 text-gray-800'
+    }
+  }
+
+  const formatDuration = (start: string | null, end: string | null) => {
+    if (!start) return '-'
+    const endTime = end ? new Date(end).getTime() : Date.now()
+    const durationMs = endTime - new Date(start).getTime()
+    if (durationMs < 1000) return `${durationMs}ms`
+    if (durationMs < 60000) return `${(durationMs / 1000).toFixed(1)}s`
+    return `${(durationMs / 60000).toFixed(1)}m`
+  }
+
+  return (
+    <div className="min-h-screen bg-background">
+      <PageHeader
+        title="İş Yönetimi"
+        description="Aktif iş kuyruğunu, scrape çalışmalarını ve sistem sağlığını izleyin."
+        actions={
+          <button
+            onClick={() => refetch()}
+            className="inline-flex items-center gap-2 rounded-lg border border-border bg-background px-3 py-2 text-sm hover:bg-muted"
+          >
+            <RefreshCw className="h-4 w-4" />
+            Yenile
+          </button>
+        }
+      />
+
+      <main className="space-y-6 p-6">
+        <div className="grid gap-4 md:grid-cols-3">
+          <Card>
+            <CardContent className="p-4">
+              <div className="text-sm text-muted-foreground">Bekleyen İşler</div>
+              <div className="text-2xl font-bold">{data?.queueDepth ?? '-'}</div>
+            </CardContent>
+          </Card>
+          <Card>
+            <CardContent className="p-4">
+              <div className="text-sm text-muted-foreground">Aktif Scrape Runs</div>
+              <div className="text-2xl font-bold">{data?.runningScrapeRuns ?? '-'}</div>
+            </CardContent>
+          </Card>
+          <Card>
+            <CardContent className="p-4">
+              <div className="text-sm text-muted-foreground">Toplam Tamamlanan</div>
+              <div className="text-2xl font-bold">{data?.completedScrapeRuns ?? '-'}</div>
+            </CardContent>
+          </Card>
+        </div>
+
+        <Card>
+          <CardHeader>
+            <SectionHeader
+              title="Son Scrape Çalışmaları"
+              description="Son 50 scrape run'ın durumu ve istatistikleri."
+            />
+          </CardHeader>
+          <CardContent>
+            {isLoading ? (
+              <div className="flex items-center justify-center py-8">
+                <Loader2 className="h-6 w-6 animate-spin text-muted-foreground" />
+              </div>
+            ) : (
+              <div className="overflow-x-auto">
+                <Table>
+                  <TableHeader>
+                    <TableRow>
+                      <TableHead>ID</TableHead>
+                      <TableHead>Tür</TableHead>
+                      <TableHead>Kaynak</TableHead>
+                      <TableHead>Durum</TableHead>
+                      <TableHead className="text-right">Siteler</TableHead>
+                      <TableHead className="text-right">Tamamlanan</TableHead>
+                      <TableHead className="text-right">Başarısız</TableHead>
+                      <TableHead className="text-right">Eklenen</TableHead>
+                      <TableHead className="text-right">Güncellenen</TableHead>
+                      <TableHead>Süre</TableHead>
+                    </TableRow>
+                  </TableHeader>
+                  <TableBody>
+                    {data?.scrapeRuns?.map((run) => (
+                      <TableRow key={run.id}>
+                        <TableCell className="font-mono text-xs">{run.id.slice(0, 8)}...</TableCell>
+                        <TableCell>{run.run_type}</TableCell>
+                        <TableCell>{run.trigger_source}</TableCell>
+                        <TableCell>
+                          <Badge className={getJobStatusColor(run.status)}>
+                            {run.status}
+                          </Badge>
+                        </TableCell>
+                        <TableCell className="text-right">{run.total_sites}</TableCell>
+                        <TableCell className="text-right">{run.completed_sites}</TableCell>
+                        <TableCell className="text-right">{run.failed_sites}</TableCell>
+                        <TableCell className="text-right">{run.inserted_count}</TableCell>
+                        <TableCell className="text-right">{run.updated_count}</TableCell>
+                        <TableCell className="text-muted-foreground text-xs">
+                          {formatDuration(run.started_at, run.completed_at)}
+                        </TableCell>
+                      </TableRow>
+                    ))}
+                    {(!data?.scrapeRuns || data.scrapeRuns.length === 0) && (
+                      <TableRow>
+                        <TableCell colSpan={10} className="text-center py-8 text-muted-foreground">
+                          Henüz scrape run yok
+                        </TableCell>
+                      </TableRow>
+                    )}
+                  </TableBody>
+                </Table>
+              </div>
+            )}
+          </CardContent>
+        </Card>
+
+        <Card>
+          <CardHeader>
+            <SectionHeader
+              title="Son İşler (Jobs)"
+              description="Son 100 işin durumu. İşler otomatik olarak 10 saniyede yenilenir."
+            />
+          </CardHeader>
+          <CardContent>
+            {isLoading ? (
+              <div className="flex items-center justify-center py-8">
+                <Loader2 className="h-6 w-6 animate-spin text-muted-foreground" />
+              </div>
+            ) : (
+              <div className="overflow-x-auto">
+                <Table>
+                  <TableHeader>
+                    <TableRow>
+                      <TableHead>ID</TableHead>
+                      <TableHead>Tür</TableHead>
+                      <TableHead>Durum</TableHead>
+                      <TableHead className="text-right">öncelik</TableHead>
+                      <TableHead className="text-right">Deneme</TableHead>
+                      <TableHead>Planlanan</TableHead>
+                      <TableHead>Başlayan</TableHead>
+                      <TableHead>Tamamlanan</TableHead>
+                      <TableHead>Hata</TableHead>
+                    </TableRow>
+                  </TableHeader>
+                  <TableBody>
+                    {data?.jobs?.map((job) => (
+                      <TableRow key={job.id}>
+                        <TableCell className="font-mono text-xs">{job.id.slice(0, 8)}...</TableCell>
+                        <TableCell className="font-medium">{job.type}</TableCell>
+                        <TableCell>
+                          <Badge className={getJobStatusColor(job.status)}>
+                            {job.status}
+                          </Badge>
+                        </TableCell>
+                        <TableCell className="text-right">{job.priority}</TableCell>
+                        <TableCell className="text-right">
+                          {job.attempts}/{job.max_attempts}
+                        </TableCell>
+                        <TableCell className="text-muted-foreground text-xs">
+                          {job.scheduled_at ? new Date(job.scheduled_at).toLocaleString('tr-TR') : '-'}
+                        </TableCell>
+                        <TableCell className="text-muted-foreground text-xs">
+                          {job.started_at ? new Date(job.started_at).toLocaleString('tr-TR') : '-'}
+                        </TableCell>
+                        <TableCell className="text-muted-foreground text-xs">
+                          {job.completed_at ? new Date(job.completed_at).toLocaleString('tr-TR') : '-'}
+                        </TableCell>
+                        <TableCell className="max-w-[200px] truncate text-xs text-red-600">
+                          {job.error || '-'}
+                        </TableCell>
+                      </TableRow>
+                    ))}
+                    {(!data?.jobs || data.jobs.length === 0) && (
+                      <TableRow>
+                        <TableCell colSpan={9} className="text-center py-8 text-muted-foreground">
+                          Henüz iş yok
+                        </TableCell>
+                      </TableRow>
+                    )}
+                  </TableBody>
+                </Table>
+              </div>
+            )}
+          </CardContent>
+        </Card>
+      </main>
+    </div>
+  )
+}

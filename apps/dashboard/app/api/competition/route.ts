@@ -173,10 +173,10 @@ export async function GET(request: NextRequest) {
       JOIN sites s ON s.id = cbv.site_id
       GROUP BY cbv.site_id, s.name, s.code
       ORDER BY CASE
-        WHEN $1 = 'avg_bonus' THEN avg_bonus
-        WHEN $1 = 'total_bonus' THEN total_bonus
-        WHEN $1 = 'active_rate' THEN active_rate
-        ELSE total_campaigns
+        WHEN $1 = 'avg_bonus' THEN COALESCE(AVG(cbv.effective_bonus_amount), 0)
+        WHEN $1 = 'total_bonus' THEN COALESCE(SUM(cbv.effective_bonus_amount), 0)
+        WHEN $1 = 'active_rate' THEN COUNT(*) FILTER (WHERE cbv.status = 'active')::numeric / NULLIF(COUNT(*), 0)::numeric
+        ELSE COUNT(*)
       END DESC
     `;
     const siteRankingsResult = await query<SiteRanking>(siteRankingsQuery, [metric || 'campaigns']);

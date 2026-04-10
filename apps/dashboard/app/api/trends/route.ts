@@ -51,25 +51,15 @@ export async function GET(request: NextRequest) {
     `;
 
     const categoryTrendQuery = `
-      WITH latest_ai AS (
-        SELECT DISTINCT ON (ai2.campaign_id)
-          ai2.campaign_id,
-          ai2.category_code,
-          ai2.sentiment_label
-        FROM campaign_ai_analyses ai2
-        ORDER BY ai2.campaign_id, ai2.created_at DESC
-      )
       SELECT 
         DATE(c.created_at) as date,
         COALESCE(
           NULLIF(c.metadata->'ai_analysis'->>'campaign_type', ''),
           NULLIF(c.metadata->'ai_analysis'->>'category', ''),
-          NULLIF(ai.category_code, ''),
           'unknown'
         ) as category,
         COUNT(*) as count
       FROM campaigns c
-      LEFT JOIN latest_ai ai ON ai.campaign_id = c.id
       WHERE c.created_at >= $1
         AND ${qualityFilter}
       GROUP BY DATE(c.created_at), 2

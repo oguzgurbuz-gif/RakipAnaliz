@@ -1,7 +1,8 @@
 'use client'
 
 import { useQuery } from '@tanstack/react-query'
-import { useState } from 'react'
+import { useState, useCallback } from 'react'
+import { useSearchParams, useRouter, usePathname } from 'next/navigation'
 import { Input } from '@/components/ui/input'
 import { Button } from '@/components/ui/button'
 import { Skeleton } from '@/components/ui/skeleton'
@@ -11,8 +12,39 @@ import { PageHeader } from '@/components/ui/page-header'
 import { fetchReportSummary } from '@/lib/api'
 
 export default function ReportsSummaryPage() {
-  const [dateFrom, setDateFrom] = useState('')
-  const [dateTo, setDateTo] = useState('')
+  const searchParams = useSearchParams()
+  const router = useRouter()
+  const pathname = usePathname()
+
+  const getParam = (key: string, defaultValue: string = ''): string => {
+    if (!searchParams) return defaultValue
+    return searchParams.get(key) || defaultValue
+  }
+
+  const [dateFrom, setDateFrom] = useState(getParam('from'))
+  const [dateTo, setDateTo] = useState(getParam('to'))
+
+  const updateUrl = useCallback((updates: Record<string, string | undefined>) => {
+    const params = new URLSearchParams(searchParams?.toString() || '')
+    for (const [key, value] of Object.entries(updates)) {
+      if (value === undefined || value === '') {
+        params.delete(key)
+      } else {
+        params.set(key, value)
+      }
+    }
+    router.replace(`${pathname}?${params.toString()}`)
+  }, [searchParams, router, pathname])
+
+  const handleDateFromChange = (value: string) => {
+    setDateFrom(value)
+    updateUrl({ from: value || undefined })
+  }
+
+  const handleDateToChange = (value: string) => {
+    setDateTo(value)
+    updateUrl({ to: value || undefined })
+  }
 
   const { data, isLoading, error, refetch } = useQuery({
     queryKey: ['report-summary', dateFrom, dateTo],
@@ -36,7 +68,7 @@ export default function ReportsSummaryPage() {
             <Input
               type="date"
               value={dateFrom}
-              onChange={(e) => setDateFrom(e.target.value)}
+              onChange={(e) => handleDateFromChange(e.target.value)}
               className="w-40 bg-background"
             />
           </div>
@@ -45,7 +77,7 @@ export default function ReportsSummaryPage() {
             <Input
               type="date"
               value={dateTo}
-              onChange={(e) => setDateTo(e.target.value)}
+              onChange={(e) => handleDateToChange(e.target.value)}
               className="w-40 bg-background"
             />
           </div>

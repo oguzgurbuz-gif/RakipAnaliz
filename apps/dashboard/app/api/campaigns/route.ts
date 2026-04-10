@@ -126,7 +126,7 @@ export async function GET(request: NextRequest) {
     }
 
     if (params.category) {
-      whereClause += ` AND COALESCE(ai.category_code, c.metadata->'ai_analysis'->>'category', c.metadata->'ai_analysis'->>'campaign_type') = $${paramIndex}`;
+      whereClause += ` AND COALESCE(c.metadata->'ai_analysis'->>'category', c.metadata->'ai_analysis'->>'campaign_type') = $${paramIndex}`;
       filterParams.push(params.category);
       paramIndex++;
     }
@@ -171,10 +171,10 @@ export async function GET(request: NextRequest) {
 
     whereClause += dateFilter.clause;
 
-    const validSortColumns = ['created_at', 'updated_at', 'valid_from', 'valid_to', 'title', 'status'];
-    const sortColumn = validSortColumns.includes(sort || '') ? sort : 'last_seen_at';
-    const sortDirection = sort?.startsWith('-') ? 'ASC' : 'DESC';
-    const sortCol = sort?.startsWith('-') ? sort.slice(1) : sortColumn;
+    const validSortColumns = ['created_at', 'updated_at', 'valid_from', 'valid_to', 'title', 'status', 'last_seen_at'];
+    const sortColumn = sort && validSortColumns.includes(sort) ? sort : 'created_at';
+    const sortDirection = sortColumn.startsWith('-') ? 'ASC' : 'DESC';
+    const sortCol = sortColumn.startsWith('-') ? sortColumn.slice(1) : sortColumn;
 
     const countQuery = `
       SELECT COUNT(DISTINCT c.id) as total
@@ -212,7 +212,7 @@ export async function GET(request: NextRequest) {
       FROM campaigns c
       LEFT JOIN sites s ON s.id = c.site_id
       ${whereClause}
-      ORDER BY c.${sortCol || 'last_seen_at'} ${sortDirection}
+      ORDER BY c.${sortCol === 'first_seen_at' ? 'created_at' : sortCol} ${sortDirection}
       LIMIT $${paramIndex} OFFSET $${paramIndex + 1}
     `;
 

@@ -1,7 +1,8 @@
 'use client'
 
-import { useQuery } from '@tanstack/react-query'
-import { useState, useEffect } from 'react'
+import { useQuery, useQueryClient } from '@tanstack/react-query'
+import { useState, useEffect, useCallback } from 'react'
+import { useSearchParams, useRouter, usePathname } from 'next/navigation'
 import { CampaignCard } from '@/components/campaign/campaign-card'
 import { CampaignTable } from '@/components/campaign/campaign-table'
 import { CampaignFilters } from '@/components/campaign/campaign-filters'
@@ -12,16 +13,67 @@ import { InsightCard } from '@/components/ui/insight-card'
 import { PageHeader } from '@/components/ui/page-header'
 import { getCampaignQualitySignals } from '@/lib/campaign-presentation'
 import { fetchCampaigns } from '@/lib/api'
+import { useSSE } from '@/hooks/useSSE'
 import type { CampaignFilters as CampaignFiltersType, Campaign } from '@/types'
 import { ChevronLeft, ChevronRight, Star, Download, LayoutGrid, TableProperties, CalendarClock, ShieldAlert, Activity } from 'lucide-react'
 
 export default function CampaignsPage() {
-  const [filters, setFilters] = useState<CampaignFiltersType>({})
-  const [page, setPage] = useState(1)
+  const searchParams = useSearchParams()
+  const router = useRouter()
+  const pathname = usePathname()
+  const queryClient = useQueryClient()
+
+  const getParam = (key: string, defaultValue: string = ''): string => {
+    if (!searchParams) return defaultValue
+    return searchParams.get(key) || defaultValue
+  }
+
+  const [filters, setFilters] = useState<CampaignFiltersType>({
+    site: getParam('siteId') || undefined,
+    status: getParam('status') || undefined,
+    sentiment: getParam('sentiment') || undefined,
+    dateMode: getParam('dateMode') || undefined,
+    dateFrom: getParam('from') || undefined,
+    dateTo: getParam('to') || undefined,
+    search: getParam('search') || undefined,
+    sort: getParam('sort') || undefined,
+    campaign_type: getParam('campaignType') || undefined,
+  })
+  const [page, setPage] = useState(parseInt(getParam('page', '1'), 10))
   const [showFavoritesOnly, setShowFavoritesOnly] = useState(false)
   const [favorites, setFavorites] = useState<string[]>([])
   const [sites, setSites] = useState<{id: string, name: string}[]>([])
   const [viewMode, setViewMode] = useState<'table' | 'cards'>('table')
+
+  useSSE(useCallback(() => {
+    queryClient.invalidateQueries({ queryKey: ['campaigns'] })
+  }, [queryClient]))
+
+  const updateUrl = useCallback((updates: Record<string, string | undefined | number>) => {
+    const params = new URLSearchParams(searchParams?.toString() || '')
+    for (const [key, value] of Object.entries(updates)) {
+      if (value === undefined || value === '' || value === 1) {
+        params.delete(key)
+      } else {
+        params.set(key, String(value))
+      }
+    }
+    router.replace(`${pathname}?${params.toString()}`)
+  }, [searchParams, router, pathname])
+
+  const handleFiltersChange = (newFilters: CampaignFiltersType) => {
+    setFilters(newFilters)
+    setPage(1)
+    updateUrl({
+      ...Object.fromEntries(Object.entries(newFilters).filter(([, v]) => v !== undefined && v !== '')),
+      page: undefined,
+    })
+  }
+
+  const handlePageChange = (newPage: number) => {
+    setPage(newPage)
+    updateUrl({ page: newPage })
+  }
 
   const { data: sitesData } = useQuery({
     queryKey: ['sites'],
@@ -54,11 +106,6 @@ export default function CampaignsPage() {
     queryKey: ['campaigns', filters, page],
     queryFn: () => fetchCampaigns({ ...filters, page, limit: 20 }),
   })
-
-  const handleFiltersChange = (newFilters: CampaignFiltersType) => {
-    setFilters(newFilters)
-    setPage(1)
-  }
 
   const activeFilterEntries = Object.entries(filters).filter(([, value]) => value !== undefined && value !== '')
   const visibleCampaigns = showFavoritesOnly
@@ -194,7 +241,7 @@ export default function CampaignsPage() {
             <Button
               variant="outline"
               size="sm"
-              onClick={() => setPage((p) => Math.max(1, p - 1))}
+              onClick={() => handlePageChange(Math.max(1, page - 1))}
               disabled={page <= 1}
             >
               <ChevronLeft className="h-4 w-4" />
@@ -205,7 +252,7 @@ export default function CampaignsPage() {
             <Button
               variant="outline"
               size="sm"
-              onClick={() => setPage((p) => Math.min(data.totalPages, p + 1))}
+              onClick={() => handlePageChange(Math.min(data.totalPages, page + 1))}
               disabled={page >= data.totalPages}
             >
               <ChevronRight className="h-4 w-4" />

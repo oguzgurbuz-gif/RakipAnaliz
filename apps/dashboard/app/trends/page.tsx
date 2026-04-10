@@ -1,7 +1,8 @@
 'use client'
 
 import { useQuery } from '@tanstack/react-query'
-import { useState } from 'react'
+import { useState, useCallback } from 'react'
+import { useSearchParams, useRouter, usePathname } from 'next/navigation'
 import {
   LineChart,
   Line,
@@ -43,7 +44,27 @@ interface TrendData {
 }
 
 export default function TrendsPage() {
-  const [days, setDays] = useState('30')
+  const searchParams = useSearchParams()
+  const router = useRouter()
+  const pathname = usePathname()
+  const [days, setDays] = useState(searchParams?.get('days') || '30')
+
+  const updateUrl = useCallback((updates: Record<string, string | undefined>) => {
+    const params = new URLSearchParams(searchParams?.toString() || '')
+    for (const [key, value] of Object.entries(updates)) {
+      if (value === undefined || value === '' || value === '30') {
+        params.delete(key)
+      } else {
+        params.set(key, value)
+      }
+    }
+    router.replace(`${pathname}?${params.toString()}`)
+  }, [searchParams, router, pathname])
+
+  const handleDaysChange = (newDays: string) => {
+    setDays(newDays)
+    updateUrl({ days: newDays })
+  }
 
   const { data, isLoading, error, refetch } = useQuery({
     queryKey: ['trends', days],
@@ -106,7 +127,7 @@ export default function TrendsPage() {
             min="7"
             max="90"
             value={days}
-            onChange={(e) => setDays(e.target.value)}
+            onChange={(e) => handleDaysChange(e.target.value)}
             className="w-20 bg-background"
           />
         </div>

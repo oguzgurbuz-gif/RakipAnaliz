@@ -58,6 +58,17 @@ const CAMPAIGN_TYPE_OPTIONS = [
   { value: 'diğer', label: 'Diğer' },
 ]
 
+const SORT_OPTIONS = [
+  { value: 'last_seen_at', label: 'Son görülme' },
+  { value: 'valid_from', label: 'Başlangıç tarihi' },
+  { value: 'valid_to', label: 'Bitiş tarihi' },
+  { value: 'created_at', label: 'Oluşturulma' },
+  { value: 'updated_at', label: 'Güncellenme' },
+  { value: 'title', label: 'Başlık (A-Z)' },
+  { value: '-title', label: 'Başlık (Z-A)' },
+  { value: 'status', label: 'Durum' },
+]
+
 export function CampaignFilters({ filters, onFiltersChange, sites }: CampaignFiltersProps) {
   const handleChange = (key: keyof CampaignFilters, value: string) => {
     onFiltersChange({
@@ -202,6 +213,22 @@ export function CampaignFilters({ filters, onFiltersChange, sites }: CampaignFil
           >
             <option value="">Tümü</option>
             {SENTIMENT_OPTIONS.map((opt) => (
+              <option key={opt.value} value={opt.value}>
+                {opt.label}
+              </option>
+            ))}
+          </Select>
+        </div>
+
+        <div>
+          <label className="text-sm font-medium text-muted-foreground">Sıralama</label>
+          <Select
+            value={filters.sort || ''}
+            onChange={(e) => handleChange('sort', e.target.value)}
+            className="mt-1"
+          >
+            <option value="">Varsayılan</option>
+            {SORT_OPTIONS.map((opt) => (
               <option key={opt.value} value={opt.value}>
                 {opt.label}
               </option>

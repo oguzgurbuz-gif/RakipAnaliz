@@ -133,19 +133,7 @@ export async function GET(
       throw new NotFoundError('Campaign', id);
     }
 
-    const [aiAnalyses, statusHistory, versions, notes, similarCampaigns] = await Promise.all([
-      query<AIAnalysisRow>(`
-        SELECT 
-          id, campaign_id, sentiment_label, sentiment_score,
-          category_code, category_confidence, summary_text,
-          key_points, risk_flags, recommendation_text,
-          model_provider, model_name, created_at
-        FROM campaign_ai_analyses
-        WHERE campaign_id = $1
-        ORDER BY created_at DESC
-        LIMIT 5
-      `, [id]),
-
+    const [statusHistory, versions, notes, similarCampaigns] = await Promise.all([
       query<StatusHistoryRow>(`
         SELECT 
           id, campaign_id, previous_status, new_status,
@@ -196,7 +184,31 @@ export async function GET(
       `, [id]),
     ]);
 
-    const latestAI = aiAnalyses[0] || null;
+    const latestAI = campaign.metadata && typeof campaign.metadata === 'object' && (campaign.metadata as Record<string, unknown>).ai_analysis
+      ? {
+          sentiment: (campaign.metadata as Record<string, unknown>).ai_analysis && typeof (campaign.metadata as Record<string, unknown>).ai_analysis === 'object'
+            ? ((campaign.metadata as Record<string, unknown>).ai_analysis as Record<string, unknown>).sentiment || null
+            : null,
+          sentimentScore: (campaign.metadata as Record<string, unknown>).ai_analysis && typeof (campaign.metadata as Record<string, unknown>).ai_analysis === 'object'
+            ? ((campaign.metadata as Record<string, unknown>).ai_analysis as Record<string, unknown>).sentiment_score || null
+            : null,
+          category: (campaign.metadata as Record<string, unknown>).ai_analysis && typeof (campaign.metadata as Record<string, unknown>).ai_analysis === 'object'
+            ? (((campaign.metadata as Record<string, unknown>).ai_analysis as Record<string, unknown>).category || ((campaign.metadata as Record<string, unknown>).ai_analysis as Record<string, unknown>).campaign_type) || null
+            : null,
+          summary: (campaign.metadata as Record<string, unknown>).ai_analysis && typeof (campaign.metadata as Record<string, unknown>).ai_analysis === 'object'
+            ? ((campaign.metadata as Record<string, unknown>).ai_analysis as Record<string, unknown>).summary || null
+            : null,
+          keyPoints: (campaign.metadata as Record<string, unknown>).ai_analysis && typeof (campaign.metadata as Record<string, unknown>).ai_analysis === 'object'
+            ? ((campaign.metadata as Record<string, unknown>).ai_analysis as Record<string, unknown>).key_points || null
+            : null,
+          riskFlags: (campaign.metadata as Record<string, unknown>).ai_analysis && typeof (campaign.metadata as Record<string, unknown>).ai_analysis === 'object'
+            ? ((campaign.metadata as Record<string, unknown>).ai_analysis as Record<string, unknown>).risk_flags || null
+            : null,
+          recommendation: (campaign.metadata as Record<string, unknown>).ai_analysis && typeof (campaign.metadata as Record<string, unknown>).ai_analysis === 'object'
+            ? ((campaign.metadata as Record<string, unknown>).ai_analysis as Record<string, unknown>).recommendation || null
+            : null,
+        }
+      : null;
 
     const result = {
       id: campaign.id,
@@ -223,18 +235,13 @@ export async function GET(
         code: campaign.site_code,
       },
       latestAI: latestAI ? {
-        id: latestAI.id,
-        sentiment: latestAI.sentiment_label,
-        sentimentScore: latestAI.sentiment_score,
-        category: latestAI.category_code,
-        categoryConfidence: latestAI.category_confidence,
-        summary: latestAI.summary_text,
-        keyPoints: latestAI.key_points,
-        riskFlags: latestAI.risk_flags,
-        recommendation: latestAI.recommendation_text,
-        modelProvider: latestAI.model_provider,
-        modelName: latestAI.model_name,
-        analyzedAt: latestAI.created_at ? latestAI.created_at.toISOString() : null,
+        sentiment: latestAI.sentiment,
+        sentimentScore: latestAI.sentimentScore,
+        category: latestAI.category,
+        summary: latestAI.summary,
+        keyPoints: latestAI.keyPoints,
+        riskFlags: latestAI.riskFlags,
+        recommendation: latestAI.recommendation,
       } : null,
       statusHistory: statusHistory.map((h: StatusHistoryRow) => ({
         id: h.id,

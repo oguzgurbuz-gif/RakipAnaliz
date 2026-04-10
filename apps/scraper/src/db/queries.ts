@@ -1136,3 +1136,29 @@ export async function getPendingCampaignIds(
   );
   return result.rows.map((row) => row.id);
 }
+
+export async function insertErrorLog(
+  db: Pool,
+  data: {
+    errorCode?: string
+    errorMessage: string
+    context?: Record<string, unknown>
+    stackTrace?: string
+    severity?: string
+  }
+): Promise<string> {
+  const result = await db.query(
+    `INSERT INTO error_logs (
+      error_code, error_message, context, stack_trace, severity
+    ) VALUES ($1, $2, $3, $4, $5)
+    RETURNING id`,
+    [
+      data.errorCode || null,
+      data.errorMessage,
+      data.context ? JSON.stringify(data.context) : '{}',
+      data.stackTrace || null,
+      data.severity || 'error',
+    ]
+  );
+  return result.rows[0].id;
+}

@@ -1,7 +1,8 @@
 'use client'
 
 import { useQuery } from '@tanstack/react-query'
-import { useState } from 'react'
+import { useState, useCallback } from 'react'
+import { useSearchParams, useRouter, usePathname } from 'next/navigation'
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card'
 import { Badge } from '@/components/ui/badge'
 import { Select } from '@/components/ui/select'
@@ -50,7 +51,27 @@ function StatCard({ icon: Icon, label, value, subValue, highlight }: {
 }
 
 export default function CompetitionPage() {
-  const [selectedCategory, setSelectedCategory] = useState<string>('')
+  const searchParams = useSearchParams()
+  const router = useRouter()
+  const pathname = usePathname()
+  const [selectedCategory, setSelectedCategory] = useState(searchParams?.get('category') || '')
+
+  const updateUrl = useCallback((updates: Record<string, string | undefined>) => {
+    const params = new URLSearchParams(searchParams?.toString() || '')
+    for (const [key, value] of Object.entries(updates)) {
+      if (value === undefined || value === '') {
+        params.delete(key)
+      } else {
+        params.set(key, value)
+      }
+    }
+    router.replace(`${pathname}?${params.toString()}`)
+  }, [searchParams, router, pathname])
+
+  const handleCategoryChange = (newCategory: string) => {
+    setSelectedCategory(newCategory)
+    updateUrl({ category: newCategory || undefined })
+  }
 
   const { data, isLoading, error } = useQuery({
     queryKey: ['competition', selectedCategory],
@@ -87,7 +108,7 @@ export default function CompetitionPage() {
             <Select
               id="category"
               value={selectedCategory}
-              onChange={(e) => setSelectedCategory(e.target.value)}
+              onChange={(e) => handleCategoryChange(e.target.value)}
               className="w-48"
             >
               <option value="">Tüm Türler</option>

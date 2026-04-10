@@ -172,12 +172,13 @@ export interface CampaignFilters {
   status?: string
   category?: string
   sentiment?: string
-  dateMode?: 'started_in_range' | 'ended_in_range' | 'active_during_range' | 'changed_in_range' | 'passive_in_range' | 'seen_in_range'
-  dateCompleteness?: 'complete' | 'missing_start' | 'missing_end' | 'missing_any'
+  dateMode?: string
+  dateCompleteness?: string
   dateFrom?: string
   dateTo?: string
   search?: string
   campaign_type?: string
+  sort?: string
 }
 
 export interface PaginatedResponse<T> {

@@ -1,6 +1,8 @@
 'use client'
 
-import { useQuery } from '@tanstack/react-query'
+import { useQuery, useQueryClient } from '@tanstack/react-query'
+import { useState, useCallback } from 'react'
+import { useSearchParams, useRouter, usePathname } from 'next/navigation'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { Skeleton } from '@/components/ui/skeleton'
 import { ErrorDisplay } from '@/components/ui/error'
@@ -9,17 +11,59 @@ import { InsightCard } from '@/components/ui/insight-card'
 import { PageHeader } from '@/components/ui/page-header'
 import { SectionHeader } from '@/components/ui/section-header'
 import { fetchReportSummary, fetchCompetition } from '@/lib/api'
-import { useState } from 'react'
 import { Input } from '@/components/ui/input'
 import { Button } from '@/components/ui/button'
 import { Badge } from '@/components/ui/badge'
 import { getCategoryLabel } from '@/lib/category-labels'
+import { useSSE } from '@/hooks/useSSE'
 import { AlertTriangle, BarChart3, Crown, Target, TrendingUp, ShieldAlert, Sparkles } from 'lucide-react'
 
 export default function DashboardPage() {
-  const [dateFrom, setDateFrom] = useState('')
-  const [dateTo, setDateTo] = useState('')
-  const [selectedCategory, setSelectedCategory] = useState<string>('')
+  const searchParams = useSearchParams()
+  const router = useRouter()
+  const pathname = usePathname()
+  const queryClient = useQueryClient()
+
+  const getParam = (key: string, defaultValue: string = ''): string => {
+    if (!searchParams) return defaultValue
+    return searchParams.get(key) || defaultValue
+  }
+
+  const [dateFrom, setDateFrom] = useState(getParam('dateFrom'))
+  const [dateTo, setDateTo] = useState(getParam('dateTo'))
+  const [selectedCategory, setSelectedCategory] = useState(getParam('selectedCategory'))
+
+  useSSE(useCallback(() => {
+    queryClient.invalidateQueries({ queryKey: ['report-summary'] })
+    queryClient.invalidateQueries({ queryKey: ['competition'] })
+  }, [queryClient]))
+
+  const updateUrl = useCallback((updates: Record<string, string | undefined>) => {
+    const params = new URLSearchParams(searchParams?.toString() || '')
+    for (const [key, value] of Object.entries(updates)) {
+      if (value === undefined || value === '') {
+        params.delete(key)
+      } else {
+        params.set(key, value)
+      }
+    }
+    router.replace(`${pathname}?${params.toString()}`)
+  }, [searchParams, router, pathname])
+
+  const handleDateFromChange = (value: string) => {
+    setDateFrom(value)
+    updateUrl({ dateFrom: value || undefined })
+  }
+
+  const handleDateToChange = (value: string) => {
+    setDateTo(value)
+    updateUrl({ dateTo: value || undefined })
+  }
+
+  const handleCategoryChange = (value: string) => {
+    setSelectedCategory(value)
+    updateUrl({ selectedCategory: value || undefined })
+  }
 
   const { data, isLoading, error, refetch } = useQuery({
     queryKey: ['report-summary', dateFrom, dateTo],
@@ -101,14 +145,14 @@ export default function DashboardPage() {
           <Input
             type="date"
             value={dateFrom}
-            onChange={(e) => setDateFrom(e.target.value)}
+            onChange={(e) => handleDateFromChange(e.target.value)}
             className="w-40 bg-background"
           />
           <span>-</span>
           <Input
             type="date"
             value={dateTo}
-            onChange={(e) => setDateTo(e.target.value)}
+            onChange={(e) => handleDateToChange(e.target.value)}
             className="w-40 bg-background"
           />
         </div>
@@ -322,7 +366,7 @@ export default function DashboardPage() {
               <select
                 className="border rounded px-3 py-1.5 text-sm"
                 value={selectedCategory}
-                onChange={(e) => setSelectedCategory(e.target.value)}
+                onChange={(e) => handleCategoryChange(e.target.value)}
               >
                 <option value="">Tüm Kategoriler</option>
                 {competitionData?.categories?.map((cat) => (

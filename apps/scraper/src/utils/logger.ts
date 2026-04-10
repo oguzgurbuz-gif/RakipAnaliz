@@ -15,6 +15,21 @@ export interface LogEntry {
   };
 }
 
+async function writeErrorToDb(entry: LogEntry): Promise<void> {
+  try {
+    const { insertErrorLog } = await import('./db');
+    await insertErrorLog(
+      entry.context?.errorCode as string || 'SCRAPER_ERROR',
+      entry.message,
+      entry.context,
+      entry.error?.stack,
+      entry.level
+    );
+  } catch {
+    // Ignore DB write failures - don't cause log loops
+  }
+}
+
 class Logger {
   private static instance: Logger;
   private minLevel: LogLevel = 'info';
@@ -82,7 +97,9 @@ class Logger {
 
   warn(message: string, context?: LogContext): void {
     if (this.shouldLog('warn')) {
-      this.output(this.formatEntry('warn', message, context));
+      const entry = this.formatEntry('warn', message, context);
+      this.output(entry);
+      writeErrorToDb(entry);
     }
   }
 
@@ -100,6 +117,7 @@ class Logger {
       }
 
       this.output(entry);
+      writeErrorToDb(entry);
     }
   }
 

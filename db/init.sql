@@ -339,17 +339,16 @@ CREATE TRIGGER update_job_queue_updated_at BEFORE UPDATE ON job_queue FOR EACH R
 -- Seed sites data
 -- ============================================================================
 INSERT INTO sites (code, name, base_url, adapter_key, is_active, priority) VALUES
-('misli', 'Misli.com', 'https://www.misli.com', 'misli', true, 100),
-('傻子', '傻子.com', 'https://www.傻子.com', 'sizi', true, 100),
-('bayin', 'Bayin.com', 'https://www.bayin.com', 'bayin', true, 100),
-('4nala', '4nala.com', 'https://4nala.com', '4nala', true, 100),
-('Edit', 'Edit.com', 'https://www.Edit.com', 'Edit', true, 100),
-('Merit', 'Merit.com', 'https://www.merit poker.com', 'merit', true, 100),
-('Restbet', 'Restbet.com', 'https://www.restbet.com', 'restbet', true, 100),
-('Bex', 'Bex.com', 'https://www.bex.com', 'bex', true, 100),
-('Anka', 'Anka.com', 'https://www.anka.com', 'anka', true, 100),
-('Hide', 'Hide.com', 'https://www.hide.com', 'hide', true, 100),
-('Grand', 'Grand.com', 'https://www.grand.com', 'grand', true, 100),
-('Roket', 'Roket.com', 'https://www.roket.com', 'roket', true, 100),
-('Sundzu', 'Sundzu.com', 'https://www.sundzu.com', 'sundzu', true, 100)
+('4nala', '4Nala', 'https://4nala.com', '4nala', true, 100),
+('altiliganyan', 'Altılı Ganyan', 'https://www.altiliganyan.com', 'altiliganyan', true, 100),
+('atyarisi', 'At Yarışı', 'https://www.atyarisi.com', 'atyarisi', true, 100),
+('bilyoner', 'Bilyoner', 'https://www.bilyoner.com', 'bilyoner', true, 100),
+('birebin', 'Birebin', 'https://www.birebin.com', 'birebin', true, 100),
+('bitalih', 'Bitalih', 'https://www.bitalih.com', 'bitalih', true, 100),
+('ekuri', 'Eküri', 'https://www.ekuri.com', 'ekuri', true, 100),
+('hipodrom', 'Hipodrom', 'https://www.hipodrom.com', 'hipodrom', true, 100),
+('misli', 'Misli', 'https://www.misli.com', 'misli', true, 100),
+('nesine', 'Nesine', 'https://www.nesine.com', 'nesine', true, 100),
+('oley', 'Oley', 'https://www.oley.com', 'oley', true, 100),
+('sonduzluk', 'SonDüzlük', 'https://www.sonduzluk.com', 'sonduzluk', true, 100)
 ON CONFLICT (code) DO NOTHING;

@@ -45,13 +45,13 @@ export async function GET(request: NextRequest) {
     }
 
     if (category) {
-      whereClause += ` AND ai.category_code = $${paramIndex}`;
+      whereClause += ` AND COALESCE(c.metadata->'ai_analysis'->>'category', c.metadata->'ai_analysis'->>'campaign_type') = $${paramIndex}`;
       filterParams.push(category);
       paramIndex++;
     }
 
     if (sentiment) {
-      whereClause += ` AND ai.sentiment_label = $${paramIndex}`;
+      whereClause += ` AND COALESCE(c.metadata->'ai_analysis'->>'sentiment', '') = $${paramIndex}`;
       filterParams.push(sentiment);
       paramIndex++;
     }
@@ -69,17 +69,10 @@ export async function GET(request: NextRequest) {
         c.primary_image_url,
         s.name as site_name,
         s.code as site_code,
-        ai.sentiment_label as ai_sentiment_label,
-        ai.category_code as ai_category_code
+        c.metadata->'ai_analysis'->>'sentiment' as ai_sentiment_label,
+        COALESCE(c.metadata->'ai_analysis'->>'category', c.metadata->'ai_analysis'->>'campaign_type') as ai_category_code
       FROM campaigns c
       JOIN sites s ON s.id = c.site_id
-      LEFT JOIN LATERAL (
-        SELECT ai2.sentiment_label, ai2.category_code
-        FROM campaign_ai_analyses ai2
-        WHERE ai2.campaign_id = c.id
-        ORDER BY ai2.created_at DESC
-        LIMIT 1
-      ) ai ON true
       ${whereClause}
       ORDER BY c.last_seen_at DESC
       LIMIT $${paramIndex}

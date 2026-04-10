@@ -4,7 +4,7 @@ import { retry } from '../utils/retry';
 import { adapterRegistry, SiteAdapter } from '../adapters';
 import { SiteConfig, RawCampaignCard, NormalizedCampaignInput, ScrapeRun, ScrapeError, VisibilityTracking } from '../types';
 import { processDedupLogic, DedupResult } from './dedup';
-import { findExistingCampaign, getLatestCampaignVersion, insertCampaign, insertCampaignVersion, updateCampaign, markCampaignSeen, updateCampaignVisibilityByFingerprint, getActiveCampaignsBySite, updateSiteScrapeStatus, getDb } from '../db';
+import { findExistingCampaign, getLatestCampaignVersion, insertCampaign, insertCampaignVersion, updateCampaign, markCampaignSeen, updateCampaignVisibilityByFingerprint, getActiveCampaignsBySite, updateSiteScrapeStatus, getDb, insertScrapeRun, updateScrapeRun, queryOne } from '../db';
 import { publishScrapeEvent } from '../publish/sse';
 import { shouldTriggerAiExtraction, triggerAiDateExtraction } from '../date-extraction/ai-fallback';
 import { getInvalidCampaignReason } from '../normalizers/text';
@@ -63,6 +63,30 @@ export class ScrapeManager {
 
     this.activeRuns.set(siteCode, run);
 
+    // Get site ID and insert scrape_runs record
+    let dbRunId: string | null = null;
+    try {
+      const siteRow = await queryOne<{ id: string }>(
+        `SELECT id FROM sites WHERE code = $1`,
+        [siteCode]
+      );
+      if (siteRow) {
+        dbRunId = await insertScrapeRun(getDb(), {
+          siteId: siteRow.id,
+          status: 'running',
+          startedAt: new Date(),
+          cardsFound: 0,
+          newCampaigns: 0,
+          updatedCampaigns: 0,
+          unchanged: 0,
+          errors: null,
+        });
+        run.id = dbRunId; // Use the DB-generated ID for consistency
+      }
+    } catch (err) {
+      logger.warn(`Failed to insert scrape_runs record for ${siteCode}`, { error: err instanceof Error ? err.message : 'Unknown' });
+    }
+
     try {
       const adapter = adapterRegistry.get(siteCode);
       if (!adapter) {
@@ -108,6 +132,23 @@ export class ScrapeManager {
 
       await this.updateSiteStats(siteCode, run);
       await publishScrapeEvent(siteCode, run);
+
+      // Update scrape_runs record in DB
+      if (dbRunId) {
+        try {
+          await updateScrapeRun(getDb(), dbRunId, {
+            status: run.status,
+            completedAt: run.completedAt,
+            cardsFound: run.cardsFound,
+            newCampaigns: run.newCampaigns,
+            updatedCampaigns: run.updatedCampaigns,
+            unchanged: run.unchanged,
+            errors: run.errors.length > 0 ? JSON.stringify(run.errors.map(e => e.message)) : null,
+          });
+        } catch (err) {
+          logger.warn(`Failed to update scrape_runs record for ${siteCode}`, { error: err instanceof Error ? err.message : 'Unknown' });
+        }
+      }
 
       this.activeRuns.delete(siteCode);
     }
