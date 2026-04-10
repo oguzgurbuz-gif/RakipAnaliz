@@ -64,7 +64,7 @@ export async function GET(request: NextRequest) {
         c.status,
         c.valid_from,
         c.valid_to,
-        c.first_seen_at,
+        c.created_at as first_seen_at,
         c.last_seen_at,
         c.primary_image_url,
         s.name as site_name,

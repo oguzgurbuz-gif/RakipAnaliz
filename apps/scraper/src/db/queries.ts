@@ -53,14 +53,14 @@ export async function insertCampaign(
   const result = await db.query(
     `INSERT INTO campaigns (
       site_id, external_id, source_url, canonical_url, title, body, normalized_text,
-      fingerprint, content_version, primary_image_url, valid_from, valid_to,
+      fingerprint, version_no, primary_image_url, valid_from, valid_to,
       valid_from_source, valid_to_source, valid_from_confidence, valid_to_confidence,
       raw_date_text, status, status_reason, tags, metadata,
-      first_seen_at, last_seen_at, last_visible_at, is_visible_on_last_scrape,
+      last_seen_at, last_visible_at, is_visible_on_last_scrape,
       created_at, updated_at
     ) VALUES (
       $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20, $21,
-      NOW(), NOW(), NOW(), true, NOW(), NOW()
+      NOW(), NOW(), true, NOW(), NOW()
     ) RETURNING id`,
     [
       data.siteId,
@@ -111,37 +111,21 @@ export async function insertCampaignVersion(
     title: string;
     body: string | null;
     normalizedText: string;
-    fingerprint: string;
-    primaryImageUrl: string | null;
-    validFrom: Date | null;
-    validTo: Date | null;
-    validFromSource: string | null;
-    validToSource: string | null;
-    rawDateText: string | null;
     versionNo: number;
   }
 ): Promise<string> {
   const result = await db.query(
     `INSERT INTO campaign_versions (
       campaign_id, title, body, normalized_text,
-      fingerprint, primary_image_url, valid_from, valid_to,
-      valid_from_source, valid_to_source,
-      raw_date_text, version_no, created_at
+      version_no, created_at
     ) VALUES (
-      $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, NOW()
+      $1, $2, $3, $4, $5, NOW()
     ) RETURNING id`,
     [
       data.campaignId,
       data.title,
       data.body,
       data.normalizedText,
-      data.fingerprint,
-      data.primaryImageUrl,
-      data.validFrom,
-      data.validTo,
-      data.validFromSource,
-      data.validToSource,
-      data.rawDateText,
       data.versionNo,
     ]
   );
@@ -370,7 +354,7 @@ export async function getCampaignForDateExtraction(
     FROM campaigns c
     JOIN campaign_versions cv ON c.id = cv.campaign_id
     WHERE c.id = $1
-    ORDER BY cv.content_version DESC
+    ORDER BY cv.version_no DESC
     LIMIT 1`,
     [campaignId]
   );
@@ -792,7 +776,7 @@ export async function getLatestVersion(
   const result = await db.query(
     `SELECT * FROM campaign_versions
     WHERE campaign_id = $1
-    ORDER BY content_version DESC
+    ORDER BY version_no DESC
     LIMIT 1`,
     [campaignId]
   );
@@ -810,16 +794,7 @@ export async function getVersionCount(
   return result.rows[0] ?? null;
 }
 
-export async function incrementVersionCount(
-  db: Pool,
-  campaignId: string
-): Promise<void> {
-  await db.query(
-    `UPDATE campaigns SET version_count = version_count + 1, updated_at = NOW()
-    WHERE id = $1`,
-    [campaignId]
-  );
-}
+// version_no is auto-managed by trigger or app logic
 
 export async function updateCampaignVersionId(
   db: Pool,
@@ -1089,7 +1064,7 @@ export async function getLatestVersionForCampaign(
   const result = await db.query(
     `SELECT * FROM campaign_versions
     WHERE campaign_id = $1
-    ORDER BY content_version DESC
+    ORDER BY version_no DESC
     LIMIT 1`,
     [campaignId]
   );

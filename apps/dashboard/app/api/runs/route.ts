@@ -12,18 +12,14 @@ const querySchema = z.object({
 
 type ScrapeRunRow = {
   id: string;
-  run_type: string;
-  trigger_source: string;
   status: string;
   started_at: Date;
   completed_at: Date | null;
-  total_sites: number;
-  completed_sites: number;
-  failed_sites: number;
-  inserted_count: number;
-  updated_count: number;
-  skipped_count: number;
-  metadata: unknown;
+  cards_found: number | null;
+  new_campaigns: number | null;
+  updated_campaigns: number | null;
+  unchanged: number | null;
+  errors: string | null;
   site_name: string | null;
   site_code: string | null;
 };
@@ -61,18 +57,14 @@ export async function GET(request: NextRequest) {
     const rows = await query<ScrapeRunRow>(`
       SELECT 
         sr.id,
-        sr.run_type,
-        sr.trigger_source,
         sr.status,
         sr.started_at,
         sr.completed_at,
-        sr.total_sites,
-        sr.completed_sites,
-        sr.failed_sites,
-        sr.inserted_count,
-        sr.updated_count,
-        sr.skipped_count,
-        sr.metadata,
+        sr.cards_found,
+        sr.new_campaigns,
+        sr.updated_campaigns,
+        sr.unchanged,
+        sr.errors,
         s.name as site_name,
         s.code as site_code
       FROM scrape_runs sr
@@ -84,18 +76,14 @@ export async function GET(request: NextRequest) {
 
     const runs = rows.map((row: ScrapeRunRow) => ({
       id: row.id,
-      runType: row.run_type,
-      triggerSource: row.trigger_source,
       status: row.status,
       startedAt: row.started_at,
       completedAt: row.completed_at,
-      totalSites: row.total_sites,
-      completedSites: row.completed_sites,
-      failedSites: row.failed_sites,
-      insertedCount: row.inserted_count,
-      updatedCount: row.updated_count,
-      skippedCount: row.skipped_count,
-      metadata: row.metadata,
+      cardsFound: row.cards_found,
+      newCampaigns: row.new_campaigns,
+      updatedCampaigns: row.updated_campaigns,
+      unchanged: row.unchanged,
+      errors: row.errors,
       site: row.site_name ? {
         id: row.site_code,
         name: row.site_name,

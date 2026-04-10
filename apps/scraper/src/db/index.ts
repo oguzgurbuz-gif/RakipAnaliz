@@ -177,8 +177,6 @@ export async function insertCampaignVersion(
     versionNo: versionCount,
   });
 
-  await queries.incrementVersionCount(db, campaignId);
-
   return versionId;
 }
 
@@ -306,7 +304,7 @@ function mapRowToCampaign(row: Record<string, unknown>): Campaign {
     visibility: (row.visibility ?? 'visible') as 'visible' | 'hidden' | 'expired' | 'pending',
     firstSeenAt: new Date(row.first_seen_at as string),
     lastSeenAt: new Date(row.last_seen_at as string),
-    versionCount: (row.version_count ?? 1) as number,
+    versionCount: (row.version_no ?? 1) as number,
     aiExtractedDates: Boolean(row.valid_from_confidence),
     aiConfidence: row.valid_to_confidence as number | null,
     createdAt: new Date(row.created_at as string),
@@ -318,7 +316,7 @@ function mapRowToVersion(row: Record<string, unknown>): CampaignVersion {
   return {
     id: row.id as string,
     campaignId: row.campaign_id as string,
-    versionNumber: (row.content_version ?? 1) as number,
+    versionNumber: (row.version_no ?? 1) as number,
     title: row.title as string,
     description: row.body as string | null,
     bonusType: 'percentage' as const,

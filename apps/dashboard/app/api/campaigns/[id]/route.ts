@@ -113,7 +113,7 @@ export async function GET(
         c.valid_to_source,
         c.valid_from_confidence,
         c.valid_to_confidence,
-        c.first_seen_at,
+        c.created_at as first_seen_at,
         c.last_seen_at,
         c.primary_image_url,
         c.fingerprint,
@@ -136,18 +136,18 @@ export async function GET(
     const [statusHistory, versions, notes, similarCampaigns] = await Promise.all([
       query<StatusHistoryRow>(`
         SELECT 
-          id, campaign_id, previous_status, new_status,
-          reason, changed_at, context
+          id, campaign_id, old_status as previous_status, new_status,
+          reason, created_at as changed_at, null as context
         FROM campaign_status_history
         WHERE campaign_id = $1
-        ORDER BY changed_at DESC
+        ORDER BY created_at DESC
         LIMIT 20
       `, [id]),
 
       query<VersionRow>(`
         SELECT 
           id, campaign_id, version_no, title, body,
-          valid_from, valid_to, diff_summary, created_at
+          valid_from, valid_to, change_summary as diff_summary, created_at
         FROM campaign_versions
         WHERE campaign_id = $1
         ORDER BY version_no DESC
@@ -156,16 +156,16 @@ export async function GET(
 
       query<NoteRow>(`
         SELECT 
-          id, campaign_id, author_name, note_text,
-          note_type, is_pinned, created_at, updated_at
+          id, campaign_id, created_by as author_name, content as note_text,
+          null as note_type, false as is_pinned, created_at, updated_at
         FROM campaign_notes
         WHERE campaign_id = $1
-        ORDER BY is_pinned DESC, created_at DESC
+        ORDER BY created_at DESC
       `, [id]),
 
       query<SimilarCampaignRow>(`
         SELECT 
-          cs.similar_campaign_id as similar_id,
+          cs.campaign_id_2 as similar_campaign_id,
           c.title as similar_title,
           c.status as similar_status,
           c.valid_from as similar_valid_from,
@@ -174,11 +174,11 @@ export async function GET(
           s.name as site_name,
           s.code as site_code,
           cs.similarity_score,
-          cs.similarity_reason
+          cs.comparison_type as similarity_reason
         FROM campaign_similarities cs
-        JOIN campaigns c ON c.id = cs.similar_campaign_id
+        JOIN campaigns c ON c.id = cs.campaign_id_2
         JOIN sites s ON s.id = c.site_id
-        WHERE cs.campaign_id = $1
+        WHERE cs.campaign_id_1 = $1
         ORDER BY cs.similarity_score DESC
         LIMIT 10
       `, [id]),

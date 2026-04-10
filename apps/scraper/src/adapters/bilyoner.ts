@@ -78,14 +78,18 @@ export class BilyonerAdapter extends BaseAdapter {
     await this.triggerLazyLoading(page);
 
     const cardSelectors = [
+      '[class*="kampanya-item"]',
+      '[class*="bonus-card"]',
+      '[class*="campaign-item"]',
+      '[class*="promotion-item"]',
+      '[class*="item-card"]',
+      '[class*="card-item"]',
+      '[class*="offer-item"]',
+      'article.kampanya',
+      'article.campaign',
       '[class*="kampanya"]',
       '[class*="bonus"]',
       '[class*="campaign"]',
-      '[class*="promotion"]',
-      '[class*="item"]',
-      '[class*="card"]',
-      '[class*="offer"]',
-      'article',
     ];
 
     let cardElements: ElementHandle<Element>[] = [];
