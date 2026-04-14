@@ -85,8 +85,8 @@ export async function GET(request: NextRequest) {
       id: row.id,
       title: row.title,
       status: row.status,
-      validFrom: row.valid_from,
-      validTo: row.valid_to,
+      validFrom: row.valid_from ? row.valid_from.toISOString() : null,
+      validTo: row.valid_to ? row.valid_to.toISOString() : null,
       site: {
         id: row.site_id,
         name: row.site_name,

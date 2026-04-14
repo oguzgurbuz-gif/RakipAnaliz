@@ -7,37 +7,49 @@ import { cn } from '@/lib/utils'
 import {
   LayoutDashboard,
   Megaphone,
-  FileText,
-  ListChecks,
-  Menu,
-  X,
-  Image,
-  GitCompare,
-  TrendingUp,
   BarChart3,
+  FileText,
   CalendarRange,
-  Bell,
+  ChevronDown,
+  ChevronRight,
+  ListChecks,
   AlertTriangle,
+  Settings,
 } from 'lucide-react'
 
-const navItems = [
+type NavItem = {
+  href: string
+  label: string
+  icon: React.ElementType
+  isAdmin?: boolean
+}
+
+const primaryNavItems: NavItem[] = [
   { href: '/', label: 'Dashboard', icon: LayoutDashboard },
   { href: '/campaigns', label: 'Kampanyalar', icon: Megaphone },
-  { href: '/calendar', label: 'Takvim', icon: CalendarRange },
-  { href: '/compare', label: 'Karşılaştır', icon: GitCompare },
-  { href: '/competition', label: 'Rekabet Analizi', icon: BarChart3 },
-  { href: '/gallery', label: 'Galeri', icon: Image },
+  { href: '/competition', label: 'Rekabet', icon: BarChart3 },
   { href: '/reports', label: 'Raporlar', icon: FileText },
-  { href: '/trends', label: 'Trendler', icon: TrendingUp },
-  { href: '/runs', label: 'Scrape İşlemleri', icon: ListChecks },
-  { href: '/quality', label: 'Veri Kalitesi', icon: AlertTriangle },
-  { href: '/admin/jobs', label: 'İş Yönetimi', icon: ListChecks },
-  { href: '/notifications', label: 'Bildirimler', icon: Bell },
+  { href: '/calendar', label: 'Takvim', icon: CalendarRange },
+]
+
+const adminNavItems: NavItem[] = [
+  { href: '/admin/runs', label: 'Scrape İşlemleri', icon: ListChecks, isAdmin: true },
+  { href: '/admin/quality', label: 'Veri Kalitesi', icon: AlertTriangle, isAdmin: true },
+  { href: '/admin/jobs', label: 'İş Yönetimi', icon: Settings, isAdmin: true },
 ]
 
 export function Sidebar() {
   const pathname = usePathname()
   const [isMobileOpen, setIsMobileOpen] = React.useState(false)
+  const [isAdminOpen, setIsAdminOpen] = React.useState(false)
+
+  const isInAdminSection = pathname?.startsWith('/admin')
+
+  React.useEffect(() => {
+    if (isInAdminSection) {
+      setIsAdminOpen(true)
+    }
+  }, [isInAdminSection])
 
   return (
     <>
@@ -45,7 +57,11 @@ export function Sidebar() {
         className="fixed left-4 top-4 z-50 rounded-xl border border-border/70 bg-background/90 p-2 shadow-lg backdrop-blur md:hidden"
         onClick={() => setIsMobileOpen(!isMobileOpen)}
       >
-        {isMobileOpen ? <X className="h-5 w-5" /> : <Menu className="h-5 w-5" />}
+        {isMobileOpen ? (
+          <ChevronRight className="h-5 w-5" />
+        ) : (
+          <LayoutDashboard className="h-5 w-5" />
+        )}
       </button>
 
       {isMobileOpen && (
@@ -74,9 +90,10 @@ export function Sidebar() {
         </div>
 
         <nav className="space-y-1 p-4">
-          {navItems.map((item) => {
+          {primaryNavItems.map((item) => {
             const Icon = item.icon
-            const isActive = (pathname ?? '') === item.href || (pathname ?? '').startsWith(item.href + '/')
+            const isActive =
+              pathname === null || pathname === item.href || pathname.startsWith(item.href + '/')
 
             return (
               <Link
@@ -95,6 +112,52 @@ export function Sidebar() {
               </Link>
             )
           })}
+
+          <div className="my-4 border-t border-border/70" />
+
+          <button
+            onClick={() => setIsAdminOpen(!isAdminOpen)}
+            className={cn(
+              'flex w-full items-center justify-between rounded-xl px-3 py-2.5 text-sm font-medium transition-colors',
+              isInAdminSection
+                ? 'bg-primary text-primary-foreground'
+                : 'text-muted-foreground hover:bg-accent hover:text-accent-foreground'
+            )}
+          >
+            <div className="flex items-center gap-3">
+              <Settings className="h-4 w-4" />
+              Admin
+            </div>
+            {isAdminOpen ? (
+              <ChevronDown className="h-4 w-4" />
+            ) : (
+              <ChevronRight className="h-4 w-4" />
+            )}
+          </button>
+
+          {isAdminOpen &&
+            adminNavItems.map((item) => {
+              const Icon = item.icon
+              const isActive =
+                pathname === null || pathname === item.href || pathname.startsWith(item.href + '/')
+
+              return (
+                <Link
+                  key={item.href}
+                  href={item.href}
+                  onClick={() => setIsMobileOpen(false)}
+                  className={cn(
+                    'flex items-center gap-3 rounded-xl px-3 py-2.5 text-sm font-medium transition-colors ml-2',
+                    isActive
+                      ? 'bg-primary text-primary-foreground shadow-sm'
+                      : 'text-muted-foreground hover:bg-accent hover:text-accent-foreground'
+                  )}
+                >
+                  <Icon className="h-4 w-4" />
+                  {item.label}
+                </Link>
+              )
+            })}
         </nav>
       </aside>
     </>

@@ -64,8 +64,8 @@ export async function GET(
       title: row.title,
       body: row.body,
       status: row.status,
-      validFrom: row.valid_from,
-      validTo: row.valid_to,
+      validFrom: row.valid_from ? row.valid_from.toISOString() : null,
+      validTo: row.valid_to ? row.valid_to.toISOString() : null,
       primaryImage: row.primary_image_url,
       site: {
         name: row.site_name,

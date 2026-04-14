@@ -1,118 +1,52 @@
 'use client'
 
+import { useState } from 'react'
 import { useQuery } from '@tanstack/react-query'
-import { useState, useCallback } from 'react'
 import { useSearchParams, useRouter, usePathname } from 'next/navigation'
-import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card'
+import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { Badge } from '@/components/ui/badge'
 import { Select } from '@/components/ui/select'
-import { EmptyState } from '@/components/ui/empty-state'
 import { InsightCard } from '@/components/ui/insight-card'
 import { PageHeader } from '@/components/ui/page-header'
-import { SectionHeader } from '@/components/ui/section-header'
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table'
-import { Trophy, Target, TrendingUp, Award, Crown } from 'lucide-react'
+import { Crown, Target, TrendingUp, ChevronDown, ChevronUp } from 'lucide-react'
 import { getCategoryLabel } from '@/lib/category-labels'
 import { cn } from '@/lib/utils'
-import { fetchCompetition, CompetitionData } from '@/lib/api'
-
-function WinnerBadge({ className }: { className?: string }) {
-  return (
-    <Badge className={cn('bg-yellow-100 text-yellow-800 border-yellow-300', className)}>
-      <Crown className="h-3 w-3 mr-1" />
-      En İyi
-    </Badge>
-  )
-}
-
-function StatCard({ icon: Icon, label, value, subValue, highlight }: {
-  icon: React.ElementType
-  label: string
-  value: string | number
-  subValue?: string
-  highlight?: boolean
-}) {
-  return (
-    <Card className={cn(highlight && 'border-yellow-400 bg-yellow-50/50')}>
-      <CardContent className="p-4">
-        <div className="flex items-center gap-3">
-          <div className={cn('p-2 rounded-lg', highlight ? 'bg-yellow-100' : 'bg-muted')}>
-            <Icon className={cn('h-5 w-5', highlight ? 'text-yellow-700' : 'text-muted-foreground')} />
-          </div>
-          <div>
-            <p className="text-sm text-muted-foreground">{label}</p>
-            <p className="text-2xl font-bold">{value}</p>
-            {subValue && <p className="text-xs text-muted-foreground">{subValue}</p>}
-          </div>
-        </div>
-      </CardContent>
-    </Card>
-  )
-}
+import { fetchCompetition } from '@/lib/api'
 
 export default function CompetitionPage() {
   const searchParams = useSearchParams()
   const router = useRouter()
   const pathname = usePathname()
   const [selectedCategory, setSelectedCategory] = useState(searchParams?.get('category') || '')
+  const [showMatrix, setShowMatrix] = useState(false)
+  const [showBonusTable, setShowBonusTable] = useState(false)
 
-  const updateUrl = useCallback((updates: Record<string, string | undefined>) => {
-    const params = new URLSearchParams(searchParams?.toString() || '')
-    for (const [key, value] of Object.entries(updates)) {
-      if (value === undefined || value === '') {
-        params.delete(key)
-      } else {
-        params.set(key, value)
-      }
-    }
-    router.replace(`${pathname}?${params.toString()}`)
-  }, [searchParams, router, pathname])
-
-  const handleCategoryChange = (newCategory: string) => {
-    setSelectedCategory(newCategory)
-    updateUrl({ category: newCategory || undefined })
-  }
-
-  const { data, isLoading, error } = useQuery({
+  const { data, isLoading } = useQuery({
     queryKey: ['competition', selectedCategory],
     queryFn: () => fetchCompetition(selectedCategory || undefined),
   })
 
-  if (error) {
-    return (
-      <div className="p-6">
-        <Card className="border-destructive">
-          <CardContent className="p-6">
-            <p className="text-destructive">Veriler yüklenirken hata oluştu.</p>
-          </CardContent>
-        </Card>
-      </div>
-    )
-  }
-
-  const allCategories = data?.categories || []
-  const siteCodes = data?.sites.map(s => s.site_code) || []
-  const siteRankingsByCampaigns = data?.siteRankings || []
-  const siteRankingsByBonus = [...siteRankingsByCampaigns].sort((a, b) => Number(b.avg_bonus) - Number(a.avg_bonus))
-  const topCampaignSite = siteRankingsByCampaigns[0]
-  const topBonusSite = siteRankingsByBonus[0]
+  const siteRankings = data?.siteRankings || []
+  const topCampaignSite = siteRankings[0]
+  const topBonusSite = [...siteRankings].sort((a, b) => Number(b.avg_bonus) - Number(a.avg_bonus))[0]
 
   return (
     <div className="min-h-screen bg-background">
       <PageHeader
         title="Rekabet Analizi"
-        description="Rakiplerin kampanya yoğunluğu, bonus agresifliği ve kategori hakimiyetini karşılaştırın."
+        description="Rakiplerin kampanya hacmi ve bonus agresifliği karşılaştırması"
         actions={
           <div className="flex items-center gap-2">
             <label htmlFor="category" className="text-sm text-muted-foreground">Tür:</label>
             <Select
               id="category"
               value={selectedCategory}
-              onChange={(e) => handleCategoryChange(e.target.value)}
+              onChange={(e) => setSelectedCategory(e.target.value)}
               className="w-48"
             >
               <option value="">Tüm Türler</option>
-              {allCategories.map(cat => (
+              {(data?.categories || []).map(cat => (
                 <option key={cat} value={cat}>{getCategoryLabel(cat)}</option>
               ))}
             </Select>
@@ -121,298 +55,210 @@ export default function CompetitionPage() {
       />
 
       <main className="p-6 space-y-6">
+        {/* Top 3 Leader Cards */}
         {isLoading ? (
-          <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-4">
-            {Array.from({ length: 4 }).map((_, i) => (
+          <div className="grid gap-4 md:grid-cols-3">
+            {Array.from({ length: 3 }).map((_, i) => (
               <Card key={i}><CardContent className="p-4"><div className="h-20 bg-muted animate-pulse rounded" /></CardContent></Card>
             ))}
           </div>
         ) : (
-          <>
-            <div className="grid gap-4 lg:grid-cols-3">
-              <InsightCard
-                icon={Crown}
-                title="Pazar Lideri"
-                value={topCampaignSite?.site_name || '-'}
-                description={`${topCampaignSite?.total_campaigns || 0} kampanya ile hacim lideri`}
-                tone="positive"
-              />
-              <InsightCard
-                icon={Target}
-                title="Bonus Lideri"
-                value={topBonusSite?.site_name || '-'}
-                description={`Ort. bonus ₺${(Number(topBonusSite?.avg_bonus) || 0).toFixed(0)}`}
-                tone="warning"
-              />
-              <InsightCard
-                icon={TrendingUp}
-                title="En Aktif Tür"
-                value={data?.comparisonTable[0] ? getCategoryLabel(data.comparisonTable[0].category) : '-'}
-                description={`${data?.comparisonTable[0]?.total_campaigns || 0} kampanya ile en yoğun kategori`}
-                tone="info"
-              />
-            </div>
-
-            <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-4">
-              <StatCard
-                icon={Trophy}
-                label="En Çok Kampanya"
-                value={topCampaignSite?.site_name || '-'}
-                subValue={`${topCampaignSite?.total_campaigns || 0} kampanya`}
-                highlight
-              />
-              <StatCard
-                icon={Target}
-                label="En Yüksek Ort. Bonus"
-                value={topBonusSite?.site_name || '-'}
-                subValue={`₺${(Number(topBonusSite?.avg_bonus) || 0).toFixed(2)} ortalama`}
-              />
-              <StatCard
-                icon={TrendingUp}
-                label="En Aktif Tür"
-                value={data?.comparisonTable[0] ? getCategoryLabel(data.comparisonTable[0].category) : '-'}
-                subValue={`${data?.comparisonTable[0]?.total_campaigns || 0} kampanya`}
-              />
-              <StatCard
-                icon={Award}
-                label="Toplam Site"
-                value={data?.sites.length || 0}
-                subValue={`${data?.categories.length} kategori`}
-              />
-            </div>
-
-            <div className="grid gap-6 lg:grid-cols-2">
-              <Card>
-                <CardHeader>
-                  <SectionHeader title="Tür Bazlı Karşılaştırma" description="Her kategoride en güçlü site ve kategori yoğunluğu." />
-                </CardHeader>
-                <CardContent>
-                  <Table>
-                    <TableHeader>
-                      <TableRow>
-                        <TableHead>Tür</TableHead>
-                        <TableHead>En İyi Site</TableHead>
-                        <TableHead className="text-right">Kampanya</TableHead>
-                        <TableHead className="text-right">Toplam Site</TableHead>
-                      </TableRow>
-                    </TableHeader>
-                    <TableBody>
-                      {data?.comparisonTable.slice(0, 10).map((row) => (
-                        <TableRow key={row.category}>
-                          <TableCell className="font-medium">{getCategoryLabel(row.category)}</TableCell>
-                          <TableCell>
-                            <div className="flex items-center gap-2">
-                              {row.best_site}
-                              {row.best_site_campaigns > 0 && <WinnerBadge />}
-                            </div>
-                          </TableCell>
-                          <TableCell className="text-right">{row.best_site_campaigns}</TableCell>
-                          <TableCell className="text-right">{row.total_sites}</TableCell>
-                        </TableRow>
-                      ))}
-                    </TableBody>
-                  </Table>
-                </CardContent>
-              </Card>
-
-              <Card>
-                <CardHeader>
-                  <SectionHeader title="Site Sıralaması" description="Kampanya hacmi ve aktif oranına göre sıralama." />
-                </CardHeader>
-                <CardContent>
-                  <Table>
-                    <TableHeader>
-                      <TableRow>
-                        <TableHead>#</TableHead>
-                        <TableHead>Site</TableHead>
-                        <TableHead className="text-right">Kampanya</TableHead>
-                        <TableHead className="text-right">Aktif</TableHead>
-                        <TableHead className="text-right">Aktif %</TableHead>
-                      </TableRow>
-                    </TableHeader>
-                    <TableBody>
-                      {siteRankingsByCampaigns.slice(0, 10).map((site, idx) => (
-                        <TableRow key={site.site_id}>
-                          <TableCell className="font-medium">{idx + 1}</TableCell>
-                          <TableCell>
-                            <div className="flex items-center gap-2">
-                              {site.site_name}
-                              {idx === 0 && <WinnerBadge />}
-                            </div>
-                          </TableCell>
-                          <TableCell className="text-right">{site.total_campaigns}</TableCell>
-                          <TableCell className="text-right">{site.active_campaigns}</TableCell>
-                          <TableCell className="text-right">{(Number(site.active_rate) * 100).toFixed(1)}%</TableCell>
-                        </TableRow>
-                      ))}
-                    </TableBody>
-                  </Table>
-                </CardContent>
-              </Card>
-            </div>
-
-            <Card>
-              <CardHeader>
-                <SectionHeader title="Site vs Site Matrisi" description="Kategori bazında hangi sitenin daha yoğun kampanya sunduğunu gösterir." />
-              </CardHeader>
-              <CardContent>
-                <div className="overflow-x-auto">
-                  <Table>
-                    <TableHeader>
-                      <TableRow>
-                        <TableHead className="sticky left-0 bg-background">Tür</TableHead>
-                        {siteCodes.slice(0, 8).map(code => (
-                          <TableHead key={code} className="text-center">{code}</TableHead>
-                        ))}
-                      </TableRow>
-                    </TableHeader>
-                    <TableBody>
-                      {data?.categories.slice(0, 12).map(cat => (
-                        <TableRow key={cat}>
-                          <TableCell className="font-medium sticky left-0 bg-background">{getCategoryLabel(cat)}</TableCell>
-                          {siteCodes.slice(0, 8).map(code => {
-                            const cell = data?.siteMatrix[cat]?.[code]
-                            const intensity = Math.min(1, (cell?.campaign_count || 0) / Math.max(1, Number(topCampaignSite?.total_campaigns || 1)))
-                            return (
-                              <TableCell key={code} className="text-center">
-                                {cell ? (
-                                  <div
-                                    className={cn(
-                                      'inline-flex min-w-[58px] flex-col items-center rounded-lg px-2 py-1',
-                                      cell.is_winner && 'ring-1 ring-yellow-300'
-                                    )}
-                                    style={{
-                                      backgroundColor: `rgba(37, 99, 235, ${0.12 + intensity * 0.25})`,
-                                    }}
-                                  >
-                                    <span className={cn('text-lg font-bold', cell.campaign_count === 0 && 'text-muted-foreground')}>
-                                      {cell.campaign_count}
-                                    </span>
-                                    {cell.is_winner && <Crown className="h-3 w-3 text-yellow-600" />}
-                                  </div>
-                                ) : (
-                                  <span className="text-muted-foreground">-</span>
-                                )}
-                              </TableCell>
-                            )
-                          })}
-                        </TableRow>
-                      ))}
-                    </TableBody>
-                  </Table>
-                </div>
-              </CardContent>
-            </Card>
-
-            <Card>
-              <CardHeader>
-                <SectionHeader title="En İyi Bonus / Fırsatlar" description="En yüksek değerli bonusları sunan kampanyalar." />
-              </CardHeader>
-              <CardContent>
-                {data?.bestDeals?.length ? (
-                  <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-3">
-                    {data.bestDeals.slice(0, 6).map((deal) => (
-                      <Card key={deal.campaign_id} className="border-border/70 bg-muted/10">
-                        <CardContent className="space-y-3 p-5">
-                          <div className="space-y-1">
-                            <div className="text-sm text-muted-foreground">{deal.site_name}</div>
-                            <div className="font-medium line-clamp-2">{deal.campaign_title}</div>
-                          </div>
-                          <div className="flex flex-wrap gap-2">
-                            <Badge variant="outline">{getCategoryLabel(deal.category)}</Badge>
-                            <Badge className={cn(
-                              deal.status === 'active' && 'bg-green-100 text-green-800',
-                              deal.status === 'ended' && 'bg-gray-100 text-gray-800',
-                            )}>
-                              {deal.status}
-                            </Badge>
-                          </div>
-                          <div className="grid grid-cols-2 gap-3 text-sm">
-                            <div>
-                              <div className="text-muted-foreground">Bonus</div>
-                              <div className="font-semibold">{deal.bonus_amount ? `₺${deal.bonus_amount.toLocaleString()}` : '-'}</div>
-                            </div>
-                            <div>
-                              <div className="text-muted-foreground">Bonus %</div>
-                              <div className="font-semibold">{deal.bonus_percentage ? `%${deal.bonus_percentage}` : '-'}</div>
-                            </div>
-                          </div>
-                        </CardContent>
-                      </Card>
-                    ))}
-                  </div>
-                ) : (
-                  <EmptyState title="Fırsat verisi yok" description="Bonus karşılaştırması için yeterli kampanya verisi bulunamadı." />
-                )}
-              </CardContent>
-            </Card>
-
-            <div className="grid gap-6 lg:grid-cols-2">
-              <Card>
-                <CardHeader>
-                  <SectionHeader title="En Çok Kampanya Sunan Siteler" description="Kampanya hacmi yüksek siteleri öne çıkarır." />
-                </CardHeader>
-                <CardContent>
-                  <Table>
-                    <TableHeader>
-                      <TableRow>
-                        <TableHead>Site</TableHead>
-                        <TableHead className="text-right">Kampanya</TableHead>
-                        <TableHead className="text-right">Ort. Bonus</TableHead>
-                      </TableRow>
-                    </TableHeader>
-                    <TableBody>
-                      {siteRankingsByCampaigns.slice(0, 8).map(site => (
-                        <TableRow key={site.site_id}>
-                          <TableCell className="font-medium">
-                            <div className="flex items-center gap-2">
-                              {site.site_name}
-                              {site.total_campaigns === topCampaignSite?.total_campaigns && <WinnerBadge />}
-                            </div>
-                          </TableCell>
-                          <TableCell className="text-right">{site.total_campaigns}</TableCell>
-                          <TableCell className="text-right font-mono">₺{Number(site.avg_bonus).toFixed(2)}</TableCell>
-                        </TableRow>
-                      ))}
-                    </TableBody>
-                  </Table>
-                </CardContent>
-              </Card>
-
-              <Card>
-                <CardHeader>
-                  <SectionHeader title="Ortalama Bonus Miktarı by Site" description="Sitelerin toplam ve ortalama bonus hacmini karşılaştırır." />
-                </CardHeader>
-                <CardContent>
-                  <Table>
-                    <TableHeader>
-                      <TableRow>
-                        <TableHead>Site</TableHead>
-                        <TableHead className="text-right">Toplam Bonus</TableHead>
-                        <TableHead className="text-right">Ort. Bonus</TableHead>
-                        <TableHead className="text-right">Tür</TableHead>
-                      </TableRow>
-                    </TableHeader>
-                    <TableBody>
-                      {siteRankingsByBonus
-                        .slice(0, 8)
-                        .map(site => (
-                          <TableRow key={site.site_id}>
-                            <TableCell className="font-medium">{site.site_name}</TableCell>
-                            <TableCell className="text-right font-mono">
-                              ₺{Number(site.total_bonus).toLocaleString(undefined, { maximumFractionDigits: 0 })}
-                            </TableCell>
-                            <TableCell className="text-right font-mono">₺{Number(site.avg_bonus).toFixed(2)}</TableCell>
-                            <TableCell className="text-right">{site.categories_count}</TableCell>
-                          </TableRow>
-                        ))}
-                    </TableBody>
-                  </Table>
-                </CardContent>
-              </Card>
-            </div>
-          </>
+          <div className="grid gap-4 md:grid-cols-3">
+            <InsightCard
+              icon={Crown}
+              title="Pazar Lideri"
+              value={topCampaignSite?.site_name || '-'}
+              description={`${topCampaignSite?.total_campaigns || 0} kampanya`}
+              tone="positive"
+            />
+            <InsightCard
+              icon={Target}
+              title="Bonus Lideri"
+              value={topBonusSite?.site_name || '-'}
+              description={`Ort. ₺${(Number(topBonusSite?.avg_bonus) || 0).toFixed(0)}`}
+              tone="warning"
+            />
+            <InsightCard
+              icon={TrendingUp}
+              title="En Aktif Tür"
+              value={data?.comparisonTable[0] ? getCategoryLabel(data.comparisonTable[0].category) : '-'}
+              description={`${data?.comparisonTable[0]?.total_campaigns || 0} kampanya`}
+              tone="info"
+            />
+          </div>
         )}
+
+        {/* Site Sıralaması - Main Table */}
+        <Card>
+          <CardHeader>
+            <CardTitle className="text-base">Site Sıralaması</CardTitle>
+          </CardHeader>
+          <CardContent>
+            <Table>
+              <TableHeader>
+                <TableRow>
+                  <TableHead>#</TableHead>
+                  <TableHead>Site</TableHead>
+                  <TableHead className="text-right">Kampanya</TableHead>
+                  <TableHead className="text-right">Aktif</TableHead>
+                  <TableHead className="text-right">Aktif %</TableHead>
+                  <TableHead className="text-right">Ort. Bonus</TableHead>
+                </TableRow>
+              </TableHeader>
+              <TableBody>
+                {siteRankings.slice(0, 10).map((site, idx) => (
+                  <TableRow key={site.site_id}>
+                    <TableCell className="font-medium">{idx + 1}</TableCell>
+                    <TableCell>
+                      <div className="flex items-center gap-2">
+                        {site.site_name}
+                        {idx === 0 && <Badge variant="winner"><Crown className="h-3 w-3 mr-1" />Lider</Badge>}
+                      </div>
+                    </TableCell>
+                    <TableCell className="text-right">{site.total_campaigns}</TableCell>
+                    <TableCell className="text-right">{site.active_campaigns}</TableCell>
+                    <TableCell className="text-right">{(Number(site.active_rate) * 100).toFixed(1)}%</TableCell>
+                    <TableCell className="text-right font-mono">₺{Number(site.avg_bonus).toFixed(0)}</TableCell>
+                  </TableRow>
+                ))}
+              </TableBody>
+            </Table>
+          </CardContent>
+        </Card>
+
+        {/* Tür Bazlı Karşılaştırma - Collapsible */}
+        <Card>
+          <CardHeader className="cursor-pointer" onClick={() => setShowBonusTable(!showBonusTable)}>
+            <div className="flex items-center justify-between">
+              <CardTitle className="text-base">Tür Bazlı Karşılaştırma</CardTitle>
+              {showBonusTable ? <ChevronUp className="h-5 w-5" /> : <ChevronDown className="h-5 w-5" />}
+            </div>
+          </CardHeader>
+          {showBonusTable && (
+            <CardContent>
+              <Table>
+                <TableHeader>
+                  <TableRow>
+                    <TableHead>Tür</TableHead>
+                    <TableHead>En İyi Site</TableHead>
+                    <TableHead className="text-right">Kampanya</TableHead>
+                    <TableHead className="text-right">Toplam Site</TableHead>
+                  </TableRow>
+                </TableHeader>
+                <TableBody>
+                  {(data?.comparisonTable || []).slice(0, 10).map((row) => (
+                    <TableRow key={row.category}>
+                      <TableCell className="font-medium">{getCategoryLabel(row.category)}</TableCell>
+                      <TableCell>
+                        <div className="flex items-center gap-2">
+                          {row.best_site}
+                          {row.best_site_campaigns > 0 && <Badge variant="winner"><Crown className="h-3 w-3 mr-1" /></Badge>}
+                        </div>
+                      </TableCell>
+                      <TableCell className="text-right">{row.best_site_campaigns}</TableCell>
+                      <TableCell className="text-right">{row.total_sites}</TableCell>
+                    </TableRow>
+                  ))}
+                </TableBody>
+              </Table>
+            </CardContent>
+          )}
+        </Card>
+
+        {/* Site vs Site Matrisi - Collapsible */}
+        <Card>
+          <CardHeader className="cursor-pointer" onClick={() => setShowMatrix(!showMatrix)}>
+            <div className="flex items-center justify-between">
+              <CardTitle className="text-base">Site vs Site Matrisi</CardTitle>
+              {showMatrix ? <ChevronUp className="h-5 w-5" /> : <ChevronDown className="h-5 w-5" />}
+            </div>
+          </CardHeader>
+          {showMatrix && (
+            <CardContent>
+              <div className="overflow-x-auto">
+                <Table>
+                  <TableHeader>
+                    <TableRow>
+                      <TableHead className="sticky left-0 bg-background">Tür</TableHead>
+                      {(data?.sites || []).slice(0, 8).map(s => (
+                        <TableHead key={s.site_code} className="text-center">{s.site_code}</TableHead>
+                      ))}
+                    </TableRow>
+                  </TableHeader>
+                  <TableBody>
+                    {(data?.categories || []).slice(0, 10).map(cat => (
+                      <TableRow key={cat}>
+                        <TableCell className="font-medium sticky left-0 bg-background">{getCategoryLabel(cat)}</TableCell>
+                        {(data?.sites || []).slice(0, 8).map(s => {
+                          const cell = data?.siteMatrix?.[cat]?.[s.site_code]
+                          const intensity = Math.min(1, (cell?.campaign_count || 0) / Math.max(1, Number(topCampaignSite?.total_campaigns || 1)))
+                          return (
+                            <TableCell key={s.site_code} className="text-center">
+                              {cell ? (
+                                <div
+                                  className={cn(
+                                    'inline-flex min-w-[50px] flex-col items-center rounded-lg px-2 py-1',
+                                    cell.is_winner && 'ring-1 ring-yellow-300'
+                                  )}
+                                  style={{ backgroundColor: `rgba(37, 99, 235, ${0.12 + intensity * 0.25})` }}
+                                >
+                                  <span className={cn('text-lg font-bold', cell.campaign_count === 0 && 'text-muted-foreground')}>
+                                    {cell.campaign_count}
+                                  </span>
+                                </div>
+                              ) : (
+                                <span className="text-muted-foreground">-</span>
+                              )}
+                            </TableCell>
+                          )
+                        })}
+                      </TableRow>
+                    ))}
+                  </TableBody>
+                </Table>
+              </div>
+            </CardContent>
+          )}
+        </Card>
+
+        {/* En İyi Bonus / Fırsatlar */}
+        <Card>
+          <CardHeader>
+            <CardTitle className="text-base">En İyi Bonus Fırsatları</CardTitle>
+          </CardHeader>
+          <CardContent>
+            {(data?.bestDeals || []).length > 0 ? (
+              <div className="grid gap-4 md:grid-cols-3">
+                {(data?.bestDeals || []).slice(0, 6).map((deal) => (
+                  <Card key={deal.campaign_id} className="border-border/70 bg-muted/10">
+                    <CardContent className="p-4 space-y-2">
+                      <div className="text-sm text-muted-foreground">{deal.site_name}</div>
+                      <div className="font-medium line-clamp-2 text-sm">{deal.campaign_title}</div>
+                      <div className="flex flex-wrap gap-2">
+                        <Badge variant="outline" className="text-xs">{getCategoryLabel(deal.category)}</Badge>
+                        <Badge className={cn('text-xs', deal.status === 'active' && 'bg-green-100 text-green-800')}>
+                          {deal.status}
+                        </Badge>
+                      </div>
+                      <div className="flex gap-4 text-sm">
+                        <div>
+                          <div className="text-muted-foreground">Bonus</div>
+                          <div className="font-semibold">{deal.bonus_amount ? `₺${deal.bonus_amount.toLocaleString()}` : '-'}</div>
+                        </div>
+                        <div>
+                          <div className="text-muted-foreground">%</div>
+                          <div className="font-semibold">{deal.bonus_percentage ? `%${deal.bonus_percentage}` : '-'}</div>
+                        </div>
+                      </div>
+                    </CardContent>
+                  </Card>
+                ))}
+              </div>
+            ) : (
+              <p className="text-sm text-muted-foreground">Bonus verisi bulunamadı.</p>
+            )}
+          </CardContent>
+        </Card>
       </main>
     </div>
   )

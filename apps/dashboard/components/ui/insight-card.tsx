@@ -8,6 +8,7 @@ interface InsightCardProps {
   value?: string | number
   description?: string
   tone?: 'default' | 'positive' | 'warning' | 'info'
+  highlight?: boolean
   className?: string
 }
 
@@ -24,10 +25,11 @@ export function InsightCard({
   value,
   description,
   tone = 'default',
+  highlight = false,
   className,
 }: InsightCardProps) {
   return (
-    <Card className={cn(toneClasses[tone], className)}>
+    <Card className={cn(toneClasses[tone], highlight && 'border-yellow-400 bg-yellow-50/50', className)}>
       <CardContent className="flex items-start gap-3 p-5">
         {Icon && (
           <div className="rounded-xl bg-background/80 p-2.5 shadow-sm">
