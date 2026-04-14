@@ -4,6 +4,7 @@ import { join } from 'path';
 import { createHash } from 'crypto';
 
 const DB_MIGRATIONS_PATH = '/app/db/migrations';
+const LEGACY_MIGRATIONS = new Set(['001_initial_schema.sql', '002_seed_sites.sql']);
 
 async function runMigrations() {
   const db = getDb();
@@ -29,6 +30,14 @@ async function runMigrations() {
     )
   `);
 
+  const hasSitesTable = await db.query(`
+    SELECT EXISTS (
+      SELECT 1
+      FROM information_schema.tables
+      WHERE table_schema = 'public' AND table_name = 'sites'
+    ) AS exists
+  `);
+  const isLegacyDatabase = Boolean(hasSitesTable.rows[0]?.exists);
   for (const filename of migrations) {
     const migrationPath = join(DB_MIGRATIONS_PATH, filename);
     const sql = readFileSync(migrationPath, 'utf-8');
@@ -62,6 +71,22 @@ async function runMigrations() {
       await db.query('COMMIT');
     } catch (error) {
       await db.query('ROLLBACK');
+      const message = error instanceof Error ? error.message : String(error);
+      const isLegacyBootstrapError =
+        isLegacyDatabase &&
+        LEGACY_MIGRATIONS.has(filename) &&
+        (message.includes('already exists') || message.includes('duplicate key value'));
+
+      if (isLegacyBootstrapError) {
+        await db.query(
+          `INSERT INTO schema_migrations (filename, checksum, executed_at)
+           VALUES ($1, $2, NOW())
+           ON CONFLICT (filename) DO NOTHING`,
+          [filename, checksum]
+        );
+        console.log(`Marking ${filename} as applied for legacy database`);
+        continue;
+      }
       throw error;
     }
     console.log(`${filename} completed`);
