@@ -14,6 +14,7 @@ async function runMigrations() {
     '004_fix_bitalih_schema.sql',
     '005_add_performance_indexes.sql',
     '006_add_search_indexes.sql',
+    '007_legacy_schema_compat.sql',
   ];
   
   console.log('Running migrations...');

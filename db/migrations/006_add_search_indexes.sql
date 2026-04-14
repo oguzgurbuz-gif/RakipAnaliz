@@ -6,8 +6,8 @@
 -- ============================================================================
 -- 1. Trigram indexes for search performance (ILIKE with leading wildcard)
 -- ============================================================================
-CREATE INDEX CONCURRENTLY IF NOT EXISTS idx_campaigns_title_trgm ON campaigns USING gin (title gin_trgm_ops);
-CREATE INDEX CONCURRENTLY IF NOT EXISTS idx_campaigns_body_trgm ON campaigns USING gin (body gin_trgm_ops);
+CREATE INDEX IF NOT EXISTS idx_campaigns_title_trgm ON campaigns USING gin (title gin_trgm_ops);
+CREATE INDEX IF NOT EXISTS idx_campaigns_body_trgm ON campaigns USING gin (body gin_trgm_ops);
 
 -- ============================================================================
 -- 2. Jobs table index for pickup query
