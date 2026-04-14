@@ -9,7 +9,7 @@ export async function GET() {
         s.name as site_name,
         s.code as site_code,
         COUNT(c.id) as total_campaigns,
-        COUNT(CASE WHEN c.metadata->'ai_analysis'->>'summary' IS NOT NULL THEN 1 END) as with_ai,
+        COUNT(CASE WHEN JSON_UNQUOTE(JSON_EXTRACT(c.metadata, '$.ai_analysis.summary')) IS NOT NULL THEN 1 END) as with_ai,
         COUNT(CASE WHEN c.valid_from IS NULL OR c.valid_to IS NULL THEN 1 END) as missing_dates,
         COUNT(CASE WHEN c.body IS NULL OR c.body = '' THEN 1 END) as missing_body
       FROM sites s

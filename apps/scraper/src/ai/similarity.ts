@@ -165,6 +165,8 @@ export function buildFingerprintForSimilarity(
 }
 
 export interface SimilaritySearchParams {
+  /** Campaign id to exclude from results (usually the source campaign). */
+  excludeCampaignId: string;
   categoryCode?: string;
   dateFrom?: string;
   dateTo?: string;
@@ -174,13 +176,13 @@ export interface SimilaritySearchParams {
 
 export function buildSimilarityQuery(
   normalizedText: string,
-  params: SimilaritySearchParams = {}
+  params: SimilaritySearchParams
 ): {
   sql: string;
   args: unknown[];
 } {
-  const args: unknown[] = [normalizedText];
-  let argIndex = 2;
+  const args: unknown[] = [normalizedText, params.excludeCampaignId];
+  let argIndex = 3;
 
   let sql = `
     SELECT
@@ -192,13 +194,13 @@ export function buildSimilarityQuery(
       c.valid_from,
       c.valid_to,
       s.name as site_name,
-      similarity(c.normalized_text, $1) as text_score
-    FROM public.campaigns c
-    LEFT JOIN public.campaign_ai_analyses ca ON ca.campaign_id = c.id AND ca.analysis_type = 'content_analysis'
-    LEFT JOIN public.sites s ON s.id = c.site_id
+      (LOCATE(LOWER($1), LOWER(IFNULL(c.normalized_text, ''))) > 0) as text_score
+    FROM campaigns c
+    LEFT JOIN campaign_ai_analyses ca ON ca.campaign_id = c.id AND ca.analysis_type = 'content_analysis'
+    LEFT JOIN sites s ON s.id = c.site_id
     WHERE c.id != $2
       AND c.status = 'active'
-      AND c.valid_to > NOW() - INTERVAL '120 days'
+      AND (c.valid_to IS NULL OR c.valid_to > DATE_SUB(NOW(), INTERVAL 120 DAY))
   `;
 
   if (params.categoryCode) {
@@ -208,13 +210,14 @@ export function buildSimilarityQuery(
   }
 
   if (params.excludeCampaignIds && params.excludeCampaignIds.length > 0) {
-    sql += ` AND c.id != ALL($${argIndex}::uuid[])`;
-    args.push(params.excludeCampaignIds);
-    argIndex++;
+    const placeholders = params.excludeCampaignIds.map((_, i) => `$${argIndex + i}`).join(', ');
+    sql += ` AND c.id NOT IN (${placeholders})`;
+    args.push(...params.excludeCampaignIds);
+    argIndex += params.excludeCampaignIds.length;
   }
 
   sql += `
-    ORDER BY text_score DESC
+    ORDER BY text_score DESC, c.updated_at DESC
     LIMIT $${argIndex}
   `;
   args.push(params.limit ?? 20);

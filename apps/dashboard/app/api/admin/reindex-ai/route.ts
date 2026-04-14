@@ -24,6 +24,7 @@ export async function POST(request: NextRequest) {
     const body = await request.json();
     const { campaignIds, analysisType, priority } = reindexSchema.parse(body);
 
+    const idPlaceholders = campaignIds.map((_, i) => `$${i + 1}`).join(', ');
     const validCampaigns = await query<{ 
       id: string; 
       title: string; 
@@ -36,8 +37,8 @@ export async function POST(request: NextRequest) {
              c.valid_from, c.valid_to
       FROM campaigns c
       JOIN sites s ON s.id = c.site_id
-      WHERE c.id = ANY($1)
-    `, [campaignIds]);
+      WHERE c.id IN (${idPlaceholders})
+    `, campaignIds);
 
     if (validCampaigns.length === 0) {
       throw new NotFoundError('Campaigns');
@@ -64,7 +65,7 @@ export async function POST(request: NextRequest) {
       const result = await query<JobRow>(`
         INSERT INTO jobs (type, payload, status, priority, max_attempts, scheduled_at)
         VALUES ${jobPayloads}
-        RETURNING id, type, payload, status, priority, created_at
+        RETURNING CAST(id AS CHAR) as id, type as job_type, payload, status, priority, created_at
       `);
 
       jobs.push(...result);

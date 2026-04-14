@@ -1,7 +1,23 @@
-import { Pool, PoolClient } from 'pg';
+import type { DbExecutor } from './compat-query';
+
+function requireInsertedId(rows: Record<string, unknown>[]): string {
+  const id = rows[0]?.id;
+  if (id == null) throw new Error('Expected inserted row id');
+  return String(id);
+}
+
+function insertedJobId(rows: Record<string, unknown>[]): number {
+  return Number(requireInsertedId(rows));
+}
+
+function countAggregate(rows: Record<string, unknown>[]): { count: number } | null {
+  const row = rows[0];
+  if (!row) return null;
+  return { count: Number(row.count) };
+}
 
 export async function findCampaignByExternalId(
-  db: Pool,
+  db: DbExecutor,
   siteId: string,
   externalId: string
 ): Promise<Record<string, unknown> | null> {
@@ -13,7 +29,7 @@ export async function findCampaignByExternalId(
 }
 
 export async function findCampaignByFingerprint(
-  db: Pool,
+  db: DbExecutor,
   siteId: string,
   fingerprint: string
 ): Promise<Record<string, unknown> | null> {
@@ -25,7 +41,7 @@ export async function findCampaignByFingerprint(
 }
 
 export async function insertCampaign(
-  db: Pool,
+  db: DbExecutor,
   data: {
     siteId: string;
     externalId: string | null;
@@ -82,15 +98,15 @@ export async function insertCampaign(
       data.rawDateText,
       data.status,
       data.statusReason,
-      data.tags || null,
+      JSON.stringify(data.tags ?? []),
       data.metadata ? JSON.stringify(data.metadata) : null,
     ]
   );
-  return result.rows[0].id;
+  return requireInsertedId(result.rows);
 }
 
 export async function updateCampaignLastSeen(
-  db: Pool,
+  db: DbExecutor,
   campaignId: string
 ): Promise<void> {
   await db.query(
@@ -105,7 +121,7 @@ export async function updateCampaignLastSeen(
 }
 
 export async function insertCampaignVersion(
-  db: Pool,
+  db: DbExecutor,
   data: {
     campaignId: string;
     title: string;
@@ -145,18 +161,28 @@ export async function insertCampaignVersion(
       data.versionNo,
     ]
   );
-  return result.rows[0].id;
+  return requireInsertedId(result.rows);
 }
 
 export async function recalculateCampaignStatus(
-  db: Pool,
+  db: DbExecutor,
   campaignId: string
 ): Promise<void> {
-  await db.query(`SELECT recalculate_campaign_status($1)`, [campaignId]);
+  await db.query(
+    `UPDATE campaigns SET
+      status = CASE
+        WHEN is_visible_on_last_scrape = 0 THEN 'hidden'
+        WHEN valid_to IS NOT NULL AND valid_to < NOW() THEN 'expired'
+        ELSE 'active'
+      END,
+      updated_at = NOW()
+    WHERE id = $1`,
+    [campaignId]
+  );
 }
 
 export async function applyAiExtractedDates(
-  db: Pool,
+  db: DbExecutor,
   campaignId: string,
   dates: {
     validFrom: Date | null;
@@ -193,7 +219,7 @@ export async function applyAiExtractedDates(
 }
 
 export async function insertAiAnalysis(
-  db: Pool,
+  db: DbExecutor,
   data: {
     campaignId: string;
     campaignVersionId?: string;
@@ -277,11 +303,11 @@ export async function insertAiAnalysis(
       data.confidence ?? null,
     ]
   );
-  return result.rows[0].id;
+  return requireInsertedId(result.rows);
 }
 
 export async function getCampaignForRecalc(
-  db: Pool,
+  db: DbExecutor,
   campaignId: string
 ): Promise<Record<string, unknown> | null> {
   const result = await db.query(
@@ -295,39 +321,39 @@ export async function getCampaignForRecalc(
 }
 
 export async function getAiAnalysisStats(
-  db: Pool,
-  campaignId?: number
+  db: DbExecutor,
+  campaignId?: string
 ): Promise<Record<string, unknown> | null> {
-  let query: string;
+  let sql: string;
   let params: unknown[];
 
   if (campaignId !== undefined) {
-    query = `
+    sql = `
       SELECT 
         COUNT(*) as total,
-        AVG((analysis->>'valueScore')::numeric) as avg_value_score,
-        JSONB_OBJECT_AGG(analysis->>'category', COUNT(*)) as category_dist
-      FROM ai_analyses
+        NULL as avg_value_score,
+        CAST('{}' AS JSON) as category_dist
+      FROM campaign_ai_analyses
       WHERE campaign_id = $1
     `;
     params = [campaignId];
   } else {
-    query = `
+    sql = `
       SELECT 
         COUNT(*) as total,
-        AVG((analysis->>'valueScore')::numeric) as avg_value_score,
-        JSONB_OBJECT_AGG(analysis->>'category', COUNT(*)) as category_dist
-      FROM ai_analyses
+        NULL as avg_value_score,
+        CAST('{}' AS JSON) as category_dist
+      FROM campaign_ai_analyses
     `;
     params = [];
   }
 
-  const result = await db.query(query, params);
+  const result = await db.query(sql, params);
   return result.rows[0] ?? null;
 }
 
 export async function updateCampaignAiAnalysis(
-  db: Pool,
+  db: DbExecutor,
   campaignId: string,
   analysis: {
     category: string | null;
@@ -353,8 +379,14 @@ export async function updateCampaignAiAnalysis(
 ): Promise<void> {
   await db.query(
     `UPDATE campaigns SET
-      metadata = JSONB_SET(COALESCE(metadata, '{}'), '{ai_analysis}',
-        COALESCE(metadata->'ai_analysis', '{}'::jsonb) || $2::jsonb),
+      metadata = JSON_SET(
+        COALESCE(metadata, JSON_OBJECT()),
+        '$.ai_analysis',
+        JSON_MERGE_PATCH(
+          COALESCE(JSON_EXTRACT(metadata, '$.ai_analysis'), JSON_OBJECT()),
+          CAST($2 AS JSON)
+        )
+      ),
       updated_at = NOW()
     WHERE id = $1`,
     [campaignId, JSON.stringify(analysis)]
@@ -362,11 +394,11 @@ export async function updateCampaignAiAnalysis(
 }
 
 export async function getCampaignForDateExtraction(
-  db: Pool,
+  db: DbExecutor,
   campaignId: string
 ): Promise<Record<string, unknown> | null> {
   const result = await db.query(
-    `SELECT cv.title, cv.body, cv.source_url as terms_url
+    `SELECT cv.title, cv.body, c.source_url as terms_url
     FROM campaigns c
     JOIN campaign_versions cv ON c.id = cv.campaign_id
     WHERE c.id = $1
@@ -378,23 +410,23 @@ export async function getCampaignForDateExtraction(
 }
 
 export async function getStaleCampaignsWithoutDates(
-  db: Pool,
+  db: DbExecutor,
   limit: number
 ): Promise<string[]> {
   const result = await db.query(
     `SELECT id FROM campaigns
     WHERE valid_to IS NULL
     AND status != 'expired'
-    AND created_at < NOW() - INTERVAL '7 days'
+    AND created_at < DATE_SUB(NOW(), INTERVAL 7 DAY)
     ORDER BY created_at ASC
     LIMIT $1`,
     [limit]
   );
-  return result.rows.map((row) => row.id);
+  return result.rows.map((row) => String(row.id));
 }
 
 export async function insertWeeklyReport(
-  db: Pool,
+  db: DbExecutor,
   data: {
     periodStart: string;
     periodEnd: string;
@@ -404,7 +436,7 @@ export async function insertWeeklyReport(
     status: string;
     generatedAt: string;
   }
-): Promise<number> {
+): Promise<string> {
   const result = await db.query(
     `INSERT INTO weekly_reports (
       period_start, period_end, summary, by_site, top_bonuses, status, generated_at
@@ -420,11 +452,11 @@ export async function insertWeeklyReport(
       data.generatedAt,
     ]
   );
-  return result.rows[0].id;
+  return requireInsertedId(result.rows);
 }
 
 export async function getWeeklyReportItems(
-  db: Pool,
+  db: DbExecutor,
   reportId: string
 ): Promise<Record<string, unknown>[]> {
   const result = await db.query(
@@ -435,21 +467,24 @@ export async function getWeeklyReportItems(
 }
 
 export async function findSimilarCampaigns(
-  db: Pool,
+  db: DbExecutor,
   campaignId: string,
   category: string | null,
   limit: number
 ): Promise<Record<string, unknown>[]> {
   let query = `
-    SELECT c.*, similarity_score
+    SELECT c.*, cs.similarity_score as similarity_score
     FROM campaigns c
-    JOIN campaign_similarities cs ON c.id = cs.similar_campaign_id
-    WHERE cs.campaign_id = $1
+    JOIN campaign_similarities cs ON c.id = cs.campaign_id_2
+    WHERE cs.campaign_id_1 = $1
   `;
   const params: unknown[] = [campaignId];
 
   if (category) {
-    query += ` AND (c.metadata->>'category') = $2`;
+    query += ` AND COALESCE(
+      JSON_UNQUOTE(JSON_EXTRACT(c.metadata, '$.ai_analysis.category')),
+      JSON_UNQUOTE(JSON_EXTRACT(c.metadata, '$.ai_analysis.campaign_type'))
+    ) = $2`;
     params.push(category);
   }
 
@@ -461,7 +496,7 @@ export async function findSimilarCampaigns(
 }
 
 export async function insertCampaignSimilarity(
-  db: Pool,
+  db: DbExecutor,
   data: {
     campaignId: string;
     similarCampaignId: string;
@@ -469,13 +504,13 @@ export async function insertCampaignSimilarity(
     comparisonType?: string;
   }
 ): Promise<string> {
-  const result = await db.query(
+  await db.query(
     `INSERT INTO campaign_similarities (
       campaign_id_1, campaign_id_2, similarity_score, comparison_type
     ) VALUES ($1, $2, $3, $4)
-    ON CONFLICT (campaign_id_1, campaign_id_2) DO UPDATE
-    SET similarity_score = $3, comparison_type = $4
-    RETURNING id`,
+    ON DUPLICATE KEY UPDATE
+      similarity_score = VALUES(similarity_score),
+      comparison_type = VALUES(comparison_type)`,
     [
       data.campaignId,
       data.similarCampaignId,
@@ -483,11 +518,15 @@ export async function insertCampaignSimilarity(
       data.comparisonType ?? null,
     ]
   );
-  return result.rows[0].id;
+  const row = await db.query(
+    `SELECT id FROM campaign_similarities WHERE campaign_id_1 = $1 AND campaign_id_2 = $2 LIMIT 1`,
+    [data.campaignId, data.similarCampaignId]
+  );
+  return requireInsertedId(row.rows);
 }
 
 export async function insertScrapeRun(
-  db: Pool,
+  db: DbExecutor,
   data: {
     siteId: string;
     status: string;
@@ -516,11 +555,11 @@ export async function insertScrapeRun(
       data.errors,
     ]
   );
-  return result.rows[0].id;
+  return requireInsertedId(result.rows);
 }
 
 export async function updateScrapeRun(
-  db: Pool,
+  db: DbExecutor,
   runId: string,
   data: {
     status?: string;
@@ -575,7 +614,7 @@ export async function updateScrapeRun(
 }
 
 export async function insertScrapeRunSite(
-  db: Pool,
+  db: DbExecutor,
   data: {
     scrapeRunId: string;
     siteId: string;
@@ -604,11 +643,11 @@ export async function insertScrapeRunSite(
       data.errors,
     ]
   );
-  return result.rows[0].id;
+  return requireInsertedId(result.rows);
 }
 
 export async function updateScrapeRunSite(
-  db: Pool,
+  db: DbExecutor,
   siteRunId: string,
   data: {
     status?: string;
@@ -658,7 +697,7 @@ export async function updateScrapeRunSite(
 }
 
 export async function insertRawSnapshot(
-  db: Pool,
+  db: DbExecutor,
   data: {
     campaignId: string;
     siteId: string;
@@ -671,11 +710,11 @@ export async function insertRawSnapshot(
     RETURNING id`,
     [data.campaignId, data.siteId, JSON.stringify(data.rawData)]
   );
-  return result.rows[0].id;
+  return requireInsertedId(result.rows);
 }
 
 export async function publishSseEvent(
-  db: Pool,
+  db: DbExecutor,
   eventType: string,
   channel: string,
   payload: Record<string, unknown>
@@ -688,7 +727,7 @@ export async function publishSseEvent(
 }
 
 export async function findExistingCampaign(
-  db: Pool,
+  db: DbExecutor,
   fingerprint: string
 ): Promise<Record<string, unknown> | null> {
   const result = await db.query(
@@ -699,7 +738,7 @@ export async function findExistingCampaign(
 }
 
 export async function getActiveCampaignsBySite(
-  db: Pool,
+  db: DbExecutor,
   siteCode: string
 ): Promise<Record<string, unknown>[]> {
   const result = await db.query(
@@ -712,7 +751,7 @@ export async function getActiveCampaignsBySite(
 }
 
 export async function updateCampaignVisibility(
-  db: Pool,
+  db: DbExecutor,
   fingerprint: string,
   visibility: string
 ): Promise<void> {
@@ -723,7 +762,7 @@ export async function updateCampaignVisibility(
 }
 
 export async function updateCampaign(
-  db: Pool,
+  db: DbExecutor,
   campaignId: string,
   data: {
     title: string;
@@ -745,7 +784,7 @@ export async function updateCampaign(
 }
 
 export async function updateSiteScrapeStatus(
-  db: Pool,
+  db: DbExecutor,
   siteCode: string,
   data: {
     lastScrapedAt: string;
@@ -773,7 +812,7 @@ export async function updateSiteScrapeStatus(
 }
 
 export async function getCampaignCountBySite(
-  db: Pool,
+  db: DbExecutor,
   siteCode: string
 ): Promise<{ count: number } | null> {
   const result = await db.query(
@@ -782,11 +821,11 @@ export async function getCampaignCountBySite(
     WHERE s.code = $1`,
     [siteCode]
   );
-  return result.rows[0] ?? null;
+  return countAggregate(result.rows);
 }
 
 export async function getLatestVersion(
-  db: Pool,
+  db: DbExecutor,
   campaignId: string
 ): Promise<Record<string, unknown> | null> {
   const result = await db.query(
@@ -800,20 +839,20 @@ export async function getLatestVersion(
 }
 
 export async function getVersionCount(
-  db: Pool,
+  db: DbExecutor,
   campaignId: string
 ): Promise<{ count: number } | null> {
   const result = await db.query(
     `SELECT COUNT(*) as count FROM campaign_versions WHERE campaign_id = $1`,
     [campaignId]
   );
-  return result.rows[0] ?? null;
+  return countAggregate(result.rows);
 }
 
 // version_no is auto-managed by trigger or app logic
 
 export async function updateCampaignVersionId(
-  db: Pool,
+  db: DbExecutor,
   campaignId: string,
   versionId: string
 ): Promise<void> {
@@ -824,7 +863,7 @@ export async function updateCampaignVersionId(
 }
 
 export async function insertJob(
-  db: Pool,
+  db: DbExecutor,
   data: {
     type: string;
     status: string;
@@ -836,15 +875,15 @@ export async function insertJob(
 ): Promise<number> {
   const result = await db.query(
     `INSERT INTO jobs (type, status, priority, payload, max_attempts, scheduled_at)
-    VALUES ($1, $2, $3, $4, $5, $6)
+    VALUES ($1, $2, $3, CAST($4 AS JSON), $5, $6)
     RETURNING id`,
     [data.type, data.status, data.priority, data.payload, data.maxAttempts, data.scheduledAt]
   );
-  return result.rows[0].id;
+  return insertedJobId(result.rows);
 }
 
 export async function getPendingJobs(
-  db: Pool,
+  db: DbExecutor,
   limit: number = 10
 ): Promise<Record<string, unknown>[]> {
   const result = await db.query(
@@ -858,7 +897,7 @@ export async function getPendingJobs(
 }
 
 export async function updateJobStatus(
-  db: Pool,
+  db: DbExecutor,
   jobId: number,
   status: string,
   result?: string | null,
@@ -883,7 +922,7 @@ export async function updateJobStatus(
 }
 
 export async function incrementJobAttempts(
-  db: Pool,
+  db: DbExecutor,
   jobId: number
 ): Promise<void> {
   await db.query(
@@ -893,7 +932,7 @@ export async function incrementJobAttempts(
 }
 
 export async function getTotalCampaignsInPeriod(
-  db: Pool,
+  db: DbExecutor,
   startDate: string,
   endDate: string
 ): Promise<{ count: number } | null> {
@@ -902,11 +941,11 @@ export async function getTotalCampaignsInPeriod(
     WHERE created_at >= $1 AND created_at <= $2`,
     [startDate, endDate]
   );
-  return result.rows[0] ?? null;
+  return countAggregate(result.rows);
 }
 
 export async function getNewCampaignsInPeriod(
-  db: Pool,
+  db: DbExecutor,
   startDate: string,
   endDate: string
 ): Promise<{ count: number } | null> {
@@ -916,11 +955,11 @@ export async function getNewCampaignsInPeriod(
     AND status_reason = 'created'`,
     [startDate, endDate]
   );
-  return result.rows[0] ?? null;
+  return countAggregate(result.rows);
 }
 
 export async function getExpiredCampaignsInPeriod(
-  db: Pool,
+  db: DbExecutor,
   startDate: string,
   endDate: string
 ): Promise<{ count: number } | null> {
@@ -930,11 +969,11 @@ export async function getExpiredCampaignsInPeriod(
     AND status = 'expired'`,
     [startDate, endDate]
   );
-  return result.rows[0] ?? null;
+  return countAggregate(result.rows);
 }
 
 export async function getUpdatedCampaignsInPeriod(
-  db: Pool,
+  db: DbExecutor,
   startDate: string,
   endDate: string
 ): Promise<{ count: number } | null> {
@@ -944,11 +983,11 @@ export async function getUpdatedCampaignsInPeriod(
     AND status = 'updated'`,
     [startDate, endDate]
   );
-  return result.rows[0] ?? null;
+  return countAggregate(result.rows);
 }
 
 export async function getActiveSitesInPeriod(
-  db: Pool,
+  db: DbExecutor,
   startDate: string,
   endDate: string
 ): Promise<{ count: number } | null> {
@@ -957,11 +996,11 @@ export async function getActiveSitesInPeriod(
     WHERE created_at >= $1 AND created_at <= $2`,
     [startDate, endDate]
   );
-  return result.rows[0] ?? null;
+  return countAggregate(result.rows);
 }
 
 export async function getCampaignsBySiteInPeriod(
-  db: Pool,
+  db: DbExecutor,
   startDate: string,
   endDate: string,
   includeSites?: string[]
@@ -980,8 +1019,9 @@ export async function getCampaignsBySiteInPeriod(
   const params: unknown[] = [startDate, endDate];
 
   if (includeSites && includeSites.length > 0) {
-    query += ` AND s.code = ANY($3)`;
-    params.push(includeSites);
+    const placeholders = includeSites.map((_, i) => `$${3 + i}`).join(', ');
+    query += ` AND s.code IN (${placeholders})`;
+    params.push(...includeSites);
   }
 
   query += ` GROUP BY s.code`;
@@ -991,7 +1031,7 @@ export async function getCampaignsBySiteInPeriod(
 }
 
 export async function getTopBonusesInPeriod(
-  db: Pool,
+  db: DbExecutor,
   startDate: string,
   endDate: string,
   limit: number
@@ -1000,13 +1040,13 @@ export async function getTopBonusesInPeriod(
     `SELECT 
       s.code as site_code,
       cv.title,
-      (c.metadata->>'valueScore')::numeric as value_score,
-      (c.metadata->>'ai_analysis') as ai_analysis
+      CAST(JSON_UNQUOTE(JSON_EXTRACT(c.metadata, '$.valueScore')) AS DECIMAL(20,4)) as value_score,
+      JSON_UNQUOTE(JSON_EXTRACT(c.metadata, '$.ai_analysis')) as ai_analysis
     FROM campaigns c
     JOIN sites s ON c.site_id = s.id
     JOIN campaign_versions cv ON c.id = cv.campaign_id
     WHERE c.created_at >= $1 AND c.created_at <= $2
-    ORDER BY value_score DESC NULLS LAST
+    ORDER BY (value_score IS NULL), value_score DESC
     LIMIT $3`,
     [startDate, endDate, limit]
   );
@@ -1014,7 +1054,7 @@ export async function getTopBonusesInPeriod(
 }
 
 export async function getCampaignStatusCounts(
-  db: Pool
+  db: DbExecutor
 ): Promise<Record<string, unknown> | null> {
   const result = await db.query(
     `SELECT 
@@ -1028,7 +1068,7 @@ export async function getCampaignStatusCounts(
 }
 
 export async function getLatestWeeklyReport(
-  db: Pool
+  db: DbExecutor
 ): Promise<Record<string, unknown> | null> {
   const result = await db.query(
     `SELECT * FROM weekly_reports ORDER BY generated_at DESC LIMIT 1`
@@ -1037,7 +1077,7 @@ export async function getLatestWeeklyReport(
 }
 
 export async function getWeeklyReportHistory(
-  db: Pool,
+  db: DbExecutor,
   limit: number
 ): Promise<Record<string, unknown>[]> {
   const result = await db.query(
@@ -1048,7 +1088,7 @@ export async function getWeeklyReportHistory(
 }
 
 export async function getCampaignIdsBySite(
-  db: Pool,
+  db: DbExecutor,
   siteCode: string,
   batchSize: number
 ): Promise<string[]> {
@@ -1059,22 +1099,22 @@ export async function getCampaignIdsBySite(
     LIMIT $2`,
     [siteCode, batchSize]
   );
-  return result.rows.map((row) => row.id);
+  return result.rows.map((row) => String(row.id));
 }
 
 export async function getAllCampaignIds(
-  db: Pool,
+  db: DbExecutor,
   batchSize: number
 ): Promise<string[]> {
   const result = await db.query(
     `SELECT id FROM campaigns LIMIT $1`,
     [batchSize]
   );
-  return result.rows.map((row) => row.id);
+  return result.rows.map((row) => String(row.id));
 }
 
 export async function getLatestVersionForCampaign(
-  db: Pool,
+  db: DbExecutor,
   campaignId: string
 ): Promise<Record<string, unknown> | null> {
   const result = await db.query(
@@ -1088,18 +1128,20 @@ export async function getLatestVersionForCampaign(
 }
 
 export async function getCampaignStatus(
-  db: Pool,
+  db: DbExecutor,
   campaignId: string
 ): Promise<{ status: string } | null> {
   const result = await db.query(
     `SELECT status FROM campaigns WHERE id = $1`,
     [campaignId]
   );
-  return result.rows[0] ?? null;
+  const row = result.rows[0];
+  if (!row) return null;
+  return { status: String(row.status) };
 }
 
 export async function updateCampaignStatus(
-  db: Pool,
+  db: DbExecutor,
   campaignId: string,
   status: string,
   visibility: string
@@ -1111,25 +1153,25 @@ export async function updateCampaignStatus(
 }
 
 export async function getExpiredCampaignIds(
-  db: Pool
+  db: DbExecutor
 ): Promise<string[]> {
   const result = await db.query(
     `SELECT id FROM campaigns WHERE status = 'expired'`
   );
-  return result.rows.map((row) => row.id);
+  return result.rows.map((row) => String(row.id));
 }
 
 export async function getPendingCampaignIds(
-  db: Pool
+  db: DbExecutor
 ): Promise<string[]> {
   const result = await db.query(
     `SELECT id FROM campaigns WHERE status = 'pending'`
   );
-  return result.rows.map((row) => row.id);
+  return result.rows.map((row) => String(row.id));
 }
 
 export async function insertErrorLog(
-  db: Pool,
+  db: DbExecutor,
   data: {
     errorCode?: string
     errorMessage: string
@@ -1151,5 +1193,5 @@ export async function insertErrorLog(
       data.severity || 'error',
     ]
   );
-  return result.rows[0].id;
+  return requireInsertedId(result.rows);
 }

@@ -36,16 +36,17 @@ export async function POST(request: NextRequest) {
     let sites: SiteRow[];
 
     if (siteCodes && siteCodes.length > 0) {
+      const ph = siteCodes.map((_, i) => `$${i + 1}`).join(', ');
       sites = await query<SiteRow>(`
         SELECT id, code, name, base_url
         FROM sites
-        WHERE code = ANY($1) AND is_active = true
-      `, [siteCodes]);
+        WHERE code IN (${ph}) AND is_active = 1
+      `, siteCodes);
     } else {
       sites = await query<SiteRow>(`
         SELECT id, code, name, base_url
         FROM sites
-        WHERE is_active = true
+        WHERE is_active = 1
       `);
     }
 
@@ -70,7 +71,7 @@ export async function POST(request: NextRequest) {
       const result = await query<JobRow>(`
         INSERT INTO jobs (type, payload, status, priority, max_attempts, scheduled_at)
         VALUES ${jobPayloads}
-        RETURNING id::text, type as job_type, payload, status, priority, created_at
+        RETURNING CAST(id AS CHAR) as id, type as job_type, payload, status, priority, created_at
       `);
 
       jobs.push(...result);

@@ -137,10 +137,10 @@ export async function GET(
       query<StatusHistoryRow>(`
         SELECT 
           id, campaign_id, old_status as previous_status, new_status,
-          reason, created_at as changed_at, null as context
+          reason, changed_at, context
         FROM campaign_status_history
         WHERE campaign_id = $1
-        ORDER BY created_at DESC
+        ORDER BY changed_at DESC
         LIMIT 20
       `, [id]),
 
@@ -156,8 +156,8 @@ export async function GET(
 
       query<NoteRow>(`
         SELECT 
-          id, campaign_id, created_by as author_name, content as note_text,
-          null as note_type, false as is_pinned, created_at, updated_at
+          id, campaign_id, author_name, note_text,
+          note_type, is_pinned, created_at, updated_at
         FROM campaign_notes
         WHERE campaign_id = $1
         ORDER BY created_at DESC

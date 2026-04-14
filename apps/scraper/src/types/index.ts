@@ -147,7 +147,7 @@ export type JobType =
   | 'status-recalc';
 
 export interface ScrapeRun {
-  id: number;
+  id: string;
   siteCode: string;
   status: 'running' | 'success' | 'failed' | 'partial';
   startedAt: Date;

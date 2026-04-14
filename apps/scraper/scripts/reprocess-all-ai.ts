@@ -88,26 +88,31 @@ async function reprocessAllCampaigns() {
         };
 
         // Update using a single JSON parameter
-        await db.query(`
+        await db.query(
+          `
           UPDATE campaigns SET
-            metadata = jsonb_set(
-              COALESCE(metadata, '{}'),
-              '{ai_analysis}',
-              $2::jsonb
+            metadata = JSON_SET(
+              COALESCE(metadata, JSON_OBJECT()),
+              '$.ai_analysis',
+              CAST($2 AS JSON)
             ),
             updated_at = NOW()
           WHERE id = $1
-        `, [campaign.id, JSON.stringify(aiAnalysis)]);
+        `,
+          [campaign.id, JSON.stringify(aiAnalysis)]
+        );
 
-        // Update dates separately
         if (data.valid_from || data.valid_to) {
-          await db.query(`
+          await db.query(
+            `
             UPDATE campaigns SET
-              valid_from = COALESCE($2::timestamptz, valid_from),
-              valid_to = COALESCE($3::timestamptz, valid_to),
+              valid_from = COALESCE($2, valid_from),
+              valid_to = COALESCE($3, valid_to),
               updated_at = NOW()
             WHERE id = $1
-          `, [campaign.id, data.valid_from, data.valid_to]);
+          `,
+            [campaign.id, data.valid_from, data.valid_to]
+          );
         }
         
         successCount++;

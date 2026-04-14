@@ -7,7 +7,7 @@ export async function GET() {
     const result = await query(`
       SELECT severity, COUNT(*) as count
       FROM error_logs
-      WHERE created_at > NOW() - INTERVAL '7 days'
+      WHERE created_at > DATE_SUB(NOW(), INTERVAL 7 DAY)
       GROUP BY severity
       ORDER BY count DESC
     `)

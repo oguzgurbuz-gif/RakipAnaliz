@@ -52,37 +52,13 @@ type SiteCategoryMatrix = {
   is_winner: boolean;
 };
 
-export async function GET(request: NextRequest) {
-  try {
-    const searchParams = Object.fromEntries(new URLSearchParams(request.nextUrl.search));
-    const params = querySchema.parse(searchParams);
-    const { category, metric } = params;
+const categoryExpr = `COALESCE(
+  NULLIF(JSON_UNQUOTE(JSON_EXTRACT(c.metadata, '$.ai_analysis.category')), ''),
+  NULLIF(JSON_UNQUOTE(JSON_EXTRACT(c.metadata, '$.ai_analysis.campaign_type')), '')
+)`;
 
-    const categoriesQuery = `
-      SELECT DISTINCT c.metadata->'ai_analysis'->>'category' as category
-      FROM campaigns c
-      WHERE c.metadata->'ai_analysis'->>'category' IS NOT NULL
-        AND c.metadata->'ai_analysis'->>'category' != ''
-      ORDER BY c.metadata->'ai_analysis'->>'category'
-    `;
-    const categoriesResult = await query<{ category: string }>(categoriesQuery);
-    const categories = categoriesResult.map(r => r.category);
-
-    const sitesQuery = `
-      SELECT id as site_id, name as site_name, code as site_code
-      FROM sites
-      ORDER BY name
-    `;
-    const sitesResult = await query<{ site_id: string; site_name: string; site_code: string }>(sitesQuery);
-    const sites = sitesResult;
-
-    let statsParams: unknown[] = [];
-    if (category) {
-      statsParams.push(category);
-    }
-
-    const categoryExpr = `COALESCE(c.metadata->'ai_analysis'->>'category', c.metadata->'ai_analysis'->>'campaign_type')`;
-    const bonusMetricsCte = `
+function bonusMetricsCte(): string {
+  return `
       WITH campaign_bonus_metrics AS (
         SELECT
           c.id,
@@ -91,31 +67,31 @@ export async function GET(request: NextRequest) {
           c.status,
           c.valid_to,
           ${categoryExpr} as category,
-          NULLIF(COALESCE(
-            c.metadata->>'bonus_amount',
-            c.metadata->'ai_analysis'->'extractedTags'->>'bonus_amount'
-          ), '')::numeric as direct_bonus_amount,
-          NULLIF(COALESCE(
-            c.metadata->>'bonus_percentage',
-            c.metadata->'ai_analysis'->'extractedTags'->>'bonus_percentage'
-          ), '')::numeric as bonus_percentage,
-          NULLIF(COALESCE(
-            c.metadata->'ai_analysis'->'extractedTags'->>'min_deposit',
-            c.metadata->'ai_analysis'->'conditions'->>'min_deposit'
-          ), '')::numeric as min_deposit,
-          NULLIF(COALESCE(
-            c.metadata->'ai_analysis'->'extractedTags'->>'max_bonus',
-            c.metadata->'ai_analysis'->'conditions'->>'max_bonus'
-          ), '')::numeric as max_bonus,
-          NULLIF(COALESCE(
-            c.metadata->'ai_analysis'->'extractedTags'->>'free_bet_amount',
-            c.metadata->'ai_analysis'->'extractedTags'->>'freebet_amount',
-            c.metadata->'ai_analysis'->'conditions'->>'freebet_amount'
-          ), '')::numeric as freebet_amount,
-          NULLIF(COALESCE(
-            c.metadata->'ai_analysis'->'extractedTags'->>'cashback_percent',
-            c.metadata->'ai_analysis'->'conditions'->>'cashback_percentage'
-          ), '')::numeric as cashback_percent
+          CAST(NULLIF(TRIM(COALESCE(
+            JSON_UNQUOTE(JSON_EXTRACT(c.metadata, '$.bonus_amount')),
+            JSON_UNQUOTE(JSON_EXTRACT(c.metadata, '$.ai_analysis.extractedTags.bonus_amount'))
+          )), '') AS DECIMAL(20,4)) as direct_bonus_amount,
+          CAST(NULLIF(TRIM(COALESCE(
+            JSON_UNQUOTE(JSON_EXTRACT(c.metadata, '$.bonus_percentage')),
+            JSON_UNQUOTE(JSON_EXTRACT(c.metadata, '$.ai_analysis.extractedTags.bonus_percentage'))
+          )), '') AS DECIMAL(20,4)) as bonus_percentage,
+          CAST(NULLIF(TRIM(COALESCE(
+            JSON_UNQUOTE(JSON_EXTRACT(c.metadata, '$.ai_analysis.extractedTags.min_deposit')),
+            JSON_UNQUOTE(JSON_EXTRACT(c.metadata, '$.ai_analysis.conditions.min_deposit'))
+          )), '') AS DECIMAL(20,4)) as min_deposit,
+          CAST(NULLIF(TRIM(COALESCE(
+            JSON_UNQUOTE(JSON_EXTRACT(c.metadata, '$.ai_analysis.extractedTags.max_bonus')),
+            JSON_UNQUOTE(JSON_EXTRACT(c.metadata, '$.ai_analysis.conditions.max_bonus'))
+          )), '') AS DECIMAL(20,4)) as max_bonus,
+          CAST(NULLIF(TRIM(COALESCE(
+            JSON_UNQUOTE(JSON_EXTRACT(c.metadata, '$.ai_analysis.extractedTags.free_bet_amount')),
+            JSON_UNQUOTE(JSON_EXTRACT(c.metadata, '$.ai_analysis.extractedTags.freebet_amount')),
+            JSON_UNQUOTE(JSON_EXTRACT(c.metadata, '$.ai_analysis.conditions.freebet_amount'))
+          )), '') AS DECIMAL(20,4)) as freebet_amount,
+          CAST(NULLIF(TRIM(COALESCE(
+            JSON_UNQUOTE(JSON_EXTRACT(c.metadata, '$.ai_analysis.extractedTags.cashback_percent')),
+            JSON_UNQUOTE(JSON_EXTRACT(c.metadata, '$.ai_analysis.conditions.cashback_percentage'))
+          )), '') AS DECIMAL(20,4)) as cashback_percent
         FROM campaigns c
       ),
       campaign_bonus_values AS (
@@ -135,16 +111,48 @@ export async function GET(request: NextRequest) {
         FROM campaign_bonus_metrics cbm
       )
     `;
+}
+
+export async function GET(request: NextRequest) {
+  try {
+    const searchParams = Object.fromEntries(new URLSearchParams(request.nextUrl.search));
+    const params = querySchema.parse(searchParams);
+    const { category, metric } = params;
+
+    const categoriesQuery = `
+      SELECT DISTINCT ${categoryExpr} as category
+      FROM campaigns c
+      WHERE ${categoryExpr} IS NOT NULL
+        AND ${categoryExpr} != ''
+      ORDER BY category
+    `;
+    const categoriesResult = await query<{ category: string }>(categoriesQuery);
+    const categories = categoriesResult.map((r) => r.category);
+
+    const sitesQuery = `
+      SELECT id as site_id, name as site_name, code as site_code
+      FROM sites
+      ORDER BY name
+    `;
+    const sitesResult = await query<{ site_id: string; site_name: string; site_code: string }>(sitesQuery);
+    const sites = sitesResult;
+
+    let statsParams: unknown[] = [];
+    if (category) {
+      statsParams.push(category);
+    }
+
+    const cte = bonusMetricsCte();
 
     const statsQuery = `
-      ${bonusMetricsCte}
+      ${cte}
       SELECT 
         cbv.category as category,
         cbv.site_id,
         s.name as site_name,
         s.code as site_code,
         COUNT(*) as campaign_count,
-        COUNT(*) FILTER (WHERE cbv.status = 'active') as active_count,
+        SUM(CASE WHEN cbv.status = 'active' THEN 1 ELSE 0 END) as active_count,
         COALESCE(AVG(cbv.effective_bonus_amount), 0) as avg_bonus,
         COALESCE(SUM(cbv.effective_bonus_amount), 0) as total_bonus
       FROM campaign_bonus_values cbv
@@ -158,31 +166,35 @@ export async function GET(request: NextRequest) {
     const statsResult = await query<CategoryStats>(statsQuery, statsParams);
 
     const siteRankingsQuery = `
-      ${bonusMetricsCte}
-      SELECT
-        cbv.site_id,
-        s.name as site_name,
-        s.code as site_code,
-        COUNT(*) as total_campaigns,
-        COUNT(*) FILTER (WHERE cbv.status = 'active') as active_campaigns,
-        COALESCE(AVG(cbv.effective_bonus_amount), 0) as avg_bonus,
-        COALESCE(SUM(cbv.effective_bonus_amount), 0) as total_bonus,
-        COUNT(DISTINCT cbv.category) as categories_count,
-        COUNT(*) FILTER (WHERE cbv.status = 'active')::numeric / NULLIF(COUNT(*), 0)::numeric as active_rate
-      FROM campaign_bonus_values cbv
-      JOIN sites s ON s.id = cbv.site_id
-      GROUP BY cbv.site_id, s.name, s.code
+      ${cte}
+      SELECT * FROM (
+        SELECT
+          cbv.site_id,
+          s.name as site_name,
+          s.code as site_code,
+          COUNT(*) as total_campaigns,
+          SUM(CASE WHEN cbv.status = 'active' THEN 1 ELSE 0 END) as active_campaigns,
+          COALESCE(AVG(cbv.effective_bonus_amount), 0) as avg_bonus,
+          COALESCE(SUM(cbv.effective_bonus_amount), 0) as total_bonus,
+          COUNT(DISTINCT cbv.category) as categories_count,
+          CASE WHEN COUNT(*) = 0 THEN 0
+            ELSE SUM(CASE WHEN cbv.status = 'active' THEN 1 ELSE 0 END) / COUNT(*)
+          END as active_rate
+        FROM campaign_bonus_values cbv
+        JOIN sites s ON s.id = cbv.site_id
+        GROUP BY cbv.site_id, s.name, s.code
+      ) ranked
       ORDER BY CASE
-        WHEN $1 = 'avg_bonus' THEN COALESCE(AVG(cbv.effective_bonus_amount), 0)
-        WHEN $1 = 'total_bonus' THEN COALESCE(SUM(cbv.effective_bonus_amount), 0)
-        WHEN $1 = 'active_rate' THEN COUNT(*) FILTER (WHERE cbv.status = 'active')::numeric / NULLIF(COUNT(*), 0)::numeric
-        ELSE COUNT(*)
+        WHEN $1 = 'avg_bonus' THEN ranked.avg_bonus
+        WHEN $1 = 'total_bonus' THEN ranked.total_bonus
+        WHEN $1 = 'active_rate' THEN ranked.active_rate
+        ELSE ranked.total_campaigns
       END DESC
     `;
     const siteRankingsResult = await query<SiteRanking>(siteRankingsQuery, [metric || 'campaigns']);
 
     const bestDealsQuery = `
-      ${bonusMetricsCte}
+      ${cte}
       SELECT 
         cbv.id as campaign_id,
         cbv.title as campaign_title,
@@ -238,7 +250,10 @@ export async function GET(request: NextRequest) {
     }> = [];
     for (const cat of Object.keys(siteMatrix)) {
       const sitesInCat = Object.values(siteMatrix[cat]);
-      const best = sitesInCat.reduce((a, b) => (Number(a.campaign_count) > Number(b.campaign_count) ? a : b), sitesInCat[0]);
+      const best = sitesInCat.reduce(
+        (a, b) => (Number(a.campaign_count) > Number(b.campaign_count) ? a : b),
+        sitesInCat[0]
+      );
       const totalCampaigns = sitesInCat.reduce((sum, s) => sum + Number(s.campaign_count), 0);
       comparisonTable.push({
         category: cat,
@@ -252,7 +267,8 @@ export async function GET(request: NextRequest) {
 
     comparisonTable.sort((a, b) => b.total_campaigns - a.total_campaigns);
 
-    const topByCategory: Record<string, Array<{ site_name: string; site_code: string; count: number; avg_bonus: number }>> = {};
+    const topByCategory: Record<string, Array<{ site_name: string; site_code: string; count: number; avg_bonus: number }>> =
+      {};
     for (const stat of statsResult) {
       if (!topByCategory[stat.category]) {
         topByCategory[stat.category] = [];

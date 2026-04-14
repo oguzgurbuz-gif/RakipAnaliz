@@ -442,9 +442,9 @@ export class ScrapeManager {
   private async getExistingCampaignsForSite(siteCode: string): Promise<Record<string, import('../types').Campaign>> {
     const campaigns = await getActiveCampaignsBySite(siteCode);
     const map: Record<string, import('../types').Campaign> = {};
-    for (const campaign of campaigns) {
-      const fp = campaign.fingerprint as string;
-      map[fp] = campaign as import('../types').Campaign;
+    for (const campaign of campaigns.values()) {
+      const fp = campaign.fingerprint;
+      map[fp] = campaign;
     }
     return map;
   }

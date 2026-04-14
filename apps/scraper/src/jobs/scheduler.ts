@@ -68,7 +68,7 @@ export class JobScheduler {
     const db = getDb();
     const now = new Date();
 
-    const result = await queries.insertJob(db, {
+    const jobId = await queries.insertJob(db, {
       type,
       status: 'pending',
       priority: options.priority ?? 0,
@@ -76,8 +76,6 @@ export class JobScheduler {
       maxAttempts: options.maxAttempts ?? 3,
       scheduledAt: (options.scheduledAt ?? now).toISOString(),
     });
-
-    const jobId = result.id;
 
     logger.info(`Scheduled job ${jobId}`, { type, priority: options.priority });
 
@@ -250,7 +248,7 @@ async function processScrapeJob(payload: Record<string, unknown>): Promise<Recor
 
 function mapRowToJob(row: Record<string, unknown>): JobRecord {
   return {
-    id: row.id as number,
+    id: Number(row.id),
     type: row.type as JobType,
     status: row.status as 'pending' | 'processing' | 'completed' | 'failed',
     priority: row.priority as number,

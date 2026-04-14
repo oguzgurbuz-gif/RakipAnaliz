@@ -50,11 +50,11 @@ export async function GET(
         s.name as site_name,
         s.code as site_code,
         cs.similarity_score,
-        cs.similarity_reason
+        cs.comparison_type as similarity_reason
       FROM campaign_similarities cs
-      JOIN campaigns c ON c.id = cs.similar_campaign_id
+      JOIN campaigns c ON c.id = cs.campaign_id_2
       JOIN sites s ON s.id = c.site_id
-      WHERE cs.campaign_id = $1
+      WHERE cs.campaign_id_1 = $1
       ORDER BY cs.similarity_score DESC
       LIMIT 20
     `, [id]);

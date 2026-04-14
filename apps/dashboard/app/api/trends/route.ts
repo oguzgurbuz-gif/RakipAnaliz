@@ -32,11 +32,11 @@ export async function GET(request: NextRequest) {
     dateFrom.setDate(dateFrom.getDate() - days);
 
     const qualityFilter = `
-      COALESCE(BTRIM(c.title), '') <> ''
-      AND LOWER(BTRIM(c.title)) NOT IN ('kampanyalar', 'güncel kampanyalar')
-      AND c.title NOT ILIKE '%tarayıcı sürümü%'
-      AND COALESCE(c.body, '') NOT ILIKE '%desteklenmemektedir%'
-      AND COALESCE(c.body, '') NOT ILIKE '%güncel kampanya bulunmamaktadır%'
+      COALESCE(TRIM(c.title), '') <> ''
+      AND LOWER(TRIM(c.title)) NOT IN ('kampanyalar', 'güncel kampanyalar')
+      AND LOWER(c.title) NOT LIKE LOWER('%tarayıcı sürümü%')
+      AND LOWER(COALESCE(c.body, '')) NOT LIKE LOWER('%desteklenmemektedir%')
+      AND LOWER(COALESCE(c.body, '')) NOT LIKE LOWER('%güncel kampanya bulunmamaktadır%')
     `;
 
     const campaignsOverTimeQuery = `
@@ -54,29 +54,32 @@ export async function GET(request: NextRequest) {
       SELECT 
         DATE(c.created_at) as date,
         COALESCE(
-          NULLIF(c.metadata->'ai_analysis'->>'campaign_type', ''),
-          NULLIF(c.metadata->'ai_analysis'->>'category', ''),
+          NULLIF(JSON_UNQUOTE(JSON_EXTRACT(c.metadata, '$.ai_analysis.campaign_type')), ''),
+          NULLIF(JSON_UNQUOTE(JSON_EXTRACT(c.metadata, '$.ai_analysis.category')), ''),
           'unknown'
         ) as category,
         COUNT(*) as count
       FROM campaigns c
       WHERE c.created_at >= $1
         AND ${qualityFilter}
-      GROUP BY DATE(c.created_at), 2
+      GROUP BY DATE(c.created_at), category
       ORDER BY date ASC, count DESC
     `;
 
     const sentimentDistributionQuery = `
       WITH latest_ai AS (
-        SELECT DISTINCT ON (ai2.campaign_id)
-          ai2.campaign_id,
-          ai2.sentiment_label
-        FROM campaign_ai_analyses ai2
-        ORDER BY ai2.campaign_id, ai2.created_at DESC
+        SELECT campaign_id, sentiment_label
+        FROM (
+          SELECT ai2.campaign_id,
+                 ai2.sentiment_label,
+                 ROW_NUMBER() OVER (PARTITION BY ai2.campaign_id ORDER BY ai2.created_at DESC) as rn
+          FROM campaign_ai_analyses ai2
+        ) t
+        WHERE t.rn = 1
       )
       SELECT 
         COALESCE(
-          NULLIF(c.metadata->'ai_analysis'->>'sentiment', ''),
+          NULLIF(JSON_UNQUOTE(JSON_EXTRACT(c.metadata, '$.ai_analysis.sentiment')), ''),
           NULLIF(ai.sentiment_label, ''),
           'unknown'
         ) as sentiment,
@@ -85,21 +88,21 @@ export async function GET(request: NextRequest) {
       LEFT JOIN latest_ai ai ON ai.campaign_id = c.id
       WHERE c.created_at >= $1
         AND ${qualityFilter}
-      GROUP BY 1
+      GROUP BY sentiment
     `;
 
     const topCategoriesQuery = `
       SELECT 
         COALESCE(
-          NULLIF(c.metadata->'ai_analysis'->>'campaign_type', ''),
-          NULLIF(c.metadata->'ai_analysis'->>'category', ''),
+          NULLIF(JSON_UNQUOTE(JSON_EXTRACT(c.metadata, '$.ai_analysis.campaign_type')), ''),
+          NULLIF(JSON_UNQUOTE(JSON_EXTRACT(c.metadata, '$.ai_analysis.category')), ''),
           'unknown'
         ) as category,
         COUNT(*) as count
       FROM campaigns c
       WHERE c.created_at >= $1
         AND ${qualityFilter}
-      GROUP BY 1
+      GROUP BY category
       ORDER BY count DESC
       LIMIT 10
     `;
@@ -120,11 +123,11 @@ export async function GET(request: NextRequest) {
     const valueScoreBySiteQuery = `
       SELECT 
         s.name as site_name,
-        AVG((c.metadata->'ai_analysis'->>'valueScore')::numeric) as avg_value_score
+        AVG(CAST(JSON_UNQUOTE(JSON_EXTRACT(c.metadata, '$.ai_analysis.valueScore')) AS DECIMAL(20,4))) as avg_value_score
       FROM campaigns c
       JOIN sites s ON s.id = c.site_id
       WHERE c.created_at >= $1
-        AND (c.metadata->'ai_analysis'->>'valueScore') IS NOT NULL
+        AND JSON_UNQUOTE(JSON_EXTRACT(c.metadata, '$.ai_analysis.valueScore')) IS NOT NULL
         AND ${qualityFilter}
       GROUP BY s.name
       ORDER BY avg_value_score DESC
@@ -134,15 +137,15 @@ export async function GET(request: NextRequest) {
     const weeklyTopCategoriesQuery = `
       SELECT
         COALESCE(
-          NULLIF(c.metadata->'ai_analysis'->>'campaign_type', ''),
-          NULLIF(c.metadata->'ai_analysis'->>'category', ''),
+          NULLIF(JSON_UNQUOTE(JSON_EXTRACT(c.metadata, '$.ai_analysis.campaign_type')), ''),
+          NULLIF(JSON_UNQUOTE(JSON_EXTRACT(c.metadata, '$.ai_analysis.category')), ''),
           'unknown'
         ) as category,
         COUNT(*) as count
       FROM campaigns c
       WHERE c.created_at >= $1
         AND ${qualityFilter}
-      GROUP BY 1
+      GROUP BY category
       ORDER BY count DESC
       LIMIT 10
     `;

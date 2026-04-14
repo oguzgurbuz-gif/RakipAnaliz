@@ -745,7 +745,9 @@ export async function getAiAnalysisSummary(): Promise<{
     totalAnalyzed: (result?.total ?? 0) as number,
     averageValueScore: (result?.avg_value_score ?? 0) as number,
     categoryDistribution: result?.category_dist
-      ? JSON.parse(result.category_dist as string)
+      ? typeof result.category_dist === 'string'
+        ? JSON.parse(result.category_dist as string)
+        : (result.category_dist as Record<string, number>)
       : {},
   };
 }

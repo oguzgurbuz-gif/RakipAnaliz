@@ -53,8 +53,8 @@ export async function GET(request: NextRequest) {
     const topCategoriesRaw = await query<{ category: string; count: string }>(`
       SELECT 
         COALESCE(
-          NULLIF(c.metadata->'ai_analysis'->>'campaign_type', ''),
-          NULLIF(c.metadata->'ai_analysis'->>'category', ''),
+          NULLIF(JSON_UNQUOTE(JSON_EXTRACT(c.metadata, '$.ai_analysis.campaign_type')), ''),
+          NULLIF(JSON_UNQUOTE(JSON_EXTRACT(c.metadata, '$.ai_analysis.category')), ''),
           'unknown'
         ) as category,
         COUNT(*) as count
@@ -63,12 +63,12 @@ export async function GET(request: NextRequest) {
             (c.valid_from >= $1 AND c.valid_from <= $2)
          OR (c.valid_from IS NULL AND c.created_at >= $1 AND c.created_at <= $2)
       )
-        AND COALESCE(BTRIM(c.title), '') <> ''
-        AND LOWER(BTRIM(c.title)) NOT IN ('kampanyalar', 'güncel kampanyalar')
-        AND c.title NOT ILIKE '%tarayıcı sürümü%'
-        AND COALESCE(c.body, '') NOT ILIKE '%desteklenmemektedir%'
-        AND COALESCE(c.body, '') NOT ILIKE '%güncel kampanya bulunmamaktadır%'
-      GROUP BY 1
+        AND COALESCE(TRIM(c.title), '') <> ''
+        AND LOWER(TRIM(c.title)) NOT IN ('kampanyalar', 'güncel kampanyalar')
+        AND LOWER(c.title) NOT LIKE LOWER('%tarayıcı sürümü%')
+        AND LOWER(COALESCE(c.body, '')) NOT LIKE LOWER('%desteklenmemektedir%')
+        AND LOWER(COALESCE(c.body, '')) NOT LIKE LOWER('%güncel kampanya bulunmamaktadır%')
+      GROUP BY category
       ORDER BY count DESC
       LIMIT 10
     `, [dateFrom, dateTo]);

@@ -1,26 +1,37 @@
-import { Pool, PoolClient } from 'pg';
+import { createPool, type Pool } from 'mysql2/promise';
+import { parseMysqlDatabaseUrl } from '@bitalih/shared/sql/mysql-url';
 import { logger } from '../utils/logger';
 import { NormalizedCampaignInput, Campaign, CampaignVersion, CampaignDiff, SiteRecord } from '../types';
 import * as queries from './queries';
+import { mysqlQuery, poolAsExecutor, type DbExecutor } from './compat-query';
 
 let pool: Pool | null = null;
 
-export function getDb(): Pool {
+export function getMysqlPool(): Pool {
   if (!pool) {
-    pool = new Pool({
-      connectionString: process.env.DATABASE_URL,
-    });
-    pool.on('error', (err) => {
-      logger.error('Unexpected database pool error', { error: err.message });
+    const url = process.env.DATABASE_URL;
+    if (!url) {
+      throw new Error('DATABASE_URL is not set');
+    }
+    pool = createPool({
+      ...parseMysqlDatabaseUrl(url),
+      multipleStatements: true,
+      waitForConnections: true,
+      connectionLimit: 10,
+      timezone: 'Z',
     });
   }
   return pool;
 }
 
+/** MySQL connection pool wrapped with PostgreSQL-style `query` helpers. */
+export function getDb(): DbExecutor {
+  return poolAsExecutor(getMysqlPool());
+}
+
 export async function query<T = unknown>(text: string, params?: unknown[]): Promise<T[]> {
-  const db = getDb();
-  const result = await db.query(text, params);
-  return result.rows as T[];
+  const rows = await mysqlQuery<T & Record<string, unknown>>(getMysqlPool(), text, params);
+  return rows.rows as T[];
 }
 
 export async function queryOne<T = unknown>(text: string, params?: unknown[]): Promise<T | null> {
@@ -37,19 +48,21 @@ export async function closeDb(): Promise<void> {
 }
 
 export async function getTransaction() {
-  const db = getDb();
-  const client = await db.connect();
-  await client.query('BEGIN');
+  const conn = await getMysqlPool().getConnection();
+  await conn.beginTransaction();
+  const client: DbExecutor = {
+    query: (text, params) => mysqlQuery(conn, text, params),
+  };
   return {
-    client: client as unknown as Pool,
+    client,
     async commit() {
-      await client.query('COMMIT');
-      client.release();
+      await conn.commit();
+      conn.release();
     },
     async rollback() {
-      await client.query('ROLLBACK');
-      client.release();
-    }
+      await conn.rollback();
+      conn.release();
+    },
   };
 }
 
@@ -113,7 +126,6 @@ export async function insertCampaign(normalized: NormalizedCampaignInput): Promi
 
     await tx.commit();
 
-    // Schedule AI analysis for new campaign
     try {
       const { jobScheduler } = await import('../jobs/scheduler');
       await jobScheduler.scheduleJob(
@@ -139,9 +151,8 @@ export async function insertCampaign(normalized: NormalizedCampaignInput): Promi
       );
       logger.info(`Scheduled AI analysis job for new campaign ${campaignId}`);
     } catch (jobError) {
-      // Non-fatal: log but don't fail campaign insertion
       logger.error(`Failed to schedule AI analysis job for campaign ${campaignId}`, {
-        error: jobError instanceof Error ? jobError.message : 'Unknown error'
+        error: jobError instanceof Error ? jobError.message : 'Unknown error',
       });
     }
 
@@ -153,7 +164,7 @@ export async function insertCampaign(normalized: NormalizedCampaignInput): Promi
 }
 
 export async function insertCampaignVersion(
-  db: Pool,
+  db: DbExecutor,
   campaignId: string,
   normalized: NormalizedCampaignInput,
   diff: CampaignDiff | null,
@@ -348,7 +359,7 @@ export async function insertErrorLog(
   severity: 'debug' | 'info' | 'warn' | 'error' = 'error'
 ): Promise<void> {
   if (severity === 'debug' || severity === 'info') {
-    return; // Only log warn and error to DB
+    return;
   }
   const db = getDb();
   try {
