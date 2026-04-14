@@ -111,21 +111,37 @@ export async function insertCampaignVersion(
     title: string;
     body: string | null;
     normalizedText: string;
+    fingerprint: string;
+    primaryImageUrl?: string | null;
+    validFrom?: Date | null;
+    validTo?: Date | null;
+    validFromSource?: string | null;
+    validToSource?: string | null;
+    rawDateText?: string | null;
     versionNo: number;
   }
 ): Promise<string> {
   const result = await db.query(
     `INSERT INTO campaign_versions (
       campaign_id, title, body, normalized_text,
+      fingerprint, primary_image_url, valid_from, valid_to,
+      valid_from_source, valid_to_source, raw_date_text,
       version_no, created_at
     ) VALUES (
-      $1, $2, $3, $4, $5, NOW()
+      $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, NOW()
     ) RETURNING id`,
     [
       data.campaignId,
       data.title,
       data.body,
       data.normalizedText,
+      data.fingerprint,
+      data.primaryImageUrl ?? null,
+      data.validFrom ?? null,
+      data.validTo ?? null,
+      data.validFromSource ?? null,
+      data.validToSource ?? null,
+      data.rawDateText ?? null,
       data.versionNo,
     ]
   );

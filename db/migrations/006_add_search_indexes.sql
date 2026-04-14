@@ -3,6 +3,8 @@
 -- 2. Index for jobs status/scheduled_at pickup
 -- 3. Index for campaign_versions campaign_id lookup
 
+CREATE EXTENSION IF NOT EXISTS pg_trgm;
+
 -- ============================================================================
 -- 1. Trigram indexes for search performance (ILIKE with leading wildcard)
 -- ============================================================================
