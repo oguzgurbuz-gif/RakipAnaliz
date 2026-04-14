@@ -11,6 +11,8 @@ services:
       - ./db/init.sql:/docker-entrypoint-initdb.d/init.sql:ro
     networks:
       - app-network
+    labels:
+      - coolify.managed=true
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U postgres -d campaigns"]
       interval: 10s
@@ -27,8 +29,8 @@ services:
       NODE_ENV: production
       PORT: 3000
       DATABASE_URL: postgresql://postgres:${POSTGRES_PASSWORD:-postgres}@db:5432/campaigns
-    ports:
-      - "3001:3000"
+      NEXT_PUBLIC_API_URL: ${NEXT_PUBLIC_API_URL:-http://localhost:3000}
+      ADMIN_API_KEY: ${ADMIN_API_KEY:-your-admin-api-key-here}
     networks:
       - app-network
     depends_on:
@@ -61,8 +63,11 @@ services:
       SCRAPER_CONCURRENCY: ${SCRAPER_CONCURRENCY:-2}
       SCRAPER_HEADLESS: ${SCRAPER_HEADLESS:-true}
       SCRAPER_TIMEOUT_MS: ${SCRAPER_TIMEOUT_MS:-45000}
+      SCRAPER_RETRY_ATTEMPTS: ${SCRAPER_RETRY_ATTEMPTS:-3}
       SCRAPER_EXPAND_MAX_CLICKS: ${SCRAPER_EXPAND_MAX_CLICKS:-20}
       SCRAPER_EXPAND_WAIT_MS: ${SCRAPER_EXPAND_WAIT_MS:-1200}
+    labels:
+      - coolify.managed=true
     networks:
       - app-network
     depends_on:
