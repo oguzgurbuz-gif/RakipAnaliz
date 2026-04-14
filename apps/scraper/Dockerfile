@@ -51,5 +51,5 @@ COPY apps/scraper/src ./apps/scraper/src
 
 RUN npm install -g pnpm@8 && pnpm install --force
 
-# Run migrations on startup
-CMD ["sh", "-c", "node apps/scraper/dist/migrate.cjs || true && node apps/scraper/dist/index.cjs"]
+# Run migrations first; fail deployment on migration errors.
+CMD ["sh", "-c", "node apps/scraper/dist/migrate.cjs && node apps/scraper/dist/index.cjs"]

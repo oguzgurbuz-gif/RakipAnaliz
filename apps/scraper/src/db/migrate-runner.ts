@@ -2,6 +2,7 @@ import 'dotenv/config';
 import { getDb } from './index';
 import { readFileSync } from 'fs';
 import { join } from 'path';
+import { createHash } from 'crypto';
 
 const DB_MIGRATIONS_PATH = '/app/db/migrations';
 
@@ -19,21 +20,57 @@ async function runMigrations() {
   ];
   
   console.log('Running migrations...');
-  
+
+  await db.query(`
+    CREATE TABLE IF NOT EXISTS schema_migrations (
+      filename TEXT PRIMARY KEY,
+      checksum TEXT NOT NULL,
+      executed_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+    )
+  `);
+
   for (const filename of migrations) {
     const migrationPath = join(DB_MIGRATIONS_PATH, filename);
+    const sql = readFileSync(migrationPath, 'utf-8');
+    const checksum = createHash('sha256').update(sql).digest('hex');
+
+    const existing = await db.query(
+      'SELECT checksum FROM schema_migrations WHERE filename = $1',
+      [filename]
+    );
+
+    if (existing.rowCount && existing.rows[0].checksum === checksum) {
+      console.log(`Skipping ${filename} (already applied)`);
+      continue;
+    }
+
+    if (existing.rowCount) {
+      throw new Error(
+        `Migration checksum mismatch for ${filename}. Migration file changed after being applied.`
+      );
+    }
+
+    console.log(`Executing ${filename}...`);
+    await db.query('BEGIN');
     try {
-      const sql = readFileSync(migrationPath, 'utf-8');
-      console.log(`Executing ${filename}...`);
       await db.query(sql);
+      await db.query(
+        `INSERT INTO schema_migrations (filename, checksum, executed_at)
+         VALUES ($1, $2, NOW())`,
+        [filename, checksum]
+      );
+      await db.query('COMMIT');
       console.log(`${filename} completed`);
     } catch (err) {
-      console.error(`Migration ${filename} failed:`, err instanceof Error ? err.message : err);
-      // Continue with other migrations
+      await db.query('ROLLBACK');
+      throw err;
     }
   }
-  
+
   console.log('All migrations completed');
 }
 
-runMigrations();
+runMigrations().catch((error) => {
+  console.error('Migration failed:', error instanceof Error ? error.message : error);
+  process.exit(1);
+});
