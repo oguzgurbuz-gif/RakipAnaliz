@@ -1,14 +1,17 @@
-import { getDb } from './index';
+import 'dotenv/config';
+import { getMysqlPool } from './index';
 import { readFileSync } from 'fs';
 import { join } from 'path';
 import { createHash } from 'crypto';
+import { mysqlQuery } from './compat-query';
 
 const DB_MIGRATIONS_PATH = '/app/db/migrations';
 const LEGACY_MIGRATIONS = new Set(['001_initial_schema.sql', '002_seed_sites.sql']);
 
 async function runMigrations() {
-  const db = getDb();
-  
+  const pool = getMysqlPool();
+  const conn = await pool.getConnection();
+
   const migrations = [
     '001_initial_schema.sql',
     '002_seed_sites.sql',
@@ -18,80 +21,93 @@ async function runMigrations() {
     '006_add_search_indexes.sql',
     '007_legacy_schema_compat.sql',
   ];
-  
+
   console.log('Running migrations...');
   console.log('Looking for migrations in:', DB_MIGRATIONS_PATH);
 
-  await db.query(`
+  await mysqlQuery(
+    conn,
+    `
     CREATE TABLE IF NOT EXISTS schema_migrations (
-      filename TEXT PRIMARY KEY,
-      checksum TEXT NOT NULL,
-      executed_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+      filename VARCHAR(255) PRIMARY KEY,
+      checksum CHAR(64) NOT NULL,
+      executed_at TIMESTAMP(6) NOT NULL DEFAULT CURRENT_TIMESTAMP(6)
     )
-  `);
+  `
+  );
 
-  const hasSitesTable = await db.query(`
+  const hasSitesTable = await mysqlQuery<{ exists: number }>(
+    conn,
+    `
     SELECT EXISTS (
       SELECT 1
       FROM information_schema.tables
-      WHERE table_schema = 'public' AND table_name = 'sites'
-    ) AS exists
-  `);
+      WHERE table_schema = DATABASE() AND table_name = 'sites'
+    ) AS \`exists\`
+  `
+  );
   const isLegacyDatabase = Boolean(hasSitesTable.rows[0]?.exists);
-  for (const filename of migrations) {
-    const migrationPath = join(DB_MIGRATIONS_PATH, filename);
-    const sql = readFileSync(migrationPath, 'utf-8');
-    const checksum = createHash('sha256').update(sql).digest('hex');
 
-    const existing = await db.query(
-      'SELECT checksum FROM schema_migrations WHERE filename = $1',
-      [filename]
-    );
+  try {
+    for (const filename of migrations) {
+      const migrationPath = join(DB_MIGRATIONS_PATH, filename);
+      const sql = readFileSync(migrationPath, 'utf-8');
+      const checksum = createHash('sha256').update(sql).digest('hex');
 
-    if (existing.rowCount && existing.rows[0].checksum === checksum) {
-      console.log(`Skipping ${filename} (already applied)`);
-      continue;
-    }
-
-    if (existing.rowCount) {
-      throw new Error(
-        `Migration checksum mismatch for ${filename}. Migration file changed after being applied.`
+      const existing = await mysqlQuery<{ checksum: string }>(
+        conn,
+        'SELECT checksum FROM schema_migrations WHERE filename = $1',
+        [filename]
       );
-    }
 
-    console.log(`Executing ${filename}...`);
-    await db.query('BEGIN');
-    try {
-      await db.query(sql);
-      await db.query(
-        `INSERT INTO schema_migrations (filename, checksum, executed_at)
-         VALUES ($1, $2, NOW())`,
-        [filename, checksum]
-      );
-      await db.query('COMMIT');
-    } catch (error) {
-      await db.query('ROLLBACK');
-      const message = error instanceof Error ? error.message : String(error);
-      const isLegacyBootstrapError =
-        isLegacyDatabase &&
-        LEGACY_MIGRATIONS.has(filename) &&
-        (message.includes('already exists') || message.includes('duplicate key value'));
-
-      if (isLegacyBootstrapError) {
-        await db.query(
-          `INSERT INTO schema_migrations (filename, checksum, executed_at)
-           VALUES ($1, $2, NOW())
-           ON CONFLICT (filename) DO NOTHING`,
-          [filename, checksum]
-        );
-        console.log(`Marking ${filename} as applied for legacy database`);
+      if (existing.rowCount && existing.rows[0].checksum === checksum) {
+        console.log(`Skipping ${filename} (already applied)`);
         continue;
       }
-      throw error;
+
+      if (existing.rowCount) {
+        throw new Error(
+          `Migration checksum mismatch for ${filename}. Migration file changed after being applied.`
+        );
+      }
+
+      console.log(`Executing ${filename}...`);
+      try {
+        await conn.query(sql);
+        await mysqlQuery(
+          conn,
+          `INSERT INTO schema_migrations (filename, checksum, executed_at)
+           VALUES ($1, $2, NOW())`,
+          [filename, checksum]
+        );
+      } catch (error) {
+        const message = error instanceof Error ? error.message : String(error);
+        const isLegacyBootstrapError =
+          isLegacyDatabase &&
+          LEGACY_MIGRATIONS.has(filename) &&
+          (message.includes('already exists') ||
+            message.includes('Duplicate entry') ||
+            message.includes('duplicate key'));
+
+        if (isLegacyBootstrapError) {
+          await mysqlQuery(
+            conn,
+            `INSERT INTO schema_migrations (filename, checksum, executed_at)
+             VALUES ($1, $2, NOW())
+             ON DUPLICATE KEY UPDATE filename = filename`,
+            [filename, checksum]
+          );
+          console.log(`Marking ${filename} as applied for legacy database`);
+          continue;
+        }
+        throw error;
+      }
+      console.log(`${filename} completed`);
     }
-    console.log(`${filename} completed`);
+  } finally {
+    conn.release();
   }
-  
+
   console.log('All migrations completed successfully');
   process.exit(0);
 }
