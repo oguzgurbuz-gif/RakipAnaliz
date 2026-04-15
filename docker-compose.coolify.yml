@@ -1,25 +1,23 @@
 services:
   db:
-    image: mysql:8.4
+    image: postgres:16-alpine
     restart: unless-stopped
     environment:
-      MYSQL_ROOT_PASSWORD: ${MYSQL_ROOT_PASSWORD:-postgres}
-      MYSQL_DATABASE: ${MYSQL_DATABASE:-campaigns}
-    command:
-      - --character-set-server=utf8mb4
-      - --collation-server=utf8mb4_unicode_ci
-      - --default-time-zone=+00:00
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-postgres}
+      POSTGRES_DB: campaigns
     volumes:
-      - mysql_data:/var/lib/mysql
+      - postgres_data:/var/lib/postgresql/data
+      - ./db/init.sql:/docker-entrypoint-initdb.d/init.sql:ro
     networks:
       - app-network
     labels:
       - coolify.managed=true
     healthcheck:
-      test: ["CMD-SHELL", "mysqladmin ping -h 127.0.0.1 -uroot -p$$MYSQL_ROOT_PASSWORD || exit 1"]
+      test: ["CMD-SHELL", "pg_isready -U postgres -d campaigns"]
       interval: 10s
       timeout: 5s
-      retries: 10
+      retries: 5
       start_period: 30s
 
   dashboard:
@@ -30,22 +28,22 @@ services:
     environment:
       NODE_ENV: production
       PORT: 3000
-      DATABASE_URL: mysql://root:${MYSQL_ROOT_PASSWORD:-postgres}@db:3306/${MYSQL_DATABASE:-campaigns}
+      DATABASE_URL: postgresql://postgres:${POSTGRES_PASSWORD:-postgres}@db:5432/campaigns
       NEXT_PUBLIC_API_URL: ${NEXT_PUBLIC_API_URL:-http://localhost:3000}
       ADMIN_API_KEY: ${ADMIN_API_KEY:-your-admin-api-key-here}
     networks:
       - app-network
-    depends_on:
-      db:
-        condition: service_healthy
+    labels:
+      - coolify.managed=true
     healthcheck:
       test: ["CMD-SHELL", "wget --no-verbose --tries=1 --spider http://localhost:3000 || exit 1"]
       interval: 30s
       timeout: 10s
       retries: 3
       start_period: 15s
-    labels:
-      - coolify.managed=true
+    depends_on:
+      db:
+        condition: service_healthy
 
   scraper:
     build:
@@ -54,7 +52,7 @@ services:
     restart: unless-stopped
     environment:
       NODE_ENV: production
-      DATABASE_URL: mysql://root:${MYSQL_ROOT_PASSWORD:-postgres}@db:3306/${MYSQL_DATABASE:-campaigns}
+      DATABASE_URL: postgresql://postgres:${POSTGRES_PASSWORD:-postgres}@db:5432/campaigns
       PUPPETEER_EXECUTABLE_PATH: /usr/bin/chromium
       DEEPSEEK_API_URL: ${DEEPSEEK_API_URL}
       DEEPSEEK_API_KEY: ${DEEPSEEK_API_KEY}
@@ -68,10 +66,10 @@ services:
       SCRAPER_RETRY_ATTEMPTS: ${SCRAPER_RETRY_ATTEMPTS:-3}
       SCRAPER_EXPAND_MAX_CLICKS: ${SCRAPER_EXPAND_MAX_CLICKS:-20}
       SCRAPER_EXPAND_WAIT_MS: ${SCRAPER_EXPAND_WAIT_MS:-1200}
-    labels:
-      - coolify.managed=true
     networks:
       - app-network
+    labels:
+      - coolify.managed=true
     depends_on:
       db:
         condition: service_healthy
@@ -81,4 +79,4 @@ networks:
     driver: bridge
 
 volumes:
-  mysql_data:
+  postgres_data:
