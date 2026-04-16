@@ -7,6 +7,7 @@ import { mysqlQuery } from './compat-query';
 
 const DB_MIGRATIONS_PATH = '/app/db/migrations';
 const LEGACY_MIGRATIONS = new Set(['001_initial_schema.sql', '002_seed_sites.sql']);
+const MUTABLE_MIGRATIONS = new Set(['002_seed_sites.sql']);
 
 async function runMigrations() {
   const pool = getMysqlPool();
@@ -65,6 +66,17 @@ async function runMigrations() {
       }
 
       if (existing.rowCount) {
+        if (MUTABLE_MIGRATIONS.has(filename)) {
+          await mysqlQuery(
+            conn,
+            `UPDATE schema_migrations
+             SET checksum = $2, executed_at = NOW()
+             WHERE filename = $1`,
+            [filename, checksum]
+          );
+          console.log(`Updated checksum for mutable migration ${filename}`);
+          continue;
+        }
         throw new Error(
           `Migration checksum mismatch for ${filename}. Migration file changed after being applied.`
         );
