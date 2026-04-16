@@ -3,6 +3,7 @@ import { getDb, query } from './db';
 import { jobScheduler } from './jobs/scheduler';
 import { logger } from './utils/logger';
 import { scrapeManager } from './core/scraper';
+import { getLatestWeeklyReport } from './jobs/weekly-report';
 
 const INITIAL_SCRAPE_DONE_KEY = 'initial_scrape_done';
 
@@ -74,11 +75,49 @@ async function runInitialScrapeIfNeeded(): Promise<void> {
       
       await new Promise(resolve => setTimeout(resolve, 2000));
     }
+
+    await ensureInitialWeeklyReportIfMissing();
     
     process.env[INITIAL_SCRAPE_DONE_KEY] = 'true';
     logger.info('Initial scrape completed for all sites');
   } catch (error) {
     logger.error('Error during initial scrape', {
+      error: error instanceof Error ? error.message : String(error),
+    });
+  }
+}
+
+async function ensureInitialWeeklyReportIfMissing(): Promise<void> {
+  try {
+    const existing = await getLatestWeeklyReport();
+    if (existing) {
+      logger.info('Weekly report already exists, skipping initial report generation');
+      return;
+    }
+
+    const now = new Date();
+    const sevenDaysAgo = new Date(now);
+    sevenDaysAgo.setDate(now.getDate() - 7);
+
+    const weekStartDate = sevenDaysAgo.toISOString().split('T')[0];
+    const weekEndDate = now.toISOString().split('T')[0];
+
+    const jobId = await jobScheduler.scheduleJob(
+      'weekly-report',
+      { weekStartDate, weekEndDate },
+      {
+        priority: 10,
+        scheduledAt: new Date(),
+      }
+    );
+
+    logger.info('Scheduled initial weekly report after first full scrape cycle', {
+      jobId,
+      weekStartDate,
+      weekEndDate,
+    });
+  } catch (error) {
+    logger.error('Failed to schedule initial weekly report', {
       error: error instanceof Error ? error.message : String(error),
     });
   }
