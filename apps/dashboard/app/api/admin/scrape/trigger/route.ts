@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { z } from 'zod';
-import { query, queryOne } from '@/lib/db';
-import { successResponse, createdResponse, errorResponse, handleApiError, getCorsHeaders } from '@/lib/response';
+import { query } from '@/lib/db';
+import { createdResponse, handleApiError, getCorsHeaders } from '@/lib/response';
 import { ValidationError } from '@bitalih/shared/errors';
 
 const SSE_CHANNEL = process.env.SSE_CHANNEL || 'bitalih:events';
@@ -19,18 +19,9 @@ type SiteRow = {
   base_url: string;
 };
 
-type JobRow = {
-  id: string;
-  job_type: string;
-  payload: unknown;
-  status: string;
-  priority: number;
-  created_at: Date;
-};
-
 export async function POST(request: NextRequest) {
   try {
-    const body = await request.json();
+    const body = await request.json().catch(() => ({}));
     const { siteCodes, runType, priority } = triggerSchema.parse(body);
 
     let sites: SiteRow[];
@@ -54,50 +45,49 @@ export async function POST(request: NextRequest) {
       throw new ValidationError('No active sites found matching the criteria');
     }
 
-    const jobs: JobRow[] = [];
-
-    if (sites.length > 0) {
-      const jobPayloads = sites.map(site => `('scrape', '${JSON.stringify({
-        siteCode: site.code,
-        siteId: site.id,
-        siteName: site.name,
-        runType,
-        triggeredBy: 'admin',
-        config: {
-          baseUrl: site.base_url,
-        },
-      })}', 'pending', ${priority}, 3, NOW())`).join(', ');
-
-      const result = await query<JobRow>(`
-        INSERT INTO jobs (type, payload, status, priority, max_attempts, scheduled_at)
-        VALUES ${jobPayloads}
-        RETURNING CAST(id AS CHAR) as id, type as job_type, payload, status, priority, created_at
-      `);
-
-      jobs.push(...result);
+    let jobsCreated = 0;
+    for (const site of sites) {
+      await query(
+        `INSERT INTO jobs (type, payload, status, priority, max_attempts, scheduled_at)
+         VALUES ($1, CAST($2 AS JSON), 'pending', $3, 3, NOW())`,
+        [
+          'scrape',
+          JSON.stringify({
+            siteCode: site.code,
+            siteId: site.id,
+            siteName: site.name,
+            runType,
+            triggeredBy: 'admin',
+            config: { baseUrl: site.base_url },
+          }),
+          priority,
+        ]
+      );
+      jobsCreated += 1;
     }
 
-    const scrapeRun = await queryOne<{ id: string }>(`
-      INSERT INTO scrape_runs (run_type, trigger_source, status, total_sites)
-      VALUES ($1, 'admin', 'running', $2)
-      RETURNING id
-    `, [runType, sites.length]);
+    await query(
+      `INSERT INTO scrape_runs (
+        site_id, status, started_at, cards_found, new_campaigns, updated_campaigns, unchanged, errors
+      ) VALUES (
+        NULL, 'running', NOW(), 0, 0, 0, 0, $1
+      )`,
+      [`admin-trigger:${runType}:${sites.length}`]
+    );
 
     await query(`
       INSERT INTO sse_events (event_type, event_channel, payload)
       VALUES ('scrape.run.triggered', $1, $2)
     `, [SSE_CHANNEL || 'bitalih:events', JSON.stringify({
-      scrapeRunId: scrapeRun?.id,
       siteCount: sites.length,
-      jobIds: jobs.map(j => j.id),
+      jobsCreated,
       timestamp: new Date().toISOString(),
     })]);
 
     return createdResponse({
-      scrapeRunId: scrapeRun?.id,
-      jobsCreated: jobs.length,
+      jobsCreated,
       sitesTriggered: sites.map(s => s.code),
-      message: `Triggered scrape for ${jobs.length} site(s)`,
+      message: `Triggered scrape for ${jobsCreated} site(s)`,
     });
   } catch (error) {
     return handleApiError(error);

@@ -23,22 +23,75 @@ interface TrendData {
 
 const API_BASE = process.env.NEXT_PUBLIC_API_URL || ''
 
+const EMPTY_REPORT_SUMMARY: ReportSummary = {
+  dateFrom: '',
+  dateTo: '',
+  startedCount: 0,
+  endedCount: 0,
+  activeCount: 0,
+  passiveCount: 0,
+  changedCount: 0,
+  topCategories: [],
+  topSites: [],
+}
+
+const EMPTY_TREND_DATA: TrendData = {
+  campaignsOverTime: [],
+  categoryByDate: {},
+  categoryDistribution: [],
+  sentimentDistribution: [],
+  topSites: [],
+  valueScoresBySite: [],
+  topCategoriesThisWeek: [],
+}
+
+const EMPTY_COMPETITION_DATA: CompetitionData = {
+  categories: [],
+  sites: [],
+  siteRankings: [],
+  comparisonTable: [],
+  bestDeals: [],
+  siteMatrix: {},
+}
+
+async function withFallback<T>(fallback: T, fn: () => Promise<T>): Promise<T> {
+  try {
+    return await fn()
+  } catch (error) {
+    console.warn('API fallback activated:', error)
+    return fallback
+  }
+}
+
 async function fetchApi<T>(
   endpoint: string,
   options?: RequestInit
 ): Promise<T> {
-  const response = await fetch(`${API_BASE}${endpoint}`, {
-    headers: {
-      'Content-Type': 'application/json',
-      ...options?.headers,
-    },
-    ...options,
-  })
+  let response: Response
+  try {
+    response = await fetch(`${API_BASE}${endpoint}`, {
+      headers: {
+        'Content-Type': 'application/json',
+        ...options?.headers,
+      },
+      ...options,
+    })
+  } catch (error) {
+    throw new Error(error instanceof Error ? error.message : 'Network request failed')
+  }
 
-  const json = await response.json()
+  const payload = await response.text()
+  let json: any = null
+  if (payload) {
+    try {
+      json = JSON.parse(payload)
+    } catch {
+      json = null
+    }
+  }
 
   if (!response.ok) {
-    const error = json?.error || json?.message || 'Request failed'
+    const error = json?.error || json?.message || `Request failed (${response.status})`
     throw new Error(error || `HTTP error ${response.status}`)
   }
 
@@ -63,6 +116,9 @@ async function fetchApi<T>(
 export async function fetchCampaigns(
   filters: CampaignFilters & { page?: number; limit?: number } = {}
 ): Promise<PaginatedResponse<Campaign>> {
+  return withFallback(
+    { data: [], total: 0, page: filters.page ?? 1, limit: filters.limit ?? 20, totalPages: 0 },
+    async () => {
   const params = new URLSearchParams()
   
   if (filters.site !== undefined && filters.site !== '') {
@@ -121,6 +177,8 @@ export async function fetchCampaigns(
     limit: response.meta.pageSize,
     totalPages: response.meta.totalPages,
   }
+    }
+  )
 }
 
 function parseJsonField(value: unknown): string[] | null {
@@ -172,7 +230,7 @@ export async function updateCampaign(id: string, data: { validFrom?: string | nu
 }
 
 export async function fetchWeeklyReports(): Promise<WeeklyReport[]> {
-  return fetchApi<WeeklyReport[]>('/api/reports/weekly')
+  return withFallback([], () => fetchApi<WeeklyReport[]>('/api/reports/weekly'))
 }
 
 export async function fetchWeeklyReport(id: string): Promise<WeeklyReportDetail> {
@@ -192,6 +250,7 @@ export async function fetchReportSummary(
   dateFrom?: string,
   dateTo?: string
 ): Promise<ReportSummary> {
+  return withFallback(EMPTY_REPORT_SUMMARY, async () => {
   const params = new URLSearchParams()
   if (dateFrom) params.append('dateFrom', dateFrom)
   if (dateTo) params.append('dateTo', dateTo)
@@ -200,10 +259,11 @@ export async function fetchReportSummary(
   return fetchApi<ReportSummary>(
     `/api/reports/summary${queryString ? `?${queryString}` : ''}`
   )
+  })
 }
 
 export async function fetchScrapeRuns(): Promise<ScrapeRun[]> {
-  return fetchApi<ScrapeRun[]>('/api/runs')
+  return withFallback([], () => fetchApi<ScrapeRun[]>('/api/runs'))
 }
 
 export async function fetchScrapeRun(id: string): Promise<ScrapeRun> {
@@ -218,7 +278,7 @@ export async function triggerScrape(siteId?: string): Promise<{ message: string 
 }
 
 export async function fetchTrends(days: number = 30): Promise<TrendData> {
-  return fetchApi<TrendData>(`/api/trends?days=${days}`)
+  return withFallback(EMPTY_TREND_DATA, () => fetchApi<TrendData>(`/api/trends?days=${days}`))
 }
 
 export interface CompetitionData {
@@ -265,8 +325,10 @@ export interface CompetitionData {
 }
 
 export async function fetchCompetition(category?: string): Promise<CompetitionData> {
+  return withFallback(EMPTY_COMPETITION_DATA, async () => {
   const params = new URLSearchParams()
   if (category) params.append('category', category)
   const queryString = params.toString()
   return fetchApi<CompetitionData>(`/api/competition${queryString ? `?${queryString}` : ''}`)
+  })
 }

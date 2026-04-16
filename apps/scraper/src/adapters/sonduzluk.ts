@@ -20,14 +20,14 @@ export class SonDuzlukAdapter extends BaseAdapter {
   public readonly campaignsUrl = 'https://www.sonduzluk.com/kampanyalar';
 
   protected readonly selectors = {
-    campaignCard: '.dz-campaign, .bonus-offer, .special-deal, [class*="dz-"]',
+    campaignCard: '.dz-campaign, .bonus-offer, .special-deal, [class*="dz-"], [class*="campaign"], article, .card',
     campaignTitle: '.dz-headline, .deal-title, h3',
     campaignDescription: '.dz-text, .deal-description',
     bonusAmount: '.dz-value, .deal-amount',
     bonusPercentage: '.dz-percent, .deal-ratio',
     minDeposit: '.dz-minimum, .floor-deposit',
     code: '.dz-key, .deal-code',
-    campaignUrl: 'a[href*="deal"], a[href*="bonus"]',
+    campaignUrl: 'a[href*="deal"], a[href*="bonus"], a[href*="kampanya"]',
     campaignImage: '.dz-image img, .deal-thumb img',
     startDate: '.dz-start',
     endDate: '.dz-end',
@@ -57,7 +57,12 @@ export class SonDuzlukAdapter extends BaseAdapter {
   async extractCards(page: Page): Promise<RawCampaignCard[]> {
     const cards: RawCampaignCard[] = [];
 
-    await this.waitForSelector(page, this.selectors.campaignCard, { timeout: 15000 });
+    try {
+      await this.waitForSelector(page, this.selectors.campaignCard, { timeout: 25000 });
+    } catch {
+      // Site layout and anti-bot flows change often; fallback discovery is more resilient.
+      return this.fallbackCardDiscovery(page);
+    }
 
     const cardElements = await page.$$(this.selectors.campaignCard);
 
