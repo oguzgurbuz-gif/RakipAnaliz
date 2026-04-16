@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { z } from 'zod';
 import { query } from '@/lib/db';
-import { successResponse, handleApiError, getCorsHeaders } from '@/lib/response';
+import { successResponse, getCorsHeaders } from '@/lib/response';
 
 const querySchema = z.object({
   page: z.coerce.number().int().positive().default(1),
@@ -100,7 +100,16 @@ export async function GET(request: NextRequest) {
       }
     );
   } catch (error) {
-    return handleApiError(error);
+    console.error('Runs API fallback:', error);
+    return successResponse(
+      [],
+      {
+        page: 1,
+        pageSize: 20,
+        total: 0,
+        totalPages: 0,
+      }
+    );
   }
 }
 

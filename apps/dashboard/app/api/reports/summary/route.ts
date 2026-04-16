@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { z } from 'zod';
 import { query } from '@/lib/db';
-import { successResponse, handleApiError, getCorsHeaders } from '@/lib/response';
+import { successResponse, getCorsHeaders } from '@/lib/response';
 import { getCategoryLabel, isGenericCategory } from '@/lib/category-labels';
 
 const querySchema = z.object({
@@ -126,7 +126,19 @@ export async function GET(request: NextRequest) {
 
     return successResponse(result);
   } catch (error) {
-    return handleApiError(error);
+    console.error('Report summary API fallback:', error);
+    return successResponse({
+      dateFrom: new Date(0).toISOString(),
+      dateTo: new Date(0).toISOString(),
+      startedCount: 0,
+      endedCount: 0,
+      activeCount: 0,
+      passiveCount: 0,
+      changedCount: 0,
+      topCategories: [],
+      topSites: [],
+      fallback: true,
+    });
   }
 }
 
