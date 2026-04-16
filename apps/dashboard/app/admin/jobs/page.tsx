@@ -1,12 +1,13 @@
 'use client'
 
+import { useState } from 'react'
 import { useQuery } from '@tanstack/react-query'
-import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
+import { Card, CardContent, CardHeader } from '@/components/ui/card'
 import { Badge } from '@/components/ui/badge'
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table'
 import { PageHeader } from '@/components/ui/page-header'
 import { SectionHeader } from '@/components/ui/section-header'
-import { RefreshCw, Loader2 } from 'lucide-react'
+import { RefreshCw, Loader2, Play, Bot, ActivitySquare } from 'lucide-react'
 
 type JobRow = {
   id: string
@@ -44,7 +45,19 @@ type AdminJobsData = {
   jobs: JobRow[]
 }
 
+type SiteOption = {
+  id: string
+  name: string
+  code: string
+}
+
 export default function AdminJobsPage() {
+  const [campaignIdsInput, setCampaignIdsInput] = useState('')
+  const [selectedSiteCodes, setSelectedSiteCodes] = useState<string[]>([])
+  const [actionMessage, setActionMessage] = useState<string | null>(null)
+  const [actionError, setActionError] = useState<string | null>(null)
+  const [isSubmitting, setIsSubmitting] = useState(false)
+
   const { data, isLoading, refetch } = useQuery<AdminJobsData>({
     queryKey: ['admin-jobs'],
     queryFn: async () => {
@@ -54,6 +67,56 @@ export default function AdminJobsPage() {
     },
     refetchInterval: 10000,
   })
+
+  const { data: sitesData } = useQuery<{ success: boolean; data: SiteOption[] }>({
+    queryKey: ['admin-sites'],
+    queryFn: async () => {
+      const res = await fetch('/api/sites')
+      if (!res.ok) throw new Error('Failed to fetch sites')
+      return res.json()
+    },
+    staleTime: 60_000,
+  })
+
+  const parseCampaignIds = () =>
+    campaignIdsInput
+      .split(/[\s,]+/)
+      .map((x) => x.trim())
+      .filter(Boolean)
+
+  const selectedSet = new Set(selectedSiteCodes)
+  const activeSites = sitesData?.data ?? []
+
+  const toggleSite = (siteCode: string) => {
+    setSelectedSiteCodes((prev) =>
+      prev.includes(siteCode)
+        ? prev.filter((code) => code !== siteCode)
+        : [...prev, siteCode]
+    )
+  }
+
+  const runAction = async (url: string, body: Record<string, unknown>) => {
+    setActionError(null)
+    setActionMessage(null)
+    setIsSubmitting(true)
+    try {
+      const res = await fetch(url, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(body),
+      })
+      const json = await res.json().catch(() => ({}))
+      if (!res.ok) {
+        throw new Error(json.message || json.error || 'İşlem başarısız')
+      }
+      setActionMessage(json.message || 'İşlem kuyruğa alındı')
+      await refetch()
+    } catch (error) {
+      setActionError(error instanceof Error ? error.message : 'Bilinmeyen hata')
+    } finally {
+      setIsSubmitting(false)
+    }
+  }
 
   const getJobStatusColor = (status: string) => {
     switch (status) {
@@ -111,6 +174,105 @@ export default function AdminJobsPage() {
             </CardContent>
           </Card>
         </div>
+
+        <Card>
+          <CardHeader>
+            <SectionHeader
+              title="Hızlı Admin Aksiyonları"
+              description="Scrape tetikleme, AI reindex ve status recalculation işlemlerini buradan çalıştırın."
+            />
+          </CardHeader>
+          <CardContent className="space-y-4">
+            <div className="flex flex-wrap gap-3">
+              <button
+                disabled={isSubmitting}
+                onClick={() =>
+                  runAction('/api/admin/scrape/trigger', {
+                    runType: 'manual',
+                    priority: 60,
+                    ...(selectedSiteCodes.length > 0 ? { siteCodes: selectedSiteCodes } : {}),
+                  })
+                }
+                className="inline-flex items-center gap-2 rounded-lg border border-border bg-background px-3 py-2 text-sm hover:bg-muted disabled:opacity-50"
+              >
+                <Play className="h-4 w-4" />
+                {selectedSiteCodes.length > 0
+                  ? `${selectedSiteCodes.length} Site İçin Scrape Başlat`
+                  : 'Tüm Siteler İçin Scrape Başlat'}
+              </button>
+              <button
+                disabled={isSubmitting || selectedSiteCodes.length === 0}
+                onClick={() => setSelectedSiteCodes([])}
+                className="inline-flex items-center gap-2 rounded-lg border border-border bg-background px-3 py-2 text-sm hover:bg-muted disabled:opacity-50"
+              >
+                Seçimi Temizle
+              </button>
+            </div>
+
+            <div className="space-y-2">
+              <p className="text-sm text-muted-foreground">
+                Scrape için site seçimi (boş bırakılırsa tüm aktif siteler çalışır):
+              </p>
+              <div className="flex flex-wrap gap-2">
+                {activeSites.map((site) => (
+                  <button
+                    key={site.code}
+                    type="button"
+                    onClick={() => toggleSite(site.code)}
+                    className={`rounded-full border px-3 py-1 text-xs transition ${
+                      selectedSet.has(site.code)
+                        ? 'border-primary bg-primary text-primary-foreground'
+                        : 'border-border bg-background text-foreground hover:bg-muted'
+                    }`}
+                  >
+                    {site.name} ({site.code})
+                  </button>
+                ))}
+              </div>
+            </div>
+
+            <textarea
+              value={campaignIdsInput}
+              onChange={(e) => setCampaignIdsInput(e.target.value)}
+              rows={3}
+              placeholder="Campaign UUID'lerini virgül veya satır ile girin"
+              className="w-full rounded-lg border border-border bg-background p-3 text-sm"
+            />
+
+            <div className="flex flex-wrap gap-3">
+              <button
+                disabled={isSubmitting || parseCampaignIds().length === 0}
+                onClick={() =>
+                  runAction('/api/admin/reindex-ai', {
+                    campaignIds: parseCampaignIds(),
+                    analysisType: 'full',
+                    priority: 65,
+                  })
+                }
+                className="inline-flex items-center gap-2 rounded-lg border border-border bg-background px-3 py-2 text-sm hover:bg-muted disabled:opacity-50"
+              >
+                <Bot className="h-4 w-4" />
+                AI Reindex
+              </button>
+
+              <button
+                disabled={isSubmitting || parseCampaignIds().length === 0}
+                onClick={() =>
+                  runAction('/api/admin/recalculate-status', {
+                    campaignIds: parseCampaignIds(),
+                  })
+                }
+                className="inline-flex items-center gap-2 rounded-lg border border-border bg-background px-3 py-2 text-sm hover:bg-muted disabled:opacity-50"
+              >
+                <ActivitySquare className="h-4 w-4" />
+                Status Yeniden Hesapla
+              </button>
+            </div>
+
+            {actionMessage && <p className="text-sm text-green-600">{actionMessage}</p>}
+            {actionError && <p className="text-sm text-red-600">{actionError}</p>}
+          </CardContent>
+        </Card>
 
         <Card>
           <CardHeader>

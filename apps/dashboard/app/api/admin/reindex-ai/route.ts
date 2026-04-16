@@ -1,23 +1,14 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { z } from 'zod';
-import { query, queryOne } from '@/lib/db';
-import { successResponse, createdResponse, errorResponse, handleApiError, getCorsHeaders } from '@/lib/response';
-import { ValidationError, NotFoundError } from '@bitalih/shared/errors';
+import { query } from '@/lib/db';
+import { createdResponse, errorResponse, handleApiError, getCorsHeaders } from '@/lib/response';
+import { NotFoundError } from '@bitalih/shared/errors';
 
 const reindexSchema = z.object({
   campaignIds: z.array(z.string().uuid()).min(1),
   analysisType: z.enum(['full', 'dates_only', 'sentiment_only']).default('full'),
   priority: z.number().int().min(0).max(100).default(50),
 });
-
-type JobRow = {
-  id: string;
-  job_type: string;
-  payload: unknown;
-  status: string;
-  priority: number;
-  created_at: Date;
-};
 
 export async function POST(request: NextRequest) {
   try {
@@ -48,27 +39,27 @@ export async function POST(request: NextRequest) {
       (id: string) => !validCampaigns.find((c: { id: string }) => c.id === id)
     );
 
-    const jobs: JobRow[] = [];
-
-    if (validCampaigns.length > 0) {
-      const jobPayloads = validCampaigns.map(c => `('ai-analysis', '${JSON.stringify({
-        campaignId: c.id,
-        title: c.title,
-        description: c.body,
-        termsUrl: null,
-        termsText: null,
-        priority: priority >= 75 ? 'high' : priority >= 25 ? 'medium' : 'low',
-        validFrom: c.valid_from,
-        validTo: c.valid_to,
-      })}', 'pending', ${priority}, 3, NOW())`).join(', ');
-
-      const result = await query<JobRow>(`
-        INSERT INTO jobs (type, payload, status, priority, max_attempts, scheduled_at)
-        VALUES ${jobPayloads}
-        RETURNING CAST(id AS CHAR) as id, type as job_type, payload, status, priority, created_at
-      `);
-
-      jobs.push(...result);
+    let jobsCreated = 0;
+    for (const c of validCampaigns) {
+      await query(
+        `INSERT INTO jobs (type, payload, status, priority, max_attempts, scheduled_at)
+         VALUES ($1, CAST($2 AS JSON), 'pending', $3, 3, NOW())`,
+        [
+          'ai-analysis',
+          JSON.stringify({
+            campaignId: c.id,
+            title: c.title,
+            description: c.body,
+            termsUrl: null,
+            termsText: null,
+            priority: priority >= 75 ? 'high' : priority >= 25 ? 'medium' : 'low',
+            validFrom: c.valid_from,
+            validTo: c.valid_to,
+          }),
+          priority,
+        ]
+      );
+      jobsCreated += 1;
     }
 
     await query(`
@@ -78,15 +69,15 @@ export async function POST(request: NextRequest) {
       campaignCount: validCampaigns.length,
       notFoundCount: notFoundIds.length,
       notFoundIds,
-      jobIds: jobs.map(j => j.id),
+      jobsCreated,
       analysisType,
       timestamp: new Date().toISOString(),
     })]);
 
     return createdResponse({
-      jobsCreated: jobs.length,
+      jobsCreated,
       campaignsProcessed: validCampaigns.map((c: { id: string; title: string }) => ({ id: c.id, title: c.title })),
-      message: `Queued AI reindex for ${jobs.length} campaign(s)`,
+      message: `Queued AI reindex for ${jobsCreated} campaign(s)`,
     });
   } catch (error) {
     if (error instanceof NotFoundError) {
