@@ -13,7 +13,7 @@
     "seed": "tsx src/db/seed.ts",
     "scrape": "tsx src/cli.ts",
     "clean": "rm -rf dist",
-    "test": "tsx --test",
+    "test": "tsx --test src/test/**/*.test.ts",
     "test:smoke": "tsx src/test/smoke-test.ts"
   },
   "dependencies": {

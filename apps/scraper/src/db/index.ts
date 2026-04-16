@@ -193,13 +193,13 @@ export async function insertCampaignVersion(
 
 export async function updateCampaign(campaignId: string, normalized: NormalizedCampaignInput): Promise<void> {
   const db = getDb();
-  const now = new Date().toISOString();
+  const now = new Date();
 
   await queries.updateCampaign(db, campaignId, {
     title: normalized.title,
     body: normalized.description,
     status: 'active',
-    lastSeenAt: now,
+    lastSeenAt: now.toISOString(),
   });
 }
 
@@ -241,7 +241,7 @@ export async function updateSiteScrapeStatus(
   error: string | null
 ): Promise<void> {
   const db = getDb();
-  const now = new Date().toISOString();
+  const now = new Date();
 
   const campaignCountResult = await queries.getCampaignCountBySite(db, siteCode);
   const campaignCount = campaignCountResult?.count ?? 0;

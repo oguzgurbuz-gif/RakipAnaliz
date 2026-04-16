@@ -1,20 +1,24 @@
 services:
   db:
-    image: postgres:16-alpine
+    image: mysql:8.4
     restart: unless-stopped
     environment:
-      POSTGRES_USER: postgres
-      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-postgres}
-      POSTGRES_DB: campaigns
+      MYSQL_ROOT_PASSWORD: ${MYSQL_ROOT_PASSWORD:-postgres}
+      MYSQL_DATABASE: ${MYSQL_DATABASE:-campaigns}
+    command:
+      - --character-set-server=utf8mb4
+      - --collation-server=utf8mb4_unicode_ci
+      - --default-time-zone=+00:00
     volumes:
-      - postgres_data:/var/lib/postgresql/data
-      - ./db/init.sql:/docker-entrypoint-initdb.d/init.sql:ro
+      - mysql_data:/var/lib/mysql
+    ports:
+      - "5434:5432"
     networks:
       - app-network
     labels:
       - coolify.managed=true
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U postgres -d campaigns"]
+      test: ["CMD-SHELL", "mysqladmin ping -h 127.0.0.1 -uroot -p$$MYSQL_ROOT_PASSWORD || exit 1"]
       interval: 10s
       timeout: 5s
       retries: 5
@@ -28,15 +32,17 @@ services:
     environment:
       NODE_ENV: production
       PORT: 3000
-      DATABASE_URL: postgresql://postgres:${POSTGRES_PASSWORD:-postgres}@db:5432/campaigns
+      DATABASE_URL: mysql://root:${MYSQL_ROOT_PASSWORD:-postgres}@db:3306/${MYSQL_DATABASE:-campaigns}
       NEXT_PUBLIC_API_URL: ${NEXT_PUBLIC_API_URL:-http://localhost:3000}
       ADMIN_API_KEY: ${ADMIN_API_KEY:-your-admin-api-key-here}
+    ports:
+      - "3002:3000"
     networks:
       - app-network
     labels:
       - coolify.managed=true
     healthcheck:
-      test: ["CMD-SHELL", "wget --no-verbose --tries=1 --spider http://localhost:3000 || exit 1"]
+      test: ["CMD-SHELL", "node -e \"fetch('http://localhost:3000').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))\""]
       interval: 30s
       timeout: 10s
       retries: 3
@@ -52,7 +58,7 @@ services:
     restart: unless-stopped
     environment:
       NODE_ENV: production
-      DATABASE_URL: postgresql://postgres:${POSTGRES_PASSWORD:-postgres}@db:5432/campaigns
+      DATABASE_URL: mysql://root:${MYSQL_ROOT_PASSWORD:-postgres}@db:3306/${MYSQL_DATABASE:-campaigns}
       PUPPETEER_EXECUTABLE_PATH: /usr/bin/chromium
       DEEPSEEK_API_URL: ${DEEPSEEK_API_URL}
       DEEPSEEK_API_KEY: ${DEEPSEEK_API_KEY}
@@ -79,4 +85,4 @@ networks:
     driver: bridge
 
 volumes:
-  postgres_data:
+  mysql_data:

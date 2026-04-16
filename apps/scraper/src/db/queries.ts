@@ -66,7 +66,7 @@ export async function insertCampaign(
     metadata: Record<string, unknown> | null;
   }
 ): Promise<string> {
-  const result = await db.query(
+  await db.query(
     `INSERT INTO campaigns (
       site_id, external_id, source_url, canonical_url, title, body, normalized_text,
       fingerprint, version_no, primary_image_url, valid_from, valid_to,
@@ -77,7 +77,7 @@ export async function insertCampaign(
     ) VALUES (
       $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20, $21,
       NOW(), NOW(), true, NOW(), NOW()
-    ) RETURNING id`,
+    )`,
     [
       data.siteId,
       data.externalId,
@@ -102,7 +102,12 @@ export async function insertCampaign(
       data.metadata ? JSON.stringify(data.metadata) : null,
     ]
   );
-  return requireInsertedId(result.rows);
+
+  const row = await db.query<{ id: string }>(
+    `SELECT id FROM campaigns WHERE site_id = $1 AND fingerprint = $2 LIMIT 1`,
+    [data.siteId, data.fingerprint]
+  );
+  return requireInsertedId(row.rows);
 }
 
 export async function updateCampaignLastSeen(
@@ -137,15 +142,15 @@ export async function insertCampaignVersion(
     versionNo: number;
   }
 ): Promise<string> {
-  const result = await db.query(
+  await db.query(
     `INSERT INTO campaign_versions (
       campaign_id, title, body, normalized_text,
       fingerprint, primary_image_url, valid_from, valid_to,
       valid_from_source, valid_to_source, raw_date_text,
       version_no, created_at
     ) VALUES (
-      $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, NOW()
-    ) RETURNING id`,
+      $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, NOW()
+    )`,
     [
       data.campaignId,
       data.title,
@@ -161,7 +166,12 @@ export async function insertCampaignVersion(
       data.versionNo,
     ]
   );
-  return requireInsertedId(result.rows);
+
+  const row = await db.query<{ id: string }>(
+    `SELECT id FROM campaign_versions WHERE campaign_id = $1 AND version_no = $2 ORDER BY created_at DESC LIMIT 1`,
+    [data.campaignId, data.versionNo]
+  );
+  return requireInsertedId(row.rows);
 }
 
 export async function recalculateCampaignStatus(
@@ -255,7 +265,7 @@ export async function insertAiAnalysis(
     confidence?: number;
   }
 ): Promise<string> {
-  const result = await db.query(
+  await db.query(
     `INSERT INTO campaign_ai_analyses (
       campaign_id, campaign_version_id, analysis_type, model_provider, model_name,
       prompt_version, status, sentiment_label, sentiment_score, category_code,
@@ -267,7 +277,7 @@ export async function insertAiAnalysis(
     ) VALUES (
       $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20, $21,
       $22, $23, $24, $25, $26, $27, $28, $29, $30, $31, NOW()
-    ) RETURNING id`,
+    )`,
     [
       data.campaignId,
       data.campaignVersionId ?? null,
@@ -303,7 +313,13 @@ export async function insertAiAnalysis(
       data.confidence ?? null,
     ]
   );
-  return requireInsertedId(result.rows);
+
+  // MySQL doesn't support RETURNING. We return the latest row for this campaign.
+  const row = await db.query<{ id: string }>(
+    `SELECT id FROM campaign_ai_analyses WHERE campaign_id = $1 ORDER BY created_at DESC LIMIT 1`,
+    [data.campaignId]
+  );
+  return requireInsertedId(row.rows);
 }
 
 export async function getCampaignForRecalc(
@@ -437,11 +453,11 @@ export async function insertWeeklyReport(
     generatedAt: string;
   }
 ): Promise<string> {
-  const result = await db.query(
+  await db.query(
     `INSERT INTO weekly_reports (
       period_start, period_end, summary, by_site, top_bonuses, status, generated_at
     ) VALUES ($1, $2, $3, $4, $5, $6, $7)
-    RETURNING id`,
+    `,
     [
       data.periodStart,
       data.periodEnd,
@@ -452,7 +468,15 @@ export async function insertWeeklyReport(
       data.generatedAt,
     ]
   );
-  return requireInsertedId(result.rows);
+
+  const row = await db.query<{ id: string }>(
+    `SELECT id FROM weekly_reports
+     WHERE period_start = $1 AND period_end = $2 AND status = $3
+     ORDER BY created_at DESC
+     LIMIT 1`,
+    [data.periodStart, data.periodEnd, data.status]
+  );
+  return requireInsertedId(row.rows);
 }
 
 export async function getWeeklyReportItems(
@@ -538,12 +562,11 @@ export async function insertScrapeRun(
     errors: string | null;
   }
 ): Promise<string> {
-  const result = await db.query(
+  await db.query(
     `INSERT INTO scrape_runs (
       site_id, status, started_at, cards_found,
       new_campaigns, updated_campaigns, unchanged, errors
-    ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
-    RETURNING id`,
+    ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8)`,
     [
       data.siteId,
       data.status,
@@ -555,7 +578,15 @@ export async function insertScrapeRun(
       data.errors,
     ]
   );
-  return requireInsertedId(result.rows);
+
+  const row = await db.query<{ id: string }>(
+    `SELECT id FROM scrape_runs
+     WHERE site_id = $1 AND status = $2 AND started_at = $3
+     ORDER BY created_at DESC
+     LIMIT 1`,
+    [data.siteId, data.status, data.startedAt]
+  );
+  return requireInsertedId(row.rows);
 }
 
 export async function updateScrapeRun(
@@ -626,12 +657,11 @@ export async function insertScrapeRunSite(
     errors: string | null;
   }
 ): Promise<string> {
-  const result = await db.query(
+  await db.query(
     `INSERT INTO scrape_run_sites (
       scrape_run_id, site_id, status, cards_found,
       new_campaigns, updated_campaigns, unchanged, errors
-    ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
-    RETURNING id`,
+    ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8)`,
     [
       data.scrapeRunId,
       data.siteId,
@@ -643,7 +673,15 @@ export async function insertScrapeRunSite(
       data.errors,
     ]
   );
-  return requireInsertedId(result.rows);
+
+  const row = await db.query<{ id: string }>(
+    `SELECT id FROM scrape_run_sites
+     WHERE scrape_run_id = $1 AND site_id = $2
+     ORDER BY created_at DESC
+     LIMIT 1`,
+    [data.scrapeRunId, data.siteId]
+  );
+  return requireInsertedId(row.rows);
 }
 
 export async function updateScrapeRunSite(
@@ -704,13 +742,20 @@ export async function insertRawSnapshot(
     rawData: Record<string, unknown>;
   }
 ): Promise<string> {
-  const result = await db.query(
+  await db.query(
     `INSERT INTO raw_campaign_snapshots (campaign_id, site_id, raw_data, created_at)
-    VALUES ($1, $2, $3, NOW())
-    RETURNING id`,
+    VALUES ($1, $2, $3, NOW())`,
     [data.campaignId, data.siteId, JSON.stringify(data.rawData)]
   );
-  return requireInsertedId(result.rows);
+
+  const row = await db.query<{ id: string }>(
+    `SELECT id FROM raw_campaign_snapshots
+     WHERE campaign_id = $1 AND site_id = $2
+     ORDER BY created_at DESC
+     LIMIT 1`,
+    [data.campaignId, data.siteId]
+  );
+  return requireInsertedId(row.rows);
 }
 
 export async function publishSseEvent(
@@ -787,7 +832,7 @@ export async function updateSiteScrapeStatus(
   db: DbExecutor,
   siteCode: string,
   data: {
-    lastScrapedAt: string;
+    lastScrapedAt: Date;
     lastScrapeStatus: string;
     lastScrapeError: string | null;
     campaignCount: number;
@@ -870,16 +915,24 @@ export async function insertJob(
     priority: number;
     payload: string;
     maxAttempts: number;
-    scheduledAt: string;
+    scheduledAt: Date;
   }
 ): Promise<number> {
-  const result = await db.query(
+  await db.query(
     `INSERT INTO jobs (type, status, priority, payload, max_attempts, scheduled_at)
     VALUES ($1, $2, $3, CAST($4 AS JSON), $5, $6)
-    RETURNING id`,
+    `,
     [data.type, data.status, data.priority, data.payload, data.maxAttempts, data.scheduledAt]
   );
-  return insertedJobId(result.rows);
+
+  const row = await db.query<{ id: number }>(
+    `SELECT id FROM jobs
+     WHERE type = $1 AND status = $2 AND scheduled_at = $3
+     ORDER BY id DESC
+     LIMIT 1`,
+    [data.type, data.status, data.scheduledAt]
+  );
+  return insertedJobId(row.rows);
 }
 
 export async function getPendingJobs(
@@ -1180,11 +1233,11 @@ export async function insertErrorLog(
     severity?: string
   }
 ): Promise<string> {
-  const result = await db.query(
+  await db.query(
     `INSERT INTO error_logs (
       error_code, error_message, context, stack_trace, severity
     ) VALUES ($1, $2, $3, $4, $5)
-    RETURNING id`,
+    `,
     [
       data.errorCode || null,
       data.errorMessage,
@@ -1193,5 +1246,16 @@ export async function insertErrorLog(
       data.severity || 'error',
     ]
   );
-  return requireInsertedId(result.rows);
+
+  const row = await db.query<{ id: string }>(
+    `SELECT id FROM error_logs
+     WHERE
+       (error_code = $1 OR ($1 IS NULL AND error_code IS NULL))
+       AND error_message = $2
+       AND severity = $3
+     ORDER BY created_at DESC
+     LIMIT 1`,
+    [data.errorCode || null, data.errorMessage, data.severity || 'error']
+  );
+  return requireInsertedId(row.rows);
 }

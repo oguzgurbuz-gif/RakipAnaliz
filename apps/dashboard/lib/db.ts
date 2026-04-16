@@ -3,20 +3,33 @@ import type { ResultSetHeader, RowDataPacket } from 'mysql2';
 import { convertPgParamsToMysql } from '@bitalih/shared/sql/convert-pg-params';
 import { parseMysqlDatabaseUrl } from '@bitalih/shared/sql/mysql-url';
 
-const pool = mysql.createPool({
-  ...parseMysqlDatabaseUrl(process.env.DATABASE_URL!),
-  waitForConnections: true,
-  connectionLimit: 20,
-  idleTimeout: 30000,
-  timezone: 'Z',
-});
+let pool: mysql.Pool | null = null;
+
+function getPool(): mysql.Pool {
+  if (!pool) {
+    const databaseUrl = process.env.DATABASE_URL;
+    if (!databaseUrl) {
+      throw new Error('DATABASE_URL environment variable is not set');
+    }
+
+    pool = mysql.createPool({
+      ...parseMysqlDatabaseUrl(databaseUrl),
+      waitForConnections: true,
+      connectionLimit: 20,
+      idleTimeout: 30000,
+      timezone: 'Z',
+    });
+  }
+
+  return pool;
+}
 
 export async function query<T = Record<string, unknown>>(
   text: string,
   params?: unknown[]
 ): Promise<T[]> {
   const { sql, values } = convertPgParamsToMysql(text, params ?? []);
-  const [rows] = await pool.query<RowDataPacket[]>(sql, values);
+  const [rows] = await getPool().query<RowDataPacket[]>(sql, values);
   return rows as T[];
 }
 
@@ -33,7 +46,7 @@ export async function execute(
   params?: unknown[]
 ): Promise<number> {
   const { sql, values } = convertPgParamsToMysql(text, params ?? []);
-  const [result] = await pool.query(sql, values);
+  const [result] = await getPool().query(sql, values);
   if (Array.isArray(result)) {
     return result.length;
   }
@@ -41,7 +54,7 @@ export async function execute(
 }
 
 export async function getTransaction() {
-  const conn = await pool.getConnection();
+  const conn = await getPool().getConnection();
   try {
     await conn.beginTransaction();
 
@@ -77,11 +90,11 @@ export async function getTransaction() {
 
 export async function checkConnection(): Promise<boolean> {
   try {
-    await pool.query('SELECT 1');
+    await getPool().query('SELECT 1');
     return true;
   } catch {
     return false;
   }
 }
 
-export default pool;
+export default getPool;

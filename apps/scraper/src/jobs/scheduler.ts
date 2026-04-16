@@ -74,7 +74,7 @@ export class JobScheduler {
       priority: options.priority ?? 0,
       payload: JSON.stringify(payload),
       maxAttempts: options.maxAttempts ?? 3,
-      scheduledAt: (options.scheduledAt ?? now).toISOString(),
+      scheduledAt: options.scheduledAt ?? now,
     });
 
     logger.info(`Scheduled job ${jobId}`, { type, priority: options.priority });

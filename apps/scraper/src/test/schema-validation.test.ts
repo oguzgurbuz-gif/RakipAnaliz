@@ -23,7 +23,7 @@ describe('Database Schema Validation (MySQL)', () => {
 
   async function cols(table: string): Promise<string[]> {
     const [rows] = await pool.query<RowDataPacket[]>(
-      `SELECT column_name FROM information_schema.columns
+      `SELECT COLUMN_NAME AS column_name FROM information_schema.columns
        WHERE table_schema = DATABASE() AND table_name = ?
        ORDER BY column_name`,
       [table]
@@ -138,7 +138,7 @@ describe('Database Schema Validation (MySQL)', () => {
   describe('raw_campaign_snapshots table', () => {
     it('should exist (not raw_snapshots)', async () => {
       const [rows] = await pool.query<RowDataPacket[]>(
-        `SELECT table_name
+        `SELECT TABLE_NAME AS table_name
         FROM information_schema.tables
         WHERE table_schema = DATABASE()
         AND table_name = 'raw_campaign_snapshots'`
