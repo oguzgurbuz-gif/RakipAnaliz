@@ -12,7 +12,7 @@ INSERT INTO sites (code, name, base_url, campaigns_url, adapter_key, is_active, 
 ('nesine', 'Nesine', 'https://nesine.com', 'https://nesine.com/bonus-kampanyalari', 'nesine', 1, 100),
 ('oley', 'Oley', 'https://oley.com', 'https://oley.com/kampanyalar', 'oley', 1, 90),
 ('sonduzluk', 'SonDüzlük', 'https://sonduzluk.com', 'https://sonduzluk.com/kampanyalar', 'sonduzluk', 1, 70),
-('sundzulyuk', 'SonDüzlük Eski', 'https://sundzulyuk.com', 'https://sundzulyuk.com/bonus-ve-kampanyalar', 'sundzulyuk', 1, 60)
+('sundzulyuk', 'SonDüzlük Eski', 'https://sundzulyuk.com', 'https://sundzulyuk.com/bonus-ve-kampanyalar', 'sonduzluk', 0, 60)
 ON DUPLICATE KEY UPDATE
   name = VALUES(name),
   base_url = VALUES(base_url),
