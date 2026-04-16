@@ -33,7 +33,14 @@ export async function GET(request: NextRequest) {
     })
   } catch (error) {
     console.error('Admin jobs API error:', error)
-    return NextResponse.json({ error: 'Internal server error' }, { status: 500, headers: getCorsHeaders() })
+    return NextResponse.json({
+      queueDepth: 0,
+      runningScrapeRuns: 0,
+      completedScrapeRuns: 0,
+      scrapeRuns: [],
+      jobs: [],
+      fallback: true,
+    }, { headers: getCorsHeaders() })
   }
 }
 

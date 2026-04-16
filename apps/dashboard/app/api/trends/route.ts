@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { z } from 'zod';
 import { query } from '@/lib/db';
-import { handleApiError, getCorsHeaders } from '@/lib/response';
+import { getCorsHeaders } from '@/lib/response';
 
 const querySchema = z.object({
   days: z.coerce.number().int().positive().max(90).default(30),
@@ -226,7 +226,23 @@ export async function GET(request: NextRequest) {
       { headers: getCorsHeaders() }
     );
   } catch (error) {
-    return handleApiError(error);
+    console.error('Trends API fallback:', error);
+    return NextResponse.json(
+      {
+        success: true,
+        data: {
+          campaignsOverTime: [],
+          categoryByDate: {},
+          categoryDistribution: [],
+          sentimentDistribution: [],
+          topSites: [],
+          valueScoresBySite: [],
+          topCategoriesThisWeek: [],
+        },
+        fallback: true,
+      },
+      { headers: getCorsHeaders() }
+    );
   }
 }
 

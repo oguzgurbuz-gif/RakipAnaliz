@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { z } from 'zod';
 import { query } from '@/lib/db';
-import { successResponse, handleApiError, getCorsHeaders } from '@/lib/response';
+import { successResponse, getCorsHeaders } from '@/lib/response';
 
 const querySchema = z.object({
   category: z.string().optional(),
@@ -301,7 +301,18 @@ export async function GET(request: NextRequest) {
       { headers: getCorsHeaders() }
     );
   } catch (error) {
-    return handleApiError(error);
+    console.error('Competition API fallback:', error);
+    return successResponse({
+      categories: [],
+      sites: [],
+      statsByCategory: [],
+      siteRankings: [],
+      bestDeals: [],
+      comparisonTable: [],
+      siteMatrix: {},
+      topByCategory: {},
+      fallback: true,
+    });
   }
 }
 

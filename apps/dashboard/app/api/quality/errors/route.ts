@@ -15,7 +15,7 @@ export async function GET() {
     return NextResponse.json(result)
   } catch (error) {
     console.error('Quality errors error:', error)
-    return NextResponse.json({ error: 'Internal server error' }, { status: 500, headers: getCorsHeaders() })
+    return NextResponse.json([], { headers: getCorsHeaders() })
   }
 }
 

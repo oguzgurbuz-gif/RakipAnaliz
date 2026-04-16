@@ -1,6 +1,6 @@
 import { NextResponse } from 'next/server';
 import { query } from '@/lib/db';
-import { handleApiError, getCorsHeaders } from '@/lib/response';
+import { getCorsHeaders } from '@/lib/response';
 
 export async function GET() {
   try {
@@ -16,7 +16,11 @@ export async function GET() {
       { headers: getCorsHeaders() }
     );
   } catch (error) {
-    return handleApiError(error);
+    console.error('Sites API fallback:', error);
+    return NextResponse.json(
+      { success: true, data: [], fallback: true },
+      { headers: getCorsHeaders() }
+    );
   }
 }
 

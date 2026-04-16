@@ -29,7 +29,18 @@ export async function GET() {
     })
   } catch (error) {
     console.error('Quality stats error:', error)
-    return NextResponse.json({ error: 'Internal server error' }, { status: 500, headers: getCorsHeaders() })
+    return NextResponse.json({
+      totalCampaigns: 0,
+      campaignsWithAiAnalysis: 0,
+      campaignsMissingDates: 0,
+      campaignsWithBothDates: 0,
+      campaignsMissingBody: 0,
+      suspiciousCampaigns: 0,
+      activeCampaigns: 0,
+      endedCampaigns: 0,
+      pendingCampaigns: 0,
+      fallback: true,
+    }, { headers: getCorsHeaders() })
   }
 }
 
