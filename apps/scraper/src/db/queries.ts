@@ -457,6 +457,13 @@ export async function insertWeeklyReport(
     `INSERT INTO weekly_reports (
       period_start, period_end, summary, by_site, top_bonuses, status, generated_at
     ) VALUES ($1, $2, $3, $4, $5, $6, $7)
+    ON DUPLICATE KEY UPDATE
+      summary = VALUES(summary),
+      by_site = VALUES(by_site),
+      top_bonuses = VALUES(top_bonuses),
+      status = VALUES(status),
+      generated_at = VALUES(generated_at),
+      updated_at = CURRENT_TIMESTAMP(6)
     `,
     [
       data.periodStart,
@@ -477,6 +484,20 @@ export async function insertWeeklyReport(
     [data.periodStart, data.periodEnd, data.status]
   );
   return requireInsertedId(row.rows);
+}
+
+export async function hasWeeklyReportForPeriod(
+  db: DbExecutor,
+  periodStart: string,
+  periodEnd: string
+): Promise<boolean> {
+  const result = await db.query<{ count: string }>(
+    `SELECT COUNT(*) as count
+     FROM weekly_reports
+     WHERE period_start = $1 AND period_end = $2`,
+    [periodStart, periodEnd]
+  );
+  return parseInt(result.rows[0]?.count || '0', 10) > 0;
 }
 
 export async function getWeeklyReportItems(

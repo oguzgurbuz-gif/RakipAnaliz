@@ -71,7 +71,7 @@ export default function WeeklyReportsPage() {
           <EmptyState
             icon={FileClock}
             title="Henüz haftalık rapor bulunmuyor"
-            description="Rapor üretildiğinde burada haftalık kartlar ve öne çıkan içgörüler görünecek."
+            description="İlk tam scrape turu bittiğinde sistem otomatik ilk raporu üretir. Sonrasında haftalık raporlar burada listelenir."
           />
         )}
       </main>
