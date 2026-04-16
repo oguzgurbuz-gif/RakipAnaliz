@@ -1,22 +1,16 @@
-import { describe, it, expect } from 'node:test';
-import { getDb, query, queryOne, closeDb } from '../db';
-import { Pool } from 'pg';
+import { describe, it, after } from 'node:test';
+import assert from 'node:assert/strict';
+import { query, queryOne, closeDb } from '../db';
 
 describe('Smoke Tests - Database Operations', () => {
-  let pool: Pool;
-
-  beforeAll(async () => {
-    pool = getDb() as Pool;
-  });
-
-  afterAll(async () => {
+  after(async () => {
     await closeDb();
   });
 
   describe('Database Connection', () => {
     it('should connect to database', async () => {
-      const result = await pool.query('SELECT NOW() as now');
-      expect(result.rows[0].now).toBeDefined();
+      const rows = await query<{ now: Date }>('SELECT NOW() as now');
+      assert.ok(rows[0]?.now);
     });
   });
 
@@ -25,7 +19,7 @@ describe('Smoke Tests - Database Operations', () => {
       const sites = await query<{ id: string; code: string; name: string }>(
         'SELECT id, code, name FROM sites LIMIT 5'
       );
-      expect(Array.isArray(sites)).toBe(true);
+      assert.equal(Array.isArray(sites), true);
     });
 
     it('should find site by code', async () => {
@@ -33,8 +27,8 @@ describe('Smoke Tests - Database Operations', () => {
         'SELECT id, code FROM sites WHERE code = $1',
         ['misli']
       );
-      expect(site).not.toBeNull();
-      expect(site?.code).toBe('misli');
+      assert.notEqual(site, null);
+      assert.equal(site?.code, 'misli');
     });
   });
 
@@ -43,35 +37,34 @@ describe('Smoke Tests - Database Operations', () => {
       const campaigns = await query<{ id: string; fingerprint: string }>(
         'SELECT id, fingerprint FROM campaigns LIMIT 1'
       );
-      expect(Array.isArray(campaigns)).toBe(true);
+      assert.equal(Array.isArray(campaigns), true);
     });
   });
 
   describe('Jobs Operations', () => {
     it('should query jobs table structure', async () => {
-      const result = await pool.query(`
-        SELECT column_name
+      const rows = await query<{ column_name: string }>(`
+        SELECT COLUMN_NAME as column_name
         FROM information_schema.columns
-        WHERE table_name = 'jobs'
+        WHERE table_schema = DATABASE()
+        AND table_name = 'jobs'
         AND column_name IN ('id', 'type', 'status', 'result', 'error')
       `);
-      const columns = result.rows.map(r => r.column_name);
-      expect(columns).toContain('result');
-      expect(columns).toContain('error');
+      const columns = rows.map((r) => r.column_name);
+      assert.ok(columns.includes('result'));
+      assert.ok(columns.includes('error'));
     });
 
     it('should insert and select a job', async () => {
-      const testJobId = await query<{ id: string }>(`
+      await query(`
         INSERT INTO jobs (type, status, priority, payload)
-        VALUES ('test-job', 'pending', 0, '{"test": true}'::jsonb)
-        RETURNING id
+        VALUES ('test-job', 'pending', 0, CAST('{"test": true}' AS JSON))
       `);
-
-      expect(testJobId[0]).toBeDefined();
-      expect(testJobId[0].id).toBeDefined();
-
-      // Cleanup
-      await pool.query('DELETE FROM jobs WHERE id = $1', [testJobId[0].id]);
+      const inserted = await queryOne<{ id: number }>(
+        `SELECT id FROM jobs WHERE type = 'test-job' ORDER BY id DESC LIMIT 1`
+      );
+      assert.ok(inserted?.id);
+      await query('DELETE FROM jobs WHERE id = $1', [inserted!.id]);
     });
   });
 
@@ -83,46 +76,50 @@ describe('Smoke Tests - Database Operations', () => {
         return;
       }
 
-      const result = await pool.query(`
+      await query(
+        `
         INSERT INTO scrape_runs (site_id, status, started_at, cards_found, new_campaigns, updated_campaigns, unchanged)
         VALUES ($1, 'running', NOW(), 0, 0, 0, 0)
-        RETURNING id
-      `, [site.id]);
+      `,
+        [site.id]
+      );
 
-      expect(result.rows[0]).toBeDefined();
-
-      // Cleanup
-      await pool.query('DELETE FROM scrape_runs WHERE id = $1', [result.rows[0].id]);
+      const inserted = await queryOne<{ id: string }>(
+        `SELECT id FROM scrape_runs WHERE site_id = $1 ORDER BY created_at DESC LIMIT 1`,
+        [site.id]
+      );
+      assert.ok(inserted?.id);
+      await query('DELETE FROM scrape_runs WHERE id = $1', [inserted!.id]);
     });
   });
 
   describe('SSE Events Operations', () => {
     it('should insert sse_event with event_channel (not channel)', async () => {
-      const result = await pool.query(`
+      await query(`
         INSERT INTO sse_events (event_type, event_channel, payload)
-        VALUES ('test-event', 'test-channel', '{"data": "test"}'::jsonb)
-        RETURNING id
+        VALUES ('test-event', 'test-channel', CAST('{"data": "test"}' AS JSON))
       `);
-
-      expect(result.rows[0]).toBeDefined();
-
-      // Cleanup
-      await pool.query('DELETE FROM sse_events WHERE id = $1', [result.rows[0].id]);
+      const inserted = await queryOne<{ id: number }>(
+        `SELECT id FROM sse_events WHERE event_type = 'test-event' ORDER BY id DESC LIMIT 1`
+      );
+      assert.ok(inserted?.id);
+      await query('DELETE FROM sse_events WHERE id = $1', [inserted!.id]);
     });
   });
 
   describe('Campaign Similarities Operations', () => {
     it('should have correct column names', async () => {
-      const result = await pool.query(`
-        SELECT column_name
+      const result = await query<{ column_name: string }>(`
+        SELECT COLUMN_NAME as column_name
         FROM information_schema.columns
-        WHERE table_name = 'campaign_similarities'
+        WHERE table_schema = DATABASE()
+        AND table_name = 'campaign_similarities'
       `);
-      const columns = result.rows.map(r => r.column_name);
+      const columns = result.map((r) => r.column_name);
 
-      expect(columns).toContain('campaign_id_1');
-      expect(columns).toContain('campaign_id_2');
-      expect(columns).not.toContain('matched_fields');
+      assert.ok(columns.includes('campaign_id_1'));
+      assert.ok(columns.includes('campaign_id_2'));
+      assert.ok(!columns.includes('matched_fields'));
     });
   });
 });

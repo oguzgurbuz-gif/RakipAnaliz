@@ -45,13 +45,16 @@ export async function GET(request: NextRequest) {
     }
 
     if (category) {
-      whereClause += ` AND COALESCE(c.metadata->'ai_analysis'->>'category', c.metadata->'ai_analysis'->>'campaign_type') = $${paramIndex}`;
+      whereClause += ` AND COALESCE(
+        NULLIF(JSON_UNQUOTE(JSON_EXTRACT(c.metadata, '$.ai_analysis.category')), ''),
+        NULLIF(JSON_UNQUOTE(JSON_EXTRACT(c.metadata, '$.ai_analysis.campaign_type')), '')
+      ) = $${paramIndex}`;
       filterParams.push(category);
       paramIndex++;
     }
 
     if (sentiment) {
-      whereClause += ` AND COALESCE(c.metadata->'ai_analysis'->>'sentiment', '') = $${paramIndex}`;
+      whereClause += ` AND COALESCE(JSON_UNQUOTE(JSON_EXTRACT(c.metadata, '$.ai_analysis.sentiment')), '') = $${paramIndex}`;
       filterParams.push(sentiment);
       paramIndex++;
     }
@@ -69,8 +72,11 @@ export async function GET(request: NextRequest) {
         c.primary_image_url,
         s.name as site_name,
         s.code as site_code,
-        c.metadata->'ai_analysis'->>'sentiment' as ai_sentiment_label,
-        COALESCE(c.metadata->'ai_analysis'->>'category', c.metadata->'ai_analysis'->>'campaign_type') as ai_category_code
+        JSON_UNQUOTE(JSON_EXTRACT(c.metadata, '$.ai_analysis.sentiment')) as ai_sentiment_label,
+        COALESCE(
+          NULLIF(JSON_UNQUOTE(JSON_EXTRACT(c.metadata, '$.ai_analysis.category')), ''),
+          NULLIF(JSON_UNQUOTE(JSON_EXTRACT(c.metadata, '$.ai_analysis.campaign_type')), '')
+        ) as ai_category_code
       FROM campaigns c
       JOIN sites s ON s.id = c.site_id
       ${whereClause}

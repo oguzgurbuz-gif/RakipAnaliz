@@ -123,13 +123,14 @@ async function storeWeeklyReport(report: WeeklyReport): Promise<void> {
   const db = getDb();
 
   try {
-    queries.insertWeeklyReport(db, {
+    await queries.insertWeeklyReport(db, {
       periodStart: report.period.start,
       periodEnd: report.period.end,
-      summary: report.summary,
-      bySite: report.bySite,
-      topBonuses: report.topBonuses,
+      summary: JSON.stringify(report.summary),
+      bySite: JSON.stringify(report.bySite),
+      topBonuses: JSON.stringify(report.topBonuses),
       status: 'completed',
+      generatedAt: report.generatedAt,
     });
 
     logger.debug('Weekly report stored successfully');

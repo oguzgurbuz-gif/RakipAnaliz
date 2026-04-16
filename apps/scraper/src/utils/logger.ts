@@ -17,7 +17,7 @@ export interface LogEntry {
 
 async function writeErrorToDb(entry: LogEntry): Promise<void> {
   try {
-    const { insertErrorLog } = await import('./db');
+    const { insertErrorLog } = await import('../db');
     await insertErrorLog(
       entry.context?.errorCode as string || 'SCRAPER_ERROR',
       entry.message,

@@ -6,7 +6,7 @@ export async function GET() {
   try {
     const [total, aiCount, missingDates, bothDates, missingBody, suspicious, active, ended, pending] = await Promise.all([
       query<{ count: string }>(`SELECT COUNT(*) as count FROM campaigns`),
-      query<{ count: string }>(`SELECT COUNT(*) as count FROM campaigns WHERE metadata->'ai_analysis'->>'summary' IS NOT NULL`),
+      query<{ count: string }>(`SELECT COUNT(*) as count FROM campaigns WHERE JSON_UNQUOTE(JSON_EXTRACT(metadata, '$.ai_analysis.summary')) IS NOT NULL`),
       query<{ count: string }>(`SELECT COUNT(*) as count FROM campaigns WHERE valid_from IS NULL OR valid_to IS NULL`),
       query<{ count: string }>(`SELECT COUNT(*) as count FROM campaigns WHERE valid_from IS NOT NULL AND valid_to IS NOT NULL`),
       query<{ count: string }>(`SELECT COUNT(*) as count FROM campaigns WHERE body IS NULL OR body = ''`),

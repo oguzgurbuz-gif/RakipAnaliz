@@ -52,6 +52,7 @@ export async function POST(request: NextRequest) {
     const body = await request.json();
     const { campaignIds } = recalculateSchema.parse(body);
 
+    const idPh = campaignIds.map((_, i) => `$${i + 1}`).join(', ');
     const campaigns = await query<CampaignRow>(`
       SELECT 
         id,
@@ -63,8 +64,8 @@ export async function POST(request: NextRequest) {
         removed_from_source_at,
         is_visible_on_last_scrape
       FROM campaigns
-      WHERE id = ANY($1)
-    `, [campaignIds]);
+      WHERE id IN (${idPh})
+    `, campaignIds);
 
     if (campaigns.length === 0) {
       throw new NotFoundError('Campaigns');
@@ -96,8 +97,8 @@ export async function POST(request: NextRequest) {
         `, [newStatus, campaign.id]);
 
         await query(`
-          INSERT INTO campaign_status_history (campaign_id, previous_status, new_status, reason, context)
-          VALUES ($1, $2, $3, 'admin_recalc', $4)
+          INSERT INTO campaign_status_history (campaign_id, old_status, new_status, reason, context)
+          VALUES ($1, $2, $3, 'admin_recalc', CAST($4 AS JSON))
         `, [campaign.id, campaign.status, newStatus, JSON.stringify({ triggeredBy: 'admin' })]);
 
         changedIds.push(campaign.id);

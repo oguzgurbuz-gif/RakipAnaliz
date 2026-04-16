@@ -1,25 +1,27 @@
 services:
   db:
-    image: postgres:16-alpine
+    image: mysql:8.4
     container_name: bitalih-db
     restart: unless-stopped
     environment:
-      POSTGRES_USER: postgres
-      POSTGRES_PASSWORD: postgres
-      POSTGRES_DB: campaigns
+      MYSQL_ROOT_PASSWORD: postgres
+      MYSQL_DATABASE: campaigns
+    command:
+      - --character-set-server=utf8mb4
+      - --collation-server=utf8mb4_unicode_ci
+      - --default-time-zone=+00:00
     volumes:
-      - postgres_data:/var/lib/postgresql/data
-      - ./db/init.sql:/docker-entrypoint-initdb.d/init.sql:ro
+      - mysql_data:/var/lib/mysql
     ports:
-      - "5433:5432"
+      - "3307:3306"
     networks:
       - bitalih-network
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U postgres -d campaigns"]
+      test: ["CMD", "mysqladmin", "ping", "-h", "localhost", "-uroot", "-ppostgres"]
       interval: 10s
       timeout: 5s
-      retries: 5
-      start_period: 10s
+      retries: 10
+      start_period: 30s
 
   dashboard:
     build:
@@ -30,17 +32,17 @@ services:
     environment:
       NODE_ENV: production
       PORT: ${PORT:-3000}
-      DATABASE_URL: ${DATABASE_URL:-postgresql://postgres:postgres@db:5432/campaigns}
+      DATABASE_URL: ${DATABASE_URL:-mysql://root:postgres@db:3306/campaigns}
       PNPM_HOME: /pnpm
     ports:
-      - "3001:3000"
+      - "3002:3000"
     depends_on:
       db:
         condition: service_healthy
     networks:
       - bitalih-network
     healthcheck:
-      test: ["CMD-SHELL", "wget --no-verbose --tries=1 --spider http://localhost:3000 || exit 1"]
+      test: ["CMD-SHELL", "node -e \"fetch('http://localhost:3000').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))\""]
       interval: 30s
       timeout: 10s
       retries: 3
@@ -54,7 +56,7 @@ services:
     restart: unless-stopped
     environment:
       NODE_ENV: ${NODE_ENV:-development}
-      DATABASE_URL: ${DATABASE_URL:-postgresql://postgres:postgres@db:5432/campaigns}
+      DATABASE_URL: ${DATABASE_URL:-mysql://root:postgres@db:3306/campaigns}
       PNPM_HOME: /pnpm
       PUPPETEER_EXECUTABLE_PATH: /usr/bin/chromium
       DEEPSEEK_API_URL: ${DEEPSEEK_API_URL:-https://api.deepseek.com/chat/completions}
@@ -79,4 +81,4 @@ networks:
     driver: bridge
 
 volumes:
-  postgres_data:
+  mysql_data:

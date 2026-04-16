@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { z } from 'zod';
 import { query } from '@/lib/db';
-import { successResponse, handleApiError, getCorsHeaders } from '@/lib/response';
+import { handleApiError, getCorsHeaders } from '@/lib/response';
 
 const querySchema = z.object({
   page: z.coerce.number().int().positive().default(1),
@@ -18,7 +18,7 @@ const querySchema = z.object({
     'active_during_range',
     'changed_in_range',
     'passive_in_range',
-    'seen_in_range'
+    'seen_in_range',
   ]).optional(),
   from: z.string().optional(),
   to: z.string().optional(),
@@ -50,6 +50,11 @@ type CampaignRow = {
   ai_risk_flags: unknown | null;
 };
 
+const aiCategoryExpr = `COALESCE(
+  NULLIF(JSON_UNQUOTE(JSON_EXTRACT(c.metadata, '$.ai_analysis.category')), ''),
+  NULLIF(JSON_UNQUOTE(JSON_EXTRACT(c.metadata, '$.ai_analysis.campaign_type')), '')
+)`;
+
 function buildDateClause(dateMode?: string, from?: string, to?: string): { clause: string; params: unknown[] } {
   if (!dateMode || !from || !to) {
     return { clause: '', params: [] };
@@ -62,37 +67,37 @@ function buildDateClause(dateMode?: string, from?: string, to?: string): { claus
     case 'started_in_range':
       return {
         clause: 'AND c.valid_from >= $1 AND c.valid_from <= $2',
-        params: [dateFrom, dateTo]
+        params: [dateFrom, dateTo],
       };
     case 'ended_in_range':
       return {
         clause: 'AND c.valid_to >= $1 AND c.valid_to <= $2',
-        params: [dateFrom, dateTo]
+        params: [dateFrom, dateTo],
       };
     case 'active_during_range':
       return {
         clause: 'AND c.valid_from <= $2 AND (c.valid_to IS NULL OR c.valid_to >= $1)',
-        params: [dateFrom, dateTo]
+        params: [dateFrom, dateTo],
       };
     case 'changed_in_range':
       return {
         clause: 'AND c.updated_at >= $1 AND c.updated_at <= $2',
-        params: [dateFrom, dateTo]
+        params: [dateFrom, dateTo],
       };
     case 'seen_in_range':
       return {
         clause: 'AND c.last_seen_at >= $1 AND c.last_seen_at <= $2',
-        params: [dateFrom, dateTo]
+        params: [dateFrom, dateTo],
       };
     case 'passive_in_range':
       return {
         clause: `AND EXISTS (
-      SELECT 1 FROM campaign_status_history h 
-      WHERE h.campaign_id = c.id 
-      AND h.new_status = 'passive' 
+      SELECT 1 FROM campaign_status_history h
+      WHERE h.campaign_id = c.id
+      AND h.new_status = 'passive'
       AND h.changed_at >= $1 AND h.changed_at <= $2
     )`,
-        params: [dateFrom, dateTo]
+        params: [dateFrom, dateTo],
       };
     default:
       return { clause: '', params: [] };
@@ -112,7 +117,7 @@ export async function GET(request: NextRequest) {
     let paramIndex = filterParams.length + 1;
 
     let whereClause = 'WHERE 1=1';
-    
+
     if (siteId) {
       whereClause += ` AND c.site_id = $${paramIndex}`;
       filterParams.push(siteId);
@@ -126,26 +131,26 @@ export async function GET(request: NextRequest) {
     }
 
     if (params.category) {
-      whereClause += ` AND COALESCE(c.metadata->'ai_analysis'->>'category', c.metadata->'ai_analysis'->>'campaign_type') = $${paramIndex}`;
+      whereClause += ` AND ${aiCategoryExpr} = $${paramIndex}`;
       filterParams.push(params.category);
       paramIndex++;
     }
 
     if (params.campaign_type) {
-      whereClause += ` AND c.metadata->'ai_analysis'->>'campaign_type' = $${paramIndex}`;
+      whereClause += ` AND JSON_UNQUOTE(JSON_EXTRACT(c.metadata, '$.ai_analysis.campaign_type')) = $${paramIndex}`;
       filterParams.push(params.campaign_type);
       paramIndex++;
     }
 
     if (params.sentiment) {
-      whereClause += ` AND COALESCE(ai.sentiment_label, c.metadata->'ai_analysis'->>'sentiment') = $${paramIndex}`;
+      whereClause += ` AND JSON_UNQUOTE(JSON_EXTRACT(c.metadata, '$.ai_analysis.sentiment')) = $${paramIndex}`;
       filterParams.push(params.sentiment);
       paramIndex++;
     }
 
     if (params.dateCompleteness) {
-      const hasStartDateExpr = `(c.valid_from IS NOT NULL OR NULLIF(c.metadata->'ai_analysis'->>'valid_from', '') IS NOT NULL)`;
-      const hasEndDateExpr = `(c.valid_to IS NOT NULL OR NULLIF(c.metadata->'ai_analysis'->>'valid_to', '') IS NOT NULL)`;
+      const hasStartDateExpr = `(c.valid_from IS NOT NULL OR NULLIF(JSON_UNQUOTE(JSON_EXTRACT(c.metadata, '$.ai_analysis.valid_from')), '') IS NOT NULL)`;
+      const hasEndDateExpr = `(c.valid_to IS NOT NULL OR NULLIF(JSON_UNQUOTE(JSON_EXTRACT(c.metadata, '$.ai_analysis.valid_to')), '') IS NOT NULL)`;
 
       switch (params.dateCompleteness) {
         case 'complete':
@@ -164,7 +169,7 @@ export async function GET(request: NextRequest) {
     }
 
     if (search) {
-      whereClause += ` AND (c.title ILIKE $${paramIndex} OR c.body ILIKE $${paramIndex})`;
+      whereClause += ` AND (LOWER(c.title) LIKE LOWER($${paramIndex}) OR LOWER(IFNULL(c.body,'')) LIKE LOWER($${paramIndex}))`;
       filterParams.push(`%${search}%`);
       paramIndex++;
     }
@@ -175,6 +180,17 @@ export async function GET(request: NextRequest) {
     const sortColumn = sort && validSortColumns.includes(sort) ? sort : 'created_at';
     const sortDirection = sortColumn.startsWith('-') ? 'ASC' : 'DESC';
     const sortCol = sortColumn.startsWith('-') ? sortColumn.slice(1) : sortColumn;
+
+    const sortSql: Record<string, string> = {
+      created_at: 'c.created_at',
+      updated_at: 'c.updated_at',
+      valid_from: 'c.valid_from',
+      valid_to: 'c.valid_to',
+      title: 'c.title',
+      status: 'c.status',
+      last_seen_at: 'c.last_seen_at',
+    };
+    const orderCol = sortSql[sortCol === 'first_seen_at' ? 'created_at' : sortCol] || 'c.created_at';
 
     const countQuery = `
       SELECT COUNT(DISTINCT c.id) as total
@@ -195,8 +211,8 @@ export async function GET(request: NextRequest) {
         c.status,
         c.valid_from,
         c.valid_to,
-        c.metadata->'ai_analysis'->>'valid_from' as ai_valid_from,
-        c.metadata->'ai_analysis'->>'valid_to' as ai_valid_to,
+        JSON_UNQUOTE(JSON_EXTRACT(c.metadata, '$.ai_analysis.valid_from')) as ai_valid_from,
+        JSON_UNQUOTE(JSON_EXTRACT(c.metadata, '$.ai_analysis.valid_to')) as ai_valid_to,
         c.created_at as first_seen_at,
         c.last_seen_at,
         c.primary_image_url,
@@ -204,15 +220,15 @@ export async function GET(request: NextRequest) {
         c.metadata,
         s.name as site_name,
         s.code as site_code,
-        c.metadata->'ai_analysis'->>'sentiment' as ai_sentiment_label,
-        COALESCE(c.metadata->'ai_analysis'->>'category', c.metadata->'ai_analysis'->>'campaign_type') as ai_category_code,
-        c.metadata->'ai_analysis'->>'summary' as ai_summary_text,
-        c.metadata->'ai_analysis'->>'key_points' as ai_key_points,
-        c.metadata->'ai_analysis'->'risk_flags' as ai_risk_flags
+        JSON_UNQUOTE(JSON_EXTRACT(c.metadata, '$.ai_analysis.sentiment')) as ai_sentiment_label,
+        ${aiCategoryExpr} as ai_category_code,
+        JSON_UNQUOTE(JSON_EXTRACT(c.metadata, '$.ai_analysis.summary')) as ai_summary_text,
+        JSON_UNQUOTE(JSON_EXTRACT(c.metadata, '$.ai_analysis.key_points')) as ai_key_points,
+        JSON_EXTRACT(c.metadata, '$.ai_analysis.risk_flags') as ai_risk_flags
       FROM campaigns c
       LEFT JOIN sites s ON s.id = c.site_id
       ${whereClause}
-      ORDER BY c.${sortCol === 'first_seen_at' ? 'created_at' : sortCol} ${sortDirection}
+      ORDER BY ${orderCol} ${sortDirection}
       LIMIT $${paramIndex} OFFSET $${paramIndex + 1}
     `;
 

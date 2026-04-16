@@ -1,23 +1,36 @@
-import { Pool } from 'pg';
+import mysql from 'mysql2/promise';
+import type { ResultSetHeader, RowDataPacket } from 'mysql2';
+import { convertPgParamsToMysql } from '@bitalih/shared/sql/convert-pg-params';
+import { parseMysqlDatabaseUrl } from '@bitalih/shared/sql/mysql-url';
 
-const pool = new Pool({
-  connectionString: process.env.DATABASE_URL,
-  max: 20,
-  idleTimeoutMillis: 30000,
-  connectionTimeoutMillis: 2000,
-});
+let pool: mysql.Pool | null = null;
+
+function getPool(): mysql.Pool {
+  if (!pool) {
+    const databaseUrl = process.env.DATABASE_URL;
+    if (!databaseUrl) {
+      throw new Error('DATABASE_URL environment variable is not set');
+    }
+
+    pool = mysql.createPool({
+      ...parseMysqlDatabaseUrl(databaseUrl),
+      waitForConnections: true,
+      connectionLimit: 20,
+      idleTimeout: 30000,
+      timezone: 'Z',
+    });
+  }
+
+  return pool;
+}
 
 export async function query<T = Record<string, unknown>>(
   text: string,
   params?: unknown[]
 ): Promise<T[]> {
-  const client = await pool.connect();
-  try {
-    const result = await client.query(text, params);
-    return result.rows as T[];
-  } finally {
-    client.release();
-  }
+  const { sql, values } = convertPgParamsToMysql(text, params ?? []);
+  const [rows] = await getPool().query<RowDataPacket[]>(sql, values);
+  return rows as T[];
 }
 
 export async function queryOne<T = Record<string, unknown>>(
@@ -32,51 +45,56 @@ export async function execute(
   text: string,
   params?: unknown[]
 ): Promise<number> {
-  const client = await pool.connect();
-  try {
-    const result = await client.query(text, params);
-    return result.rowCount || 0;
-  } finally {
-    client.release();
+  const { sql, values } = convertPgParamsToMysql(text, params ?? []);
+  const [result] = await getPool().query(sql, values);
+  if (Array.isArray(result)) {
+    return result.length;
   }
+  return (result as ResultSetHeader).affectedRows ?? 0;
 }
 
 export async function getTransaction() {
-  const client = await pool.connect();
+  const conn = await getPool().getConnection();
   try {
-    await client.query('BEGIN');
+    await conn.beginTransaction();
+
+    const run = async <T = Record<string, unknown>>(text: string, params?: unknown[]) => {
+      const { sql, values } = convertPgParamsToMysql(text, params ?? []);
+      const [rows] = await conn.query<RowDataPacket[]>(sql, values);
+      return rows as T[];
+    };
+
     return {
       commit: async () => {
-        await client.query('COMMIT');
+        await conn.commit();
+        conn.release();
       },
       rollback: async () => {
-        await client.query('ROLLBACK');
+        await conn.rollback();
+        conn.release();
       },
-      query: async <T = Record<string, unknown>>(text: string, params?: unknown[]) => {
-        const result = await client.query(text, params);
-        return result.rows as T[];
-      },
+      query: run,
       queryOne: async <T = Record<string, unknown>>(text: string, params?: unknown[]) => {
-        const rows = await client.query(text, params);
-        return (rows.rows[0] || null) as T | null;
+        const rows = await run<T>(text, params);
+        return (rows[0] || null) as T | null;
       },
       release: () => {
-        client.release();
+        conn.release();
       },
     };
   } catch (error) {
-    client.release();
+    conn.release();
     throw error;
   }
 }
 
 export async function checkConnection(): Promise<boolean> {
   try {
-    await pool.query('SELECT 1');
+    await getPool().query('SELECT 1');
     return true;
   } catch {
     return false;
   }
 }
 
-export default pool;
+export default getPool;
