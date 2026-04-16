@@ -4,6 +4,7 @@ import { logger } from '../utils/logger';
 import { NormalizedCampaignInput, Campaign, CampaignVersion, CampaignDiff, SiteRecord } from '../types';
 import * as queries from './queries';
 import { mysqlQuery, poolAsExecutor, type DbExecutor } from './compat-query';
+import { normalizeConfidence01, toDecimal4 } from '../ai/confidence';
 
 let pool: Pool | null = null;
 
@@ -261,13 +262,15 @@ export async function applyAiExtractedDates(
   confidence: number
 ): Promise<void> {
   const db = getDb();
+  const conf01 = normalizeConfidence01(confidence);
+  const confDb = conf01 == null ? null : toDecimal4(conf01);
   await queries.applyAiExtractedDates(db, campaignId, {
     validFrom: startDate,
     validTo: endDate,
     validFromSource: 'ai-extracted',
     validToSource: 'ai-extracted',
-    validFromConfidence: Math.round(confidence * 100),
-    validToConfidence: Math.round(confidence * 100),
+    validFromConfidence: confDb,
+    validToConfidence: confDb,
     rawDateText: null,
   });
 }
