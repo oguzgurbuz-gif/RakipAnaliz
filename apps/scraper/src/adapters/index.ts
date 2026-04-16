@@ -15,6 +15,7 @@ import { logger } from '../utils/logger';
 
 export class AdapterRegistry {
   private adapters: Map<string, SiteAdapter> = new Map();
+  private aliases: Map<string, string> = new Map();
 
   constructor() {
     this.registerDefaultAdapters();
@@ -40,6 +41,10 @@ export class AdapterRegistry {
       this.register(adapter);
     }
 
+    // Legacy site codes kept for backward compatibility with seeded DB rows.
+    this.registerAlias('sundzulyuk', 'sonduzluk');
+    this.registerAlias('sondzulyuk', 'sonduzluk');
+
     logger.info(`Registered ${this.adapters.size} site adapters`);
   }
 
@@ -51,6 +56,10 @@ export class AdapterRegistry {
     logger.debug(`Registered adapter for site: ${adapter.siteCode}`);
   }
 
+  registerAlias(aliasCode: string, canonicalCode: string): void {
+    this.aliases.set(aliasCode, canonicalCode);
+  }
+
   unregister(siteCode: string): boolean {
     const result = this.adapters.delete(siteCode);
     if (result) {
@@ -60,7 +69,8 @@ export class AdapterRegistry {
   }
 
   get(siteCode: string): SiteAdapter | undefined {
-    return this.adapters.get(siteCode);
+    const canonicalCode = this.aliases.get(siteCode) ?? siteCode;
+    return this.adapters.get(canonicalCode);
   }
 
   getAll(): SiteAdapter[] {
@@ -81,7 +91,8 @@ export class AdapterRegistry {
   }
 
   hasAdapter(siteCode: string): boolean {
-    return this.adapters.has(siteCode);
+    const canonicalCode = this.aliases.get(siteCode) ?? siteCode;
+    return this.adapters.has(canonicalCode);
   }
 
   getAdapterCount(): number {

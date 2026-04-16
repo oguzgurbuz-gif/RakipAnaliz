@@ -12,4 +12,4 @@ INSERT INTO sites (code, name, base_url, campaigns_url, adapter_key, is_active, 
 ('misli', 'Misli', 'https://www.misli.com', 'https://www.misli.com/bonus-kampanyalari', 'adapter_misli', true, 95),
 ('nesine', 'Nesine', 'https://www.nesine.com', 'https://www.nesine.com/bonus-kampanyalari', 'adapter_nesine', true, 100),
 ('oley', 'Oley', 'https://www.oley.com', 'https://www.oley.com/kampanyalar', 'adapter_oley', true, 90),
-('sondzulyuk', 'Sondüzlük', 'https://www.sondzulyuk.com', 'https://www.sondzulyuk.com/bonus-ve-kampanyalar', 'adapter_sondzulyuk', true, 70);
+('sonduzluk', 'SonDüzlük', 'https://www.sonduzluk.com', 'https://www.sonduzluk.com/bonus-ve-kampanyalar', 'adapter_sonduzluk', true, 70);

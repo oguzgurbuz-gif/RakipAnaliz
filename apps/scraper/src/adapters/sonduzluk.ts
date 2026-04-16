@@ -7,15 +7,17 @@ import { normalizeImageUrl } from '../normalizers/image';
 import { extractDatesFromCampaignText } from '../date-extraction/parser';
 
 export class SonDuzlukAdapter extends BaseAdapter {
-  private static readonly SITE_CODE = 'sondzulyuk';
-  private static readonly BASE_URL = 'https://www.sondzulyuk.com';
+  private static readonly SITE_CODE = 'sonduzluk';
+  private static readonly BASE_URL = 'https://www.sonduzluk.com';
   private static readonly FALLBACK_URLS = [
-    'https://www.sondzulyuk.com',
+    'https://www.sonduzluk.com',
     'https://www.sundzulyuk.com',
-    'https://sondzulyuk.com',
+    'https://sonduzluk.com',
     'https://sundzulyuk.com',
+    'https://www.sondzulyuk.com',
+    'https://sondzulyuk.com',
   ];
-  public readonly campaignsUrl = 'https://www.sondzulyuk.com/kampanyalar';
+  public readonly campaignsUrl = 'https://www.sonduzluk.com/kampanyalar';
 
   protected readonly selectors = {
     campaignCard: '.dz-campaign, .bonus-offer, .special-deal, [class*="dz-"]',
@@ -43,12 +45,12 @@ export class SonDuzlukAdapter extends BaseAdapter {
   canHandle(url: string): boolean {
     const hostname = new URL(url).hostname;
     return (
+      hostname.includes('sonduzluk') ||
+      hostname.includes('sonduzluk.com') ||
       hostname.includes('sundzulyuk') ||
       hostname.includes('sundzulyuk.com') ||
       hostname.includes('sondzulyuk') ||
-      hostname.includes('sondzulyuk.com') ||
-      hostname.includes('sondzulyuk.com') ||
-      hostname.includes('sundzulyuk.com')
+      hostname.includes('sondzulyuk.com')
     );
   }
 
@@ -65,7 +67,7 @@ export class SonDuzlukAdapter extends BaseAdapter {
 
     for (const cardEl of cardElements) {
       try {
-        const rawId = await page.evaluate((el) => el.getAttribute('data-id') || el.getAttribute('id') || `sondzulyuk-${Date.now()}`, cardEl);
+        const rawId = await page.evaluate((el) => el.getAttribute('data-id') || el.getAttribute('id') || `sonduzluk-${Date.now()}`, cardEl);
 
         const title = await cardEl.$eval(this.selectors.campaignTitle, (el) => el.textContent?.trim() ?? '').catch(() => '');
 
@@ -173,7 +175,7 @@ export class SonDuzlukAdapter extends BaseAdapter {
 
           const card: RawCampaignCard = {
             siteCode: this.siteCode,
-            rawId: `sondzulyuk-${Date.now()}-${cards.length}`,
+            rawId: `sonduzluk-${Date.now()}-${cards.length}`,
             title: cardData.querySelector?.('a')?.textContent?.trim() || href,
             description: null,
             bonusAmount: null,
