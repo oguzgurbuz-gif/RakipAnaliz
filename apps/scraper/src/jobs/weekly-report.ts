@@ -52,9 +52,10 @@ export async function processWeeklyReportJob(
 
   const report = await generateWeeklyReport(weekStartDate, weekEndDate, includeSites);
 
-  await storeWeeklyReport(report);
+  const reportId = await storeWeeklyReport(report);
 
   logger.info(`Weekly report generated successfully`, {
+    reportId,
     totalCampaigns: report.summary.totalCampaigns,
     newCampaigns: report.summary.newCampaigns,
   });
@@ -119,26 +120,19 @@ async function generateWeeklyReport(
   };
 }
 
-async function storeWeeklyReport(report: WeeklyReport): Promise<void> {
+async function storeWeeklyReport(report: WeeklyReport): Promise<string> {
   const db = getDb();
-
-  try {
-    await queries.insertWeeklyReport(db, {
-      periodStart: report.period.start,
-      periodEnd: report.period.end,
-      summary: JSON.stringify(report.summary),
-      bySite: JSON.stringify(report.bySite),
-      topBonuses: JSON.stringify(report.topBonuses),
-      status: 'completed',
-      generatedAt: report.generatedAt,
-    });
-
-    logger.debug('Weekly report stored successfully');
-  } catch (error) {
-    logger.error('Failed to store weekly report', {
-      error: error instanceof Error ? error.message : 'Unknown error',
-    });
-  }
+  const id = await queries.insertWeeklyReport(db, {
+    periodStart: report.period.start,
+    periodEnd: report.period.end,
+    summary: JSON.stringify(report.summary),
+    bySite: JSON.stringify(report.bySite),
+    topBonuses: JSON.stringify(report.topBonuses),
+    status: 'completed',
+    generatedAt: report.generatedAt,
+  });
+  logger.debug('Weekly report stored successfully', { reportId: id });
+  return id;
 }
 
 export async function getLatestWeeklyReport(): Promise<WeeklyReport | null> {

@@ -195,7 +195,7 @@ export default function ReportsPage() {
               <EmptyState
                 icon={FileClock}
                 title="Henüz haftalık rapor bulunmuyor"
-                description="Rapor üretildiğinde burada görünecek."
+                description="İlk tam scrape tamamlandıktan sonra ilk rapor otomatik üretilir ve burada görünür."
               />
             )}
           </>
