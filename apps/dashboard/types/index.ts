@@ -150,6 +150,12 @@ export interface WeeklyReportDetail extends WeeklyReport {
   recommendations: string[]
 }
 
+export interface DeltaInfo {
+  diff: number
+  pct: number
+  direction: 'up' | 'down' | 'neutral'
+}
+
 export interface ReportSummary {
   dateFrom: string
   dateTo: string
@@ -158,6 +164,15 @@ export interface ReportSummary {
   activeCount: number
   passiveCount: number
   changedCount: number
+  // Period comparison
+  deltas?: {
+    active: DeltaInfo
+    started: DeltaInfo
+    ended: DeltaInfo
+    changed: DeltaInfo
+  }
+  prevPeriodFrom?: string
+  prevPeriodTo?: string
   topCategories: { category: string; label?: string; count: number; share?: number }[]
   topSites: { siteName: string; count: number }[]
 }

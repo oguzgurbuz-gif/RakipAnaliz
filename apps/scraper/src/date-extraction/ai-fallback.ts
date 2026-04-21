@@ -94,7 +94,7 @@ export async function triggerAiDateExtraction(request: AiExtractionRequest): Pro
 
   logger.info('Triggering AI date extraction', {
     campaignId: request.campaignId,
-    titleLength: request.title.length,
+    titleLength: request.title?.length ?? 0,
     descriptionLength,
     useDescriptionForAi,
   });

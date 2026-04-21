@@ -1,37 +1,20 @@
-import { Page, ElementHandle } from 'puppeteer';
+import { Page } from 'puppeteer';
 import { BaseAdapter } from './base';
 import { RawCampaignCard, NormalizedCampaignInput } from '../types';
 import { buildFingerprint, buildRawFingerprint } from '../normalizers/fingerprint';
-import { extractNumericValue } from '../normalizers/text';
+import { extractNumericValue, isLikelyRealCampaignTitle } from '../normalizers/text';
 import { normalizeImageUrl } from '../normalizers/image';
 import { extractDatesFromCampaignText } from '../date-extraction/parser';
 
 export class BirebinAdapter extends BaseAdapter {
   private static readonly SITE_CODE = 'birebin';
   private static readonly BASE_URL = 'https://www.birebin.com';
-  public readonly campaignsUrl = 'https://www.birebin.com/kampanyalar';
+  public readonly campaignsUrl = 'https://www.birebin.com/iddaa-kampanyalar';
 
   protected readonly selectors = {
-    campaignCard: [
-      '[class*="teklif"]',
-      '[class*="offer"]',
-      '[class*="deal"]',
-      '[class*="campaign"]',
-      '[class*="bonus"]',
-      '[class*="item"]',
-      'article',
-      '.card',
-    ].join(', '),
-    campaignTitle: [
-      '[class*="title"]',
-      'h1', 'h2', 'h3', 'h4',
-    ].join(', '),
-    campaignDescription: [
-      '[class*="description"]',
-      '[class*="desc"]',
-      '[class*="info"]',
-      'p',
-    ].join(', '),
+    campaignCard: '.yardimContent',
+    campaignTitle: '.yardimContent > h2',
+    campaignDescription: '.dectext.helpContent',
     bonusAmount: [
       '[class*="değer"]',
       '[class*="amount"]',
@@ -78,127 +61,100 @@ export class BirebinAdapter extends BaseAdapter {
 
     await this.triggerLazyLoading(page);
 
-    const cardSelectors = [
-      '[class*="teklif"]',
-      '[class*="offer"]',
-      '[class*="deal"]',
-      '[class*="campaign"]',
-      '[class*="bonus"]',
-      '[class*="item"]',
-      '[class*="card"]',
-      'article',
-    ];
+    const cardSelectors = ['.yardimContent'];
+    const selectorStr = cardSelectors.join(', ');
 
-    let cardElements: ElementHandle<Element>[] = [];
-    for (const selector of cardSelectors) {
-      try {
-        cardElements = await page.$$(selector);
-        if (cardElements.length > 0) {
-          console.log(`Birebin: Found ${cardElements.length} cards with selector: ${selector}`);
-          break;
-        }
-      } catch (e) {
-        continue;
-      }
-    }
+    // Birebin lists every campaign on a single page (no per-campaign detail URLs).
+    // Each .yardimContent card holds h2 (title) + .right div (full body w/ rules + dates).
+    let cardData: any[] = await page.evaluate((selector) => {
+      const results: any[] = [];
+      const cardEls = document.querySelectorAll(selector);
+      cardEls.forEach((card, index) => {
+        const titleEl = card.querySelector('h2');
+        const title = titleEl?.textContent?.trim() || '';
+        if (!title) return;
 
-    if (cardElements.length === 0) {
-      cardElements = await this.fallbackCardDiscovery(page, seenUrls);
-    }
-
-    for (const cardEl of cardElements) {
-      try {
-        const rawId = await page.evaluate((el) => el.getAttribute('data-id') || el.getAttribute('id') || `birebin-${Date.now()}`, cardEl);
-
-        const title = await cardEl.$eval(this.selectors.campaignTitle, (el: Element) => el.textContent?.trim() ?? '').catch(() => '');
-
-        const description = await cardEl.$eval(this.selectors.campaignDescription, (el: Element) => el.textContent?.trim() ?? null).catch(() => null);
-
-        const bonusAmountText = await cardEl.$eval(this.selectors.bonusAmount, (el: Element) => el.textContent?.trim() ?? null).catch(() => null);
-
-        const bonusPercentageText = await cardEl.$eval(this.selectors.bonusPercentage, (el: Element) => el.textContent?.trim() ?? null).catch(() => null);
-
-        const minDepositText = await cardEl.$eval(this.selectors.minDeposit, (el: Element) => el.textContent?.trim() ?? null).catch(() => null);
-
-        const code = await cardEl.$eval(this.selectors.code, (el: Element) => el.textContent?.trim() ?? null).catch(() => null);
-
-        const campaignUrl = await cardEl.$eval(this.selectors.campaignUrl, (el: Element) => {
-          const href = el.getAttribute('href');
-          if (href && (href.includes('teklif') || href.includes('kampanya') || href.includes('bonus') || href.startsWith('/'))) {
-            return href;
-          }
-          return '';
-        }).catch(() => '');
-
-        if (campaignUrl && seenUrls.has(campaignUrl)) {
-          continue;
-        }
-        if (campaignUrl) {
-          seenUrls.add(campaignUrl);
+        // .right contains the full per-card body (intro + dates + rules).
+        // Falls back to .dectext.helpContent (intro only) then full card text.
+        const rightEl = card.querySelector('.right');
+        const decEl = card.querySelector('.dectext.helpContent');
+        let description =
+          rightEl?.textContent?.trim() ||
+          decEl?.textContent?.trim() ||
+          card.textContent?.trim() ||
+          null;
+        if (description && description.startsWith(title)) {
+          description = description.substring(title.length).trim();
         }
 
-        const imageUrl = await cardEl.$eval(this.selectors.campaignImage, (el: Element) => el.getAttribute('src') ?? el.getAttribute('data-src') ?? null).catch(() => null);
+        const imgEl = card.querySelector('img');
+        const imageUrl = imgEl?.getAttribute('src') || null;
 
-        const startDateText = await cardEl.$eval(this.selectors.startDate, (el: Element) => el.textContent?.trim() ?? null).catch(() => null);
+        const percentMatch = title.match(/%(\d+)/);
+        const bonusPercentageText = percentMatch ? percentMatch[0] : null;
 
-        const endDateText = await cardEl.$eval(this.selectors.endDate, (el: Element) => el.textContent?.trim() ?? null).catch(() => null);
+        const textContent = card.textContent || '';
+        const startMatch = textContent.match(/Başlangıç\s*Tarihi:\s*(\d{2}\.\d{2}\.\d{4})/);
+        const endMatch = textContent.match(/Bitiş\s*Tarihi:\s*(\d{2}\.\d{2}\.\d{4})/);
+        const startDateText = startMatch ? startMatch[1] : null;
+        const endDateText = endMatch ? endMatch[1] : null;
 
-        const termsUrl = await cardEl.$eval(this.selectors.termsUrl, (el: Element) => el.getAttribute('href') ?? null).catch(() => null);
+        const rawId = `birebin-${index}-${title.toLowerCase().replace(/[^a-z0-9]+/g, '-').substring(0, 40)}`;
 
-        const category = await cardEl.$eval(this.selectors.category, (el: Element) => el.textContent?.trim() ?? null).catch(() => null);
-
-        const badge = await cardEl.$eval(this.selectors.badge, (el: Element) => el.textContent?.trim() ?? null).catch(() => null);
-
-        const isFeatured = await cardEl.$(this.selectors.featured).then((el: ElementHandle | null) => el !== null).catch(() => false);
-
-        const isExclusive = await cardEl.$(this.selectors.exclusive).then((el: ElementHandle | null) => el !== null).catch(() => false);
-
-        const card: RawCampaignCard = {
-          siteCode: this.siteCode,
+        results.push({
           rawId,
           title,
           description,
-          bonusAmount: bonusAmountText,
-          bonusPercentage: extractNumericValue(bonusPercentageText),
-          minDeposit: minDepositText,
-          maxBonus: null,
-          code: code?.replace(/KOD:|KUPON:?/gi, '').trim() ?? null,
-          url: this.buildCampaignUrl(campaignUrl),
-          imageUrl: normalizeImageUrl(this.baseUrl, imageUrl),
-          startDate: startDateText,
-          endDate: endDateText,
-          termsUrl,
-          category,
-          badge,
-          isFeatured,
-          isExclusive,
-          rawData: {},
-          scrapedAt: new Date(),
-        };
+          imageUrl,
+          bonusPercentageText,
+          startDateText,
+          endDateText,
+        });
+      });
+      return results;
+    }, selectorStr);
 
-        cards.push(card);
-      } catch (error) {
-        console.error(`Error extracting card: ${error}`);
-      }
+    // If no cards found, try fallback discovery
+    if (cardData.length === 0) {
+      cardData = await this.fallbackCardDiscovery(page, seenUrls);
     }
 
-    const listingUrl = this.campaignsUrl;
-    for (const card of cards) {
-      if (!card.url || card.url.endsWith('/bonuskampanya')) {
-        continue;
-      }
+    for (const data of cardData) {
+      if (!data || typeof data !== 'object') continue;
 
-      const result = await this.visitDetailPage(page, card.url, { waitMs: 800 });
+      const rawId = data.rawId || `birebin-${Date.now()}`;
+      const title = data.title || '';
+      // Birebin has no per-campaign detail page; build a stable fragment URL
+      // from rawId so each card has a unique canonical reference.
+      const campaignUrl = `${this.campaignsUrl}#${rawId}`;
+      if (seenUrls.has(campaignUrl)) continue;
+      seenUrls.add(campaignUrl);
 
-      if (result?.body && result.body.length > (card.description?.length ?? 0)) {
-        card.description = result.body;
-      }
-      if (result?.termsUrl) {
-        card.termsUrl = result.termsUrl;
-      }
+      const card: RawCampaignCard = {
+        siteCode: this.siteCode,
+        rawId,
+        title,
+        description: data.description || null,
+        bonusAmount: null,
+        bonusPercentage: extractNumericValue(data.bonusPercentageText),
+        minDeposit: null,
+        maxBonus: null,
+        code: null,
+        url: campaignUrl,
+        imageUrl: normalizeImageUrl(this.baseUrl, data.imageUrl ?? null),
+        startDate: data.startDateText || null,
+        endDate: data.endDateText || null,
+        termsUrl: null,
+        category: null,
+        badge: null,
+        isFeatured: false,
+        isExclusive: false,
+        rawData: {},
+        scrapedAt: new Date(),
+      };
+
+      cards.push(card);
     }
-
-    await page.goto(listingUrl, { waitUntil: 'domcontentloaded' });
 
     return cards;
   }
@@ -246,7 +202,12 @@ export class BirebinAdapter extends BaseAdapter {
     return cards;
   }
 
-  normalize(card: RawCampaignCard): NormalizedCampaignInput {
+  normalize(card: RawCampaignCard): NormalizedCampaignInput | null {
+    // Safety check: validate title quality
+    if (!isLikelyRealCampaignTitle(card.title)) {
+      return null;
+    }
+
     const bonusAmount = extractNumericValue(card.bonusAmount);
     const bonusPercentage = card.bonusPercentage;
     const minDeposit = extractNumericValue(card.minDeposit);

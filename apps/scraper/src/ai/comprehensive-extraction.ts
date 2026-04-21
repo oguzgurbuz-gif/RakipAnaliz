@@ -113,17 +113,46 @@ export async function extractComprehensiveCampaignData(
     };
   }
 
-  const prompt = buildComprehensiveExtractionPrompt({
+  // BE-5: Try with full prompt first, then shrink if JSON parse fails
+  const result = await extractWithRetry({
     title,
     body,
     rawDateText,
+    model,
+    timeout,
+    attempt: 1,
+  });
+
+  return {
+    ...result,
+    duration_ms: Date.now() - startTime,
+  };
+}
+
+// BE-5: Helper to retry with progressively smaller prompts on JSON parse failure
+async function extractWithRetry(options: {
+  title: string;
+  body: string;
+  rawDateText?: string | null;
+  model?: string;
+  timeout?: number;
+  attempt: number;
+}): Promise<Omit<ComprehensiveExtractionResponse, 'duration_ms'>> {
+  const { title, body, rawDateText, model, timeout, attempt } = options;
+
+  // Build prompt based on attempt number (shrinking each time)
+  const prompt = buildPromptVariant({
+    title,
+    body,
+    rawDateText,
+    variant: attempt === 1 ? 'full' : attempt === 2 ? 'medium' : 'minimal',
   });
 
   try {
     const client = shdecnClient();
     const response = await client.chat(prompt.messages, {
       temperature: 0.1,
-      max_tokens: 2000,
+      max_tokens: attempt === 1 ? 2000 : attempt === 2 ? 1500 : 1000,
     });
 
     const assistantMessage = response.choices[0]?.message?.content;
@@ -131,19 +160,25 @@ export async function extractComprehensiveCampaignData(
       return {
         success: false,
         error: 'No response from AI',
-        duration_ms: Date.now() - startTime,
       };
     }
 
     const jsonMatch = assistantMessage.match(/\{[\s\S]*\}/);
     if (!jsonMatch) {
-      logger.warn('AI response did not contain valid JSON', { 
-        response: assistantMessage.substring(0, 200) 
+      logger.warn('AI response did not contain valid JSON', {
+        attempt,
+        response: assistantMessage.substring(0, 200),
       });
+      // BE-5: Try again with smaller prompt if this was attempt 1
+      if (attempt === 1) {
+        return extractWithRetry({ title, body, rawDateText, model, timeout, attempt: 2 });
+      }
+      if (attempt === 2) {
+        return extractWithRetry({ title, body, rawDateText, model, timeout, attempt: 3 });
+      }
       return {
         success: false,
         error: 'AI response did not contain JSON',
-        duration_ms: Date.now() - startTime,
       };
     }
 
@@ -154,6 +189,7 @@ export async function extractComprehensiveCampaignData(
         const coerced = coerceComprehensiveExtractionResult(parsed);
         if (coerced) {
           logger.warn('AI response schema mismatch - saving coerced best-effort data', {
+            attempt,
             parsed: JSON.stringify(parsed)?.substring(0, 200),
           });
           return {
@@ -166,23 +202,30 @@ export async function extractComprehensiveCampaignData(
                   total_tokens: response.usage.total_tokens || 0,
                 }
               : undefined,
-            duration_ms: Date.now() - startTime,
           };
         }
       }
 
       logger.warn('AI response did not match expected schema', {
+        attempt,
         parsed: JSON.stringify(parsed)?.substring(0, 200),
       });
 
+      // BE-5: Try again with smaller prompt
+      if (attempt === 1) {
+        return extractWithRetry({ title, body, rawDateText, model, timeout, attempt: 2 });
+      }
+      if (attempt === 2) {
+        return extractWithRetry({ title, body, rawDateText, model, timeout, attempt: 3 });
+      }
       return {
         success: false,
         error: 'AI response schema mismatch',
-        duration_ms: Date.now() - startTime,
       };
     }
 
     logger.info('Comprehensive extraction completed', {
+      attempt,
       campaign_type: parsed.campaign_type,
       date_confidence: parsed.date_confidence,
       extraction_confidence: parsed.extraction_confidence,
@@ -196,18 +239,139 @@ export async function extractComprehensiveCampaignData(
         completion_tokens: response.usage.completion_tokens || 0,
         total_tokens: response.usage.total_tokens || 0,
       } : undefined,
-      duration_ms: Date.now() - startTime,
     };
   } catch (error) {
     const errorMessage = error instanceof Error ? error.message : 'Unknown error';
-    logger.error('Comprehensive extraction failed', { error: errorMessage });
+    logger.error('Comprehensive extraction failed', { error: errorMessage, attempt });
     
+    // BE-5: Retry with smaller prompt on error
+    if (attempt === 1) {
+      return extractWithRetry({ title, body, rawDateText, model, timeout, attempt: 2 });
+    }
+    if (attempt === 2) {
+      return extractWithRetry({ title, body, rawDateText, model, timeout, attempt: 3 });
+    }
     return {
       success: false,
       error: errorMessage,
-      duration_ms: Date.now() - startTime,
     };
   }
+}
+
+// BE-5: Build different prompt variants based on attempt
+interface PromptVariantOptions {
+  title: string;
+  body: string;
+  rawDateText?: string | null;
+  variant: 'full' | 'medium' | 'minimal';
+}
+
+function buildPromptVariant(options: PromptVariantOptions) {
+  const { title, body, rawDateText, variant } = options;
+
+  if (variant === 'minimal') {
+    // Minimal prompt - just the essentials
+    const minimalSystem = `Sen Türk bahis platformlarından kampanya verisi çıkaran motorusun. Sadece JSON ver.`;
+    const minimalUser = `Başlık: ${title}\nMetin: ${body.substring(0, 500)}\nTarih: ${rawDateText || 'Yok'}\n\nÇıktı (sadece JSON):
+{
+  "valid_from": null,
+  "valid_to": null,
+  "date_confidence": 0,
+  "date_reasoning": "",
+  "campaign_type": "genel",
+  "type_confidence": 0,
+  "type_reasoning": "",
+  "conditions": {
+    "min_deposit": null,
+    "min_bet": null,
+    "max_bet": null,
+    "max_bonus": null,
+    "bonus_percentage": null,
+    "freebet_amount": null,
+    "cashback_percentage": null,
+    "turnover": null,
+    "promo_code": null,
+    "eligible_products": [],
+    "deposit_methods": [],
+    "target_segment": [],
+    "max_uses_per_user": null,
+    "required_actions": [],
+    "excluded_games": [],
+    "time_restrictions": null,
+    "membership_requirements": []
+  },
+  "summary": "",
+  "key_points": [],
+  "sentiment": "neutral",
+  "risk_flags": [],
+  "extraction_confidence": 0
+}`;
+
+    return {
+      system: minimalSystem,
+      user: minimalUser,
+      messages: [
+        { role: 'system' as const, content: minimalSystem },
+        { role: 'user' as const, content: minimalUser },
+      ],
+    };
+  }
+
+  if (variant === 'medium') {
+    // Medium prompt - reduced body
+    const mediumSystem = `Sen Türk bahis platformlarından kampanya verisi çıkaran motorusun.
+Çıktıyı sadece JSON formatında ver. Yorum yazma. Markdown kullanma.`;
+    const mediumUser = `Başlık: ${title}
+Metin (kısaltılmış): ${body.substring(0, 1000)}${body.length > 1000 ? '...' : ''}
+Tarih ipucu: ${rawDateText || 'Yok'}
+
+Şu formatta JSON ver:
+{
+  "valid_from": "YYYY-MM-DD" or null,
+  "valid_to": "YYYY-MM-DD" or null,
+  "date_confidence": 0.0-1.0,
+  "date_reasoning": "kısa açıklama",
+  "campaign_type": "tip",
+  "type_confidence": 0.0-1.0,
+  "type_reasoning": "kısa açıklama",
+  "conditions": {
+    "min_deposit": number or null,
+    "bonus_percentage": number or null,
+    "freebet_amount": number or null,
+    "cashback_percentage": number or null,
+    "turnover": "Nx" or null,
+    "promo_code": "code or null",
+    "eligible_products": [],
+    "deposit_methods": [],
+    "target_segment": [],
+    "max_uses_per_user": null,
+    "required_actions": [],
+    "excluded_games": [],
+    "time_restrictions": null,
+    "membership_requirements": [],
+    "min_bet": null,
+    "max_bet": null,
+    "max_bonus": null
+  },
+  "summary": "2-3 kelime",
+  "key_points": [],
+  "sentiment": "positive|neutral|negative",
+  "risk_flags": [],
+  "extraction_confidence": 0.0-1.0
+}`;
+
+    return {
+      system: mediumSystem,
+      user: mediumUser,
+      messages: [
+        { role: 'system' as const, content: mediumSystem },
+        { role: 'user' as const, content: mediumUser },
+      ],
+    };
+  }
+
+  // Full variant - use original prompt
+  return buildComprehensiveExtractionPrompt({ title, body, rawDateText });
 }
 
 export default extractComprehensiveCampaignData;

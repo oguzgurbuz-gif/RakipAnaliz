@@ -8,8 +8,10 @@ import { Button } from '@/components/ui/button'
 import { Skeleton } from '@/components/ui/skeleton'
 import { ErrorDisplay } from '@/components/ui/error'
 import { ReportSummaryComponent } from '@/components/reports/report-summary'
+import { BrandedPdfButton } from '@/components/reports/branded-pdf-button'
+import { KeyTakeaways } from '@/components/reports/key-takeaways'
 import { PageHeader } from '@/components/ui/page-header'
-import { fetchReportSummary } from '@/lib/api'
+import { fetchReportSummary, fetchCampaigns } from '@/lib/api'
 
 export default function ReportsSummaryPage() {
   const searchParams = useSearchParams()
@@ -51,15 +53,23 @@ export default function ReportsSummaryPage() {
     queryFn: () => fetchReportSummary(dateFrom || undefined, dateTo || undefined),
   })
 
+  const { data: campaignsData } = useQuery({
+    queryKey: ['campaigns', { limit: 1000 }],
+    queryFn: () => fetchCampaigns({ limit: 1000 }),
+  })
+
   return (
     <div className="min-h-screen bg-background">
       <PageHeader
         title="Rapor Özeti"
         description="Seçilen tarih aralığındaki kampanya hareketini, kategori yoğunluğunu ve site görünürlüğünü özetleyen yönetici görünümü."
         actions={
-          <Button variant="outline" size="sm" onClick={() => refetch()}>
-            Yenile
-          </Button>
+          <div className="flex gap-2">
+            <BrandedPdfButton data={data ?? null} dateFrom={dateFrom} dateTo={dateTo} />
+            <Button variant="outline" size="sm" onClick={() => refetch()}>
+              Yenile
+            </Button>
+          </div>
         }
       >
         <div className="flex flex-wrap items-center gap-3 text-sm text-muted-foreground">
@@ -100,7 +110,10 @@ export default function ReportsSummaryPage() {
             </div>
           </div>
         ) : (
-          <ReportSummaryComponent data={data ?? null} showDetails />
+          <>
+            <ReportSummaryComponent data={data ?? null} showDetails />
+            <KeyTakeaways summaryData={data ?? null} campaigns={campaignsData?.data} />
+          </>
         )}
       </main>
     </div>

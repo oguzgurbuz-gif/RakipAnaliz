@@ -1,4 +1,56 @@
 import type { DbExecutor } from './compat-query';
+import { logger } from '../utils/logger';
+
+// BE-10: Query timeout configuration (default 30 seconds)
+const DEFAULT_QUERY_TIMEOUT_MS = 30000;
+
+/**
+ * BE-10: Execute a query with a timeout
+ * Cancels the query if it takes longer than the specified timeout
+ */
+export async function queryWithTimeout<T extends Record<string, unknown>>(
+  db: DbExecutor,
+  text: string,
+  params: unknown[],
+  options: { timeoutMs?: number; operationName?: string } = {}
+): Promise<{ rows: T[]; rowCount: number }> {
+  const { timeoutMs = DEFAULT_QUERY_TIMEOUT_MS, operationName = 'database_query' } = options;
+  
+  const timeoutPromise = new Promise<never>((_, reject) => {
+    setTimeout(() => {
+      reject(new Error(`Query timeout after ${timeoutMs}ms: ${operationName}`));
+    }, timeoutMs);
+  });
+
+  const queryPromise = db.query<T>(text, params);
+
+  try {
+    return await Promise.race([queryPromise, timeoutPromise]);
+  } catch (error) {
+    logger.warn(`Query failed: ${operationName}`, {
+      operation: operationName,
+      timeoutMs,
+      error: error instanceof Error ? error.message : 'Unknown',
+      query: text.substring(0, 200),
+    });
+    throw error;
+  }
+}
+
+/**
+ * BE-4: Structured logging context for database operations
+ * Adds consistent logging context to all DB operations
+ */
+export function logDbOperation(
+  operation: string,
+  details: Record<string, unknown>
+): void {
+  logger.info(`DB operation: ${operation}`, {
+    dbOperation: operation,
+    ...details,
+    timestamp: new Date().toISOString(),
+  });
+}
 
 function requireInsertedId(rows: Record<string, unknown>[]): string {
   const id = rows[0]?.id;
@@ -191,6 +243,52 @@ export async function recalculateCampaignStatus(
   );
 }
 
+/**
+ * Bulk-recalculates the `status` column for every campaign in a single SQL
+ * statement using the same CASE rules as {@link recalculateCampaignStatus}:
+ *   - is_visible_on_last_scrape = 0  -> 'hidden'
+ *   - valid_to IS NOT NULL AND valid_to < NOW()  -> 'expired'
+ *   - otherwise                       -> 'active'
+ *
+ * Returns per-status row counts AFTER the update so the caller can log a
+ * concise summary. The function is idempotent and safe to run on a recurring
+ * schedule.
+ */
+export async function recalculateAllCampaignStatuses(
+  db: DbExecutor
+): Promise<{
+  updatedCount: number;
+  counts: { active: number; expired: number; hidden: number; other: number };
+}> {
+  const updateResult = await db.query(
+    `UPDATE campaigns SET
+      status = CASE
+        WHEN is_visible_on_last_scrape = 0 THEN 'hidden'
+        WHEN valid_to IS NOT NULL AND valid_to < NOW() THEN 'expired'
+        ELSE 'active'
+      END,
+      updated_at = NOW()`
+  );
+
+  const summaryResult = await db.query<{ status: string; count: string | number }>(
+    `SELECT status, COUNT(*) AS count FROM campaigns GROUP BY status`
+  );
+
+  const counts = { active: 0, expired: 0, hidden: 0, other: 0 };
+  for (const row of summaryResult.rows) {
+    const n = typeof row.count === 'string' ? parseInt(row.count, 10) : Number(row.count);
+    if (row.status === 'active') counts.active = n;
+    else if (row.status === 'expired') counts.expired = n;
+    else if (row.status === 'hidden') counts.hidden = n;
+    else counts.other += n;
+  }
+
+  return {
+    updatedCount: updateResult.rowCount ?? 0,
+    counts,
+  };
+}
+
 export async function applyAiExtractedDates(
   db: DbExecutor,
   campaignId: string,
@@ -276,23 +374,23 @@ export async function insertAiAnalysis(
       tokens_input, tokens_output, duration_ms, confidence, created_at
     ) VALUES (
       $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20, $21,
-      $22, $23, $24, $25, $26, $27, $28, $29, $30, $31, NOW()
+      $22, $23, $24, $25, $26, $27, $28, $29, $30, $31, $32, NOW()
     )`,
     [
       data.campaignId,
       data.campaignVersionId ?? null,
-      data.analysisType ?? null,
-      data.modelProvider ?? null,
-      data.modelName ?? null,
-      data.promptVersion ?? null,
-      data.status ?? null,
+      data.analysisType ?? 'content_analysis',
+      data.modelProvider ?? 'deepseek',
+      data.modelName ?? 'deepseek-chat',
+      data.promptVersion ?? 'v1',
+      data.status ?? 'completed',
       data.sentimentLabel ?? null,
       data.sentimentScore ?? null,
       data.categoryCode ?? null,
       data.categoryConfidence ?? null,
       data.summaryText ?? null,
-      data.keyPoints ?? null,
-      data.riskFlags ?? null,
+      data.keyPoints ? JSON.stringify(data.keyPoints) : JSON.stringify([]),
+      data.riskFlags ? JSON.stringify(data.riskFlags) : JSON.stringify([]),
       data.recommendationText ?? null,
       data.extractedValidFrom ?? null,
       data.extractedValidTo ?? null,
@@ -835,17 +933,57 @@ export async function updateCampaign(
     body: string | null;
     status: string;
     lastSeenAt: string;
+    validFrom?: Date | null;
+    validTo?: Date | null;
+    validFromSource?: string | null;
+    validToSource?: string | null;
+    validFromConfidence?: number | null;
+    validToConfidence?: number | null;
+    rawDateText?: string | null;
   }
 ): Promise<void> {
+  // Convert ISO timestamp to MySQL timestamp format (replace T with space, remove Z)
+  const toMySQLTimestamp = (isoString: string): string => {
+    return isoString.replace('T', ' ').replace('Z', '');
+  };
+
+  // Status'u DB tarafında türet: hint olarak gelen $3'ü kullan ama valid_to
+  // (yeni veya eski) NOW()'dan küçükse 'expired', is_visible_on_last_scrape=0
+  // ise 'hidden'. Bu sayede AI date extraction valid_to'yu sonradan güncellese
+  // bile bir sonraki scrape update'inde status doğru olur.
   await db.query(
     `UPDATE campaigns SET
       title = $1,
       body = $2,
-      status = $3,
+      status = CASE
+        WHEN is_visible_on_last_scrape = 0 THEN 'hidden'
+        WHEN COALESCE($6, valid_to) IS NOT NULL AND COALESCE($6, valid_to) < NOW() THEN 'expired'
+        ELSE $3
+      END,
       last_seen_at = $4,
+      valid_from = COALESCE($5, valid_from),
+      valid_to = COALESCE($6, valid_to),
+      valid_from_source = COALESCE($7, valid_from_source),
+      valid_to_source = COALESCE($8, valid_to_source),
+      valid_from_confidence = COALESCE($9, valid_from_confidence),
+      valid_to_confidence = COALESCE($10, valid_to_confidence),
+      raw_date_text = COALESCE($11, raw_date_text),
       updated_at = NOW()
-    WHERE id = $5`,
-    [data.title, data.body, data.status, data.lastSeenAt, campaignId]
+    WHERE id = $12`,
+    [
+      data.title,
+      data.body,
+      data.status,
+      toMySQLTimestamp(data.lastSeenAt),
+      data.validFrom ?? null,
+      data.validTo ?? null,
+      data.validFromSource ?? null,
+      data.validToSource ?? null,
+      data.validFromConfidence ?? null,
+      data.validToConfidence ?? null,
+      data.rawDateText ?? null,
+      campaignId,
+    ]
   );
 }
 
@@ -1150,6 +1288,38 @@ export async function getLatestWeeklyReport(
   return result.rows[0] ?? null;
 }
 
+export async function getMaxWeeklyReportPeriodStart(
+  db: DbExecutor
+): Promise<string | null> {
+  const result = await db.query<{ max_period_start: string | Date | null }>(
+    `SELECT MAX(period_start) AS max_period_start FROM weekly_reports`
+  );
+  const value = result.rows[0]?.max_period_start ?? null;
+  if (!value) {
+    return null;
+  }
+  // Normalize to YYYY-MM-DD (MySQL may return Date or string)
+  if (value instanceof Date) {
+    return value.toISOString().split('T')[0];
+  }
+  const str = String(value);
+  return str.length >= 10 ? str.substring(0, 10) : str;
+}
+
+export async function hasPendingWeeklyReportJobAt(
+  db: DbExecutor,
+  scheduledAt: Date
+): Promise<boolean> {
+  const result = await db.query<{ count: string }>(
+    `SELECT COUNT(*) AS count FROM jobs
+     WHERE type = 'weekly-report'
+       AND status IN ('pending', 'processing')
+       AND scheduled_at = $1`,
+    [scheduledAt]
+  );
+  return parseInt(result.rows[0]?.count ?? '0', 10) > 0;
+}
+
 export async function getWeeklyReportHistory(
   db: DbExecutor,
   limit: number
@@ -1279,4 +1449,88 @@ export async function insertErrorLog(
     [data.errorCode || null, data.errorMessage, data.severity || 'error']
   );
   return requireInsertedId(row.rows);
+}
+
+// BE-9: Dead Letter Queue - failed jobs are moved to failed_jobs table after max attempts
+export async function insertFailedJob(
+  db: DbExecutor,
+  data: {
+    originalJobId: number;
+    type: string;
+    payload: string;
+    error: string;
+    attempts: number;
+    maxAttempts: number;
+  }
+): Promise<string> {
+  await db.query(
+    `INSERT INTO failed_jobs (
+      original_job_id, job_type, payload, error_message, attempts, max_attempts, created_at
+    ) VALUES ($1, $2, $3, $4, $5, $6, NOW())
+    `,
+    [
+      data.originalJobId,
+      data.type,
+      data.payload,
+      data.error,
+      data.attempts,
+      data.maxAttempts,
+    ]
+  );
+
+  const row = await db.query<{ id: string }>(
+    `SELECT id FROM failed_jobs
+     WHERE original_job_id = $1 AND job_type = $2
+     ORDER BY created_at DESC
+     LIMIT 1`,
+    [data.originalJobId, data.type]
+  );
+  return requireInsertedId(row.rows);
+}
+
+export async function getFailedJobs(
+  db: DbExecutor,
+  limit: number = 100
+): Promise<Record<string, unknown>[]> {
+  const result = await db.query(
+    `SELECT * FROM failed_jobs
+     ORDER BY created_at DESC
+     LIMIT $1`,
+    [limit]
+  );
+  return result.rows;
+}
+
+export async function retryFailedJob(
+  db: DbExecutor,
+  failedJobId: string
+): Promise<number> {
+  const row = await db.query<{ original_job_id: number; job_type: string; payload: string; max_attempts: number }>(
+    `SELECT original_job_id, job_type, payload, max_attempts FROM failed_jobs WHERE id = $1`,
+    [failedJobId]
+  );
+  
+  if (row.rows.length === 0) {
+    throw new Error('Failed job not found');
+  }
+  
+  const failedJob = row.rows[0];
+  
+  // Re-insert as a new pending job
+  const jobId = await insertJob(db, {
+    type: failedJob.job_type,
+    status: 'pending',
+    priority: 0,
+    payload: failedJob.payload,
+    maxAttempts: failedJob.max_attempts ?? 3,
+    scheduledAt: new Date(),
+  });
+  
+  // Mark the failed job as retried
+  await db.query(
+    `UPDATE failed_jobs SET retried = true, retried_at = NOW(), new_job_id = $1 WHERE id = $2`,
+    [jobId, failedJobId]
+  );
+  
+  return jobId;
 }

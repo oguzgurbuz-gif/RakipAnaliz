@@ -69,12 +69,45 @@ export class AltiliGanyanAdapter extends BaseAdapter {
 
         let fullDescription: string | null = null;
         try {
-          await cardEl.click();
-          await new Promise(r => setTimeout(r, 1500));
+          // Re-find the card element to avoid "Node is detached from document" error
+          // Use page.locator approach with evaluate for reliable clicking
+          await page.evaluate((title) => {
+            const cards = document.querySelectorAll('.campaign-list__item');
+            for (let i = 0; i < cards.length; i++) {
+              const c = cards[i];
+              const titleEl = c.querySelector('.campaign-list__item__title');
+              if (titleEl?.textContent?.trim() === title) {
+                const btn = c.querySelector('.campaign-list__item__bottom .btn') as HTMLElement;
+                if (btn) {
+                  btn.click();
+                  return;
+                }
+              }
+            }
+          }, title);
+          await new Promise(r => setTimeout(r, 2500));
           fullDescription = await page.evaluate(() => {
-            const detailEl = document.querySelector('.campaign-detail, .campaign-detail-content, [class*="campaign-detail"]') as HTMLElement | null;
-            return detailEl?.innerText?.trim() || document.body.innerText?.trim() || null;
+            // Look for the campaign terms section which contains the date
+            const termsEl = document.querySelector('.campaign-terms, [class*="terms"], .campaign-detail-content, [class*="campaign-detail"]') as HTMLElement | null;
+            if (termsEl) {
+              const text = termsEl.innerText || termsEl.textContent || '';
+              // If terms section is short, use body text
+              if (text.length > 50) return text;
+            }
+            // Fallback: find text containing Turkish date patterns
+            const body = document.body.innerText || '';
+            const datePattern = /(\d{1,2}\s+(Ocak|Şubat|Mart|Nisan|Mayıs|Haziran|Temmuz|Ağustos|Eylül|Ekim|Kasım|Aralık)\s+\d{4}\s*\(08\.00\))/;
+            const match = body.match(datePattern);
+            if (match) {
+              // Find the full term line containing this date
+              const lines = body.split('\n');
+              for (const line of lines) {
+                if (line.includes(match[1])) return line.trim();
+              }
+            }
+            return body.substring(0, 500);
           });
+          console.error('ALTILIGANYAN fullDescription sample:', fullDescription?.substring(0, 200));
           await page.keyboard.press('Escape');
           await new Promise(r => setTimeout(r, 500));
         } catch (e) {

@@ -2,7 +2,7 @@ import { Page } from 'puppeteer';
 import { BaseAdapter } from './base';
 import { RawCampaignCard, NormalizedCampaignInput } from '../types';
 import { buildFingerprint, buildRawFingerprint } from '../normalizers/fingerprint';
-import { extractNumericValue } from '../normalizers/text';
+import { extractNumericValue, isLikelyRealCampaignTitle } from '../normalizers/text';
 import { normalizeImageUrl } from '../normalizers/image';
 import { extractDatesFromCampaignText } from '../date-extraction/parser';
 
@@ -20,22 +20,23 @@ export class SonDuzlukAdapter extends BaseAdapter {
   public readonly campaignsUrl = 'https://www.sonduzluk.com/kampanyalar';
 
   protected readonly selectors = {
-    campaignCard: '.dz-campaign, .bonus-offer, .special-deal, [class*="dz-"], [class*="campaign"], article, .card',
-    campaignTitle: '.dz-headline, .deal-title, h3',
-    campaignDescription: '.dz-text, .deal-description',
-    bonusAmount: '.dz-value, .deal-amount',
-    bonusPercentage: '.dz-percent, .deal-ratio',
-    minDeposit: '.dz-minimum, .floor-deposit',
-    code: '.dz-key, .deal-code',
-    campaignUrl: 'a[href*="deal"], a[href*="bonus"], a[href*="kampanya"]',
-    campaignImage: '.dz-image img, .deal-thumb img',
-    startDate: '.dz-start',
-    endDate: '.dz-end',
-    termsUrl: 'a[href*="terms"]',
-    category: '.dz-category',
-    badge: '.dz-label',
-    featured: '.highlighted-deal',
-    exclusive: '.vip-deal',
+    // Sondüzlük uses simple class names: .campaign-card, .card-top, .card-bottom
+    campaignCard: 'div.campaign-card',
+    campaignTitle: '.card-bottom > div:first-child',
+    campaignDescription: '.description-text',
+    bonusAmount: null, // Site doesn't show bonus amounts on card, only in detail page
+    bonusPercentage: null,
+    minDeposit: null,
+    code: null,
+    campaignUrl: 'a.btn-default.primary',
+    campaignImage: '.card-top img',
+    startDate: null,
+    endDate: null,
+    termsUrl: 'a[href*="sartlar"], a[href*="kosul"], a[href*="terms"]',
+    category: null,
+    badge: null,
+    featured: null,
+    exclusive: null,
   };
 
   constructor() {
@@ -64,73 +65,140 @@ export class SonDuzlukAdapter extends BaseAdapter {
       return this.fallbackCardDiscovery(page);
     }
 
-    const cardElements = await page.$$(this.selectors.campaignCard);
+    const selectorStr = this.selectors.campaignCard;
 
-    if (cardElements.length === 0) {
-      return this.fallbackCardDiscovery(page);
-    }
+    // Sondüzlük gerçek site yapısı: div.campaign-card > div.card-bottom > div.title, div.description-text, a.btn-default.primary
+    const cardData = await page.evaluate((selector) => {
+      const results: any[] = [];
+      const seenUrls: string[] = [];
+      const cardEls = document.querySelectorAll(selector);
 
-    for (const cardEl of cardElements) {
-      try {
-        const rawId = await page.evaluate((el) => el.getAttribute('data-id') || el.getAttribute('id') || `sonduzluk-${Date.now()}`, cardEl);
+      cardEls.forEach((card, index) => {
+        // Skip cards with very little text
+        if (card.textContent && card.textContent.trim().length < 20) return;
 
-        const title = await cardEl.$eval(this.selectors.campaignTitle, (el) => el.textContent?.trim() ?? '').catch(() => '');
+        // Sondüzlük gerçek selector'leri:
+        // - Başlık: .card-bottom > div:first-child (text-default d18 fw700)
+        // - Açıklama: .description-text
+        // - Link: a.btn-default.primary
+        const cardBottom = card.querySelector('.card-bottom');
+        if (!cardBottom) return;
 
-        const description = await cardEl.$eval(this.selectors.campaignDescription, (el) => el.textContent?.trim() ?? null).catch(() => null);
+        const titleEl = cardBottom.querySelector(':scope > div:first-child');
+        let title = titleEl?.textContent?.trim() ?? '';
+        
+        // Fallback: herhangi bir heading veya büyük text
+        if (!title || title.length < 3) {
+          const headings = Array.from(cardBottom.querySelectorAll('h1, h2, h3, h4, [class*="title"], [class*="headline"]'));
+          for (const h of headings) {
+            const text = h.textContent?.trim() ?? '';
+            if (text && text.length < 200) { title = text; break; }
+          }
+        }
+        
+        if (!title || title.length < 3) return;
 
-        const bonusAmountText = await cardEl.$eval(this.selectors.bonusAmount, (el) => el.textContent?.trim() ?? null).catch(() => null);
+        const rawId = card.getAttribute('data-id') || card.getAttribute('id') || `sonduzluk-${Date.now()}-${index}`;
 
-        const bonusPercentageText = await cardEl.$eval(this.selectors.bonusPercentage, (el) => el.textContent?.trim() ?? null).catch(() => null);
+        // Açıklama: .description-text
+        const descriptionEl = cardBottom.querySelector('.description-text');
+        const description = descriptionEl?.textContent?.trim() ?? null;
 
-        const minDepositText = await cardEl.$eval(this.selectors.minDeposit, (el) => el.textContent?.trim() ?? null).catch(() => null);
+        // Bonus amount/percentage: Sondüzlük'te kart üzerinde yok, detay sayfasında var
+        const bonusAmountText = null;
+        const bonusPercentageText = null;
 
-        const code = await cardEl.$eval(this.selectors.code, (el) => el.textContent?.trim() ?? null).catch(() => null);
+        // Min deposit: kart üzerinde yok
+        const minDepositText = null;
 
-        const campaignUrl = await cardEl.$eval(this.selectors.campaignUrl, (el) => el.getAttribute('href') ?? '').catch(() => '');
+        // Kod: kart üzerinde yok
+        const code = null;
 
-        const imageUrl = await cardEl.$eval(this.selectors.campaignImage, (el) => el.getAttribute('src') ?? el.getAttribute('data-src') ?? null).catch(() => null);
+        // Kampanya linki: a.btn-default.primary
+        const campaignUrlEl = cardBottom.querySelector('a.btn-default.primary');
+        let campaignUrl = '';
+        if (campaignUrlEl) {
+          const href = campaignUrlEl.getAttribute('href');
+          if (href) campaignUrl = href;
+        }
 
-        const startDateText = await cardEl.$eval(this.selectors.startDate, (el) => el.textContent?.trim() ?? null).catch(() => null);
+        if (campaignUrl && seenUrls.includes(campaignUrl)) {
+          return; // skip duplicate
+        }
+        if (campaignUrl) {
+          seenUrls.push(campaignUrl);
+        }
 
-        const endDateText = await cardEl.$eval(this.selectors.endDate, (el) => el.textContent?.trim() ?? null).catch(() => null);
+        // Görsel: .card-top img
+        const cardTop = card.querySelector('.card-top');
+        const imageEl = cardTop?.querySelector('img.desktop-only') || cardTop?.querySelector('img');
+        const imageUrl = imageEl?.getAttribute('src') ?? imageEl?.getAttribute('data-src') ?? null;
 
-        const termsUrl = await cardEl.$eval(this.selectors.termsUrl, (el) => el.getAttribute('href') ?? null).catch(() => null);
+        // Tarihler: kart üzerinde yok, detay sayfasında olabilir
+        const startDateText = null;
+        const endDateText = null;
 
-        const category = await cardEl.$eval(this.selectors.category, (el) => el.textContent?.trim() ?? null).catch(() => null);
+        // Şartlar linki
+        const termsUrl = null;
 
-        const badge = await cardEl.$eval(this.selectors.badge, (el) => el.textContent?.trim() ?? null).catch(() => null);
+        // Kategori: yok
+        const category = null;
 
-        const isFeatured = await cardEl.$(this.selectors.featured).then((el) => el !== null).catch(() => false);
+        // Badge: yok (bazı kartlarda olabilir)
+        const badgeEl = card.querySelector('[class*="badge"], [class*="label"]');
+        const badge = badgeEl?.textContent?.trim() ?? null;
 
-        const isExclusive = await cardEl.$(this.selectors.exclusive).then((el) => el !== null).catch(() => false);
+        const isFeatured = !!(card.querySelector('[class*="featured"], [class*="highlight"]'));
+        const isExclusive = !!(card.querySelector('[class*="exclusive"], [class*="vip"]'));
 
-        const card: RawCampaignCard = {
-          siteCode: this.siteCode,
+        results.push({
           rawId,
           title,
           description,
-          bonusAmount: bonusAmountText,
-          bonusPercentage: extractNumericValue(bonusPercentageText),
-          minDeposit: minDepositText,
-          maxBonus: null,
-          code: code?.replace(/KOD:|KUPON:?/gi, '').trim() ?? null,
-          url: this.buildCampaignUrl(campaignUrl),
-          imageUrl: normalizeImageUrl(this.baseUrl, imageUrl),
-          startDate: startDateText,
-          endDate: endDateText,
+          bonusAmountText,
+          bonusPercentageText,
+          minDepositText,
+          code,
+          campaignUrl,
+          imageUrl,
+          startDateText,
+          endDateText,
           termsUrl,
           category,
           badge,
           isFeatured,
           isExclusive,
-          rawData: {},
-          scrapedAt: new Date(),
-        };
+        });
+      });
 
-        cards.push(card);
-      } catch (error) {
-        console.error(`Error extracting card: ${error}`);
-      }
+      return results;
+    }, selectorStr);
+
+    for (const data of cardData) {
+      const card: RawCampaignCard = {
+        siteCode: this.siteCode,
+        rawId: data.rawId,
+        title: data.title,
+        description: data.description,
+        bonusAmount: data.bonusAmountText,
+        bonusPercentage: extractNumericValue(data.bonusPercentageText),
+        minDeposit: data.minDepositText,
+        maxBonus: null,
+        code: data.code?.replace(/KOD:|KUPON:?/gi, '').trim() ?? null,
+        url: this.buildCampaignUrl(data.campaignUrl),
+        imageUrl: normalizeImageUrl(this.baseUrl, data.imageUrl),
+        startDate: data.startDateText,
+        endDate: data.endDateText,
+        termsUrl: data.termsUrl,
+        category: data.category,
+        badge: data.badge,
+        isFeatured: data.isFeatured,
+        isExclusive: data.isExclusive,
+        rawData: {},
+        scrapedAt: new Date(),
+      };
+
+      cards.push(card);
     }
 
     const listingUrl = page.url();
@@ -210,7 +278,12 @@ export class SonDuzlukAdapter extends BaseAdapter {
     return cards;
   }
 
-  normalize(card: RawCampaignCard): NormalizedCampaignInput {
+  normalize(card: RawCampaignCard): NormalizedCampaignInput | null {
+    // Safety check: validate title quality
+    if (!isLikelyRealCampaignTitle(card.title)) {
+      return null;
+    }
+
     const bonusAmount = extractNumericValue(card.bonusAmount);
     const bonusPercentage = card.bonusPercentage;
     const minDeposit = extractNumericValue(card.minDeposit);

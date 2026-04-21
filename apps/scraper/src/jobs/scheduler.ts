@@ -4,16 +4,160 @@ import { JobRecord, JobType, SiteConfig } from '../types';
 import * as queries from '../db/queries';
 import { publishJobEvent } from '../publish/sse';
 import { processAiAnalysisJob } from './ai-analysis';
+import { processAiAnalysisBatchJob } from './ai-analysis-batch';
 import { processDateExtractionJob } from './date-extraction';
 import { processWeeklyReportJob } from './weekly-report';
 import { processStatusRecalcJob } from './status-recalc';
+import { processMomentumRecalcJob } from './momentum-recalc';
+import { EventEmitter } from 'events';
+
+// BE-13: Graceful Shutdown event emitter for coordination
+export const schedulerEvents = new EventEmitter();
+schedulerEvents.setMaxListeners(50);
+
+// BE-13: Graceful shutdown state
+interface GracefulShutdownState {
+  isShuttingDown: boolean;
+  shutdownInitiatedAt: number | null;
+  shutdownTimeoutMs: number;
+  forceShutdownTimeoutMs: number;
+}
+
+const shutdownState: GracefulShutdownState = {
+  isShuttingDown: false,
+  shutdownInitiatedAt: null,
+  shutdownTimeoutMs: 30000, // 30 seconds to finish active jobs
+  forceShutdownTimeoutMs: 60000, // 60 seconds total before force kill
+};
 
 export class JobScheduler {
   private isRunning: boolean = false;
   private intervalId: NodeJS.Timeout | null = null;
   private pollIntervalMs: number = 5000;
-  private maxConcurrentJobs: number = 3;
+  // BE-8: maxConcurrentJobs is now configurable via env var
+  private maxConcurrentJobs: number = parseInt(process.env.MAX_CONCURRENT_JOBS ?? '3', 10);
   private activeJobs: Map<number, NodeJS.Timeout> = new Map();
+  private completedJobs: number = 0;
+  private failedJobs: number = 0;
+
+  constructor() {
+    // BE-13: Register signal handlers for graceful shutdown
+    if (typeof process !== 'undefined') {
+      process.on('SIGTERM', () => this.initiateGracefulShutdown('SIGTERM'));
+      process.on('SIGINT', () => this.initiateGracefulShutdown('SIGINT'));
+      process.on('SIGQUIT', () => this.initiateGracefulShutdown('SIGQUIT'));
+    }
+  }
+
+  // BE-13: Initiate graceful shutdown
+  public async initiateGracefulShutdown(signal: string): Promise<void> {
+    if (shutdownState.isShuttingDown) {
+      logger.warn('Graceful shutdown already in progress');
+      return;
+    }
+
+    shutdownState.isShuttingDown = true;
+    shutdownState.shutdownInitiatedAt = Date.now();
+
+    logger.info(`Graceful shutdown initiated by ${signal}`, {
+      signal,
+      activeJobs: this.activeJobs.size,
+      completedJobs: this.completedJobs,
+      failedJobs: this.failedJobs,
+      shutdownTimeoutMs: shutdownState.shutdownTimeoutMs,
+    });
+
+    // Stop accepting new jobs
+    this.isRunning = false;
+
+    // Clear the polling interval
+    if (this.intervalId) {
+      clearInterval(this.intervalId);
+      this.intervalId = null;
+    }
+
+    // Emit shutdown event for coordination
+    schedulerEvents.emit('shutdown:initiated', {
+      signal,
+      activeJobs: this.activeJobs.size,
+      timestamp: new Date().toISOString(),
+    });
+
+    // Wait for active jobs to complete
+    try {
+      await this.waitForActiveJobs();
+    } catch (error) {
+      logger.warn('Timeout waiting for active jobs, initiating force shutdown');
+      schedulerEvents.emit('shutdown:force', {
+        reason: 'timeout',
+        activeJobsRemaining: this.activeJobs.size,
+      });
+    }
+
+    // Cleanup
+    this.cleanupActiveJobs();
+    
+    logger.info('Graceful shutdown completed', {
+      totalCompleted: this.completedJobs,
+      totalFailed: this.failedJobs,
+      shutdownDurationMs: Date.now() - (shutdownState.shutdownInitiatedAt ?? Date.now()),
+    });
+
+    schedulerEvents.emit('shutdown:completed', {
+      completedJobs: this.completedJobs,
+      failedJobs: this.failedJobs,
+    });
+  }
+
+  // BE-13: Wait for active jobs to complete (with timeout)
+  private async waitForActiveJobs(): Promise<void> {
+    const startTime = Date.now();
+    const checkInterval = 500; // Check every 500ms
+
+    while (this.activeJobs.size > 0) {
+      if (Date.now() - startTime > shutdownState.shutdownTimeoutMs) {
+        throw new Error('Graceful shutdown timeout');
+      }
+
+      logger.debug(`Waiting for ${this.activeJobs.size} active jobs to complete...`);
+      
+      await new Promise(resolve => setTimeout(resolve, checkInterval));
+
+      schedulerEvents.emit('shutdown:progress', {
+        activeJobs: this.activeJobs.size,
+        waitTimeMs: Date.now() - startTime,
+      });
+    }
+  }
+
+  // BE-13: Force cleanup of any remaining active jobs
+  private cleanupActiveJobs(): void {
+    for (const [jobId, timeout] of this.activeJobs) {
+      clearTimeout(timeout);
+      logger.warn(`Force cleanup: cleared active job ${jobId}`);
+    }
+    this.activeJobs.clear();
+  }
+
+  // BE-13: Check if scheduler is shutting down
+  public isShuttingDown(): boolean {
+    return shutdownState.isShuttingDown;
+  }
+
+  // BE-13: Get shutdown status
+  public getShutdownStatus(): {
+    isShuttingDown: boolean;
+    shutdownDurationMs: number | null;
+    activeJobs: number;
+  } {
+    return {
+      isShuttingDown: shutdownState.isShuttingDown,
+      shutdownDurationMs: shutdownState.shutdownInitiatedAt 
+        ? Date.now() - shutdownState.shutdownInitiatedAt 
+        : null,
+      activeJobs: this.activeJobs.size,
+    };
+  }
 
   async start(): Promise<void> {
     if (this.isRunning) {
@@ -21,8 +165,16 @@ export class JobScheduler {
       return;
     }
 
+    if (shutdownState.isShuttingDown) {
+      logger.warn('Cannot start JobScheduler while shutting down');
+      return;
+    }
+
     this.isRunning = true;
-    logger.info('JobScheduler started');
+    logger.info('JobScheduler started', {
+      maxConcurrentJobs: this.maxConcurrentJobs,
+      pollIntervalMs: this.pollIntervalMs,
+    });
 
     this.intervalId = setInterval(() => {
       this.pollAndProcessJobs().catch((error) => {
@@ -98,7 +250,8 @@ export class JobScheduler {
   }
 
   private async pollAndProcessJobs(): Promise<void> {
-    if (!this.isRunning) {
+    // BE-13: Check if shutting down before processing
+    if (!this.isRunning || shutdownState.isShuttingDown) {
       return;
     }
 
@@ -119,6 +272,10 @@ export class JobScheduler {
       if (this.activeJobs.has(job.id)) {
         return Promise.resolve();
       }
+      // BE-13: Check shutdown status before starting new job
+      if (shutdownState.isShuttingDown) {
+        return Promise.resolve();
+      }
       return this.processJob(job).catch((error) => {
         logger.error('Job processing threw uncaught error', {
           jobId: job.id,
@@ -131,6 +288,12 @@ export class JobScheduler {
   }
 
   private async processJob(job: JobRecord): Promise<void> {
+    // BE-13: Check shutdown before starting
+    if (shutdownState.isShuttingDown) {
+      logger.info(`Skipping job ${job.id} due to shutdown`);
+      return;
+    }
+
     const db = getDb();
 
     await queries.updateJobStatus(db, job.id, 'processing');
@@ -146,6 +309,9 @@ export class JobScheduler {
       await queries.updateJobStatus(db, job.id, 'completed', JSON.stringify(result), null);
       await queries.incrementJobAttempts(db, job.id);
 
+      // BE-13: Track completed jobs
+      this.completedJobs++;
+
       const completedJob = { ...job, status: 'completed' as const, result, attempts: job.attempts + 1 };
       publishJobEvent('job:completed', completedJob);
 
@@ -158,7 +324,19 @@ export class JobScheduler {
       await queries.incrementJobAttempts(db, job.id);
 
       if (job.attempts + 1 >= job.maxAttempts) {
+        // BE-9: Move to dead letter queue (failed_jobs table) after max attempts
+        await queries.insertFailedJob(db, {
+          originalJobId: job.id,
+          type: job.type,
+          payload: typeof job.payload === 'string' ? job.payload : JSON.stringify(job.payload),
+          error: errorMessage,
+          attempts: job.attempts + 1,
+          maxAttempts: job.maxAttempts,
+        });
         await queries.updateJobStatus(db, job.id, 'failed', null, errorMessage);
+
+        // BE-13: Track failed jobs
+        this.failedJobs++;
 
         const failedJob = { ...job, status: 'failed' as const, error: errorMessage, attempts: job.attempts + 1 };
         publishJobEvent('job:failed', failedJob);
@@ -168,11 +346,14 @@ export class JobScheduler {
         const retryDelay = Math.min(1000 * Math.pow(2, job.attempts), 30000);
         const timeout = setTimeout(() => {
           this.activeJobs.delete(job.id);
-          this.pollAndProcessJobs().catch((err) => {
-            logger.error('Error in retry poll', {
-              error: err instanceof Error ? err.message : 'Unknown error',
+          // BE-13: Check shutdown on retry
+          if (!shutdownState.isShuttingDown) {
+            this.pollAndProcessJobs().catch((err) => {
+              logger.error('Error in retry poll', {
+                error: err instanceof Error ? err.message : 'Unknown error',
+              });
             });
-          });
+          }
         }, retryDelay);
 
         this.activeJobs.set(job.id, timeout);
@@ -187,6 +368,9 @@ export class JobScheduler {
       case 'ai-analysis':
         return JSON.parse(JSON.stringify(await processAiAnalysisJob(payload)));
 
+      case 'ai-analysis-batch':
+        return JSON.parse(JSON.stringify(await processAiAnalysisBatchJob(payload)));
+
       case 'date-extraction':
         return JSON.parse(JSON.stringify(await processDateExtractionJob(payload)));
 
@@ -195,6 +379,9 @@ export class JobScheduler {
 
       case 'status-recalc':
         return JSON.parse(JSON.stringify(await processStatusRecalcJob(payload)));
+
+      case 'momentum-recalc':
+        return JSON.parse(JSON.stringify(await processMomentumRecalcJob(payload)));
 
       case 'scrape':
         return await processScrapeJob(payload);

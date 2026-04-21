@@ -114,6 +114,16 @@ export async function batchExtractDates(
 ): Promise<Map<string, DateExtractionResult>> {
   const results = new Map<string, DateExtractionResult>();
 
+  if (!Array.isArray(campaignIds)) {
+    logger.warn('campaignIds is not an array, skipping batch date extraction', { campaignIds: typeof campaignIds, value: String(campaignIds).slice(0, 100) });
+    return results;
+  }
+
+  if (campaignIds.length === 0) {
+    logger.info('No campaign IDs provided for batch date extraction');
+    return results;
+  }
+
   logger.info(`Starting batch date extraction for ${campaignIds.length} campaigns`);
 
   for (const campaignId of campaignIds) {
@@ -180,6 +190,11 @@ export async function reextractDatesForStaleCampaigns(
 ): Promise<number> {
   const db = getDb();
   const staleCampaignIds = await queries.getStaleCampaignsWithoutDates(db, maxAgeDays);
+
+  if (!staleCampaignIds || !Array.isArray(staleCampaignIds) || staleCampaignIds.length === 0) {
+    logger.info('No stale campaigns found for date re-extraction');
+    return 0;
+  }
 
   logger.info(`Found ${staleCampaignIds.length} stale campaigns for date re-extraction`);
 

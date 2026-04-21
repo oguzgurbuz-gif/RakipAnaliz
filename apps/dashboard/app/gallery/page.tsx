@@ -1,21 +1,24 @@
 'use client'
 
 import { useQuery } from '@tanstack/react-query'
-import { useState } from 'react'
+import { useState, useCallback } from 'react'
 import { fetchCampaigns } from '@/lib/api'
 import { EmptyState } from '@/components/ui/empty-state'
 import { Modal } from '@/components/ui/modal'
 import { PageHeader } from '@/components/ui/page-header'
 import { getCampaignTypeLabel } from '@/lib/campaign-presentation'
 import { getCategoryLabel } from '@/lib/category-labels'
+import { GalleryActions } from '@/components/gallery/gallery-actions'
 import Link from 'next/link'
-import { ExternalLink, Image as ImageIcon, X } from 'lucide-react'
+import { ExternalLink, Image as ImageIcon, X, CheckSquare, Square } from 'lucide-react'
 
 export default function GalleryPage() {
   const [selectedCampaignId, setSelectedCampaignId] = useState<string | null>(null)
   const [selectedSite, setSelectedSite] = useState('')
   const [selectedCategory, setSelectedCategory] = useState('')
   const [selectedStatus, setSelectedStatus] = useState('')
+  const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set())
+
   const { data, isLoading } = useQuery({
     queryKey: ['campaigns', { limit: 100 }],
     queryFn: () => fetchCampaigns({ limit: 100 }),
@@ -28,16 +31,48 @@ export default function GalleryPage() {
     if (selectedStatus && campaign.status !== selectedStatus) return false
     return true
   })
+
   const selectedCampaign = campaignsWithImages.find((campaign) => campaign.id === selectedCampaignId) || null
   const siteOptions = Array.from(new Set((data?.data || []).map((campaign) => campaign.site).filter(Boolean).map((site) => `${site!.code}|${site!.name}`)))
   const categoryOptions = Array.from(new Set((data?.data || []).map((campaign) => (campaign.metadata as any)?.ai_analysis?.campaign_type || campaign.category).filter(Boolean)))
+
+  const handleSelectionChange = useCallback((ids: Set<string>) => {
+    setSelectedIds(ids)
+  }, [])
+
+  const toggleSelect = useCallback((id: string, e: React.MouseEvent) => {
+    e.stopPropagation()
+    const newSet = new Set(selectedIds)
+    if (newSet.has(id)) {
+      newSet.delete(id)
+    } else {
+      newSet.add(id)
+    }
+    setSelectedIds(newSet)
+  }, [selectedIds])
+
+  const toggleSelectAll = useCallback(() => {
+    if (selectedIds.size === campaignsWithImages.length) {
+      setSelectedIds(new Set())
+    } else {
+      setSelectedIds(new Set(campaignsWithImages.map((c) => c.id)))
+    }
+  }, [campaignsWithImages, selectedIds])
+
+  const clearSelection = useCallback(() => {
+    setSelectedIds(new Set())
+  }, [])
 
   return (
     <div className="min-h-screen bg-background">
       <PageHeader
         title="Görsel Galeri"
         description="Kampanya kreatiflerini site, tür ve durum bazında süzerek keşfedin."
-        actions={<span className="text-sm text-muted-foreground">{campaignsWithImages.length} görsel</span>}
+        actions={
+          <span className="text-sm text-muted-foreground">
+            {campaignsWithImages.length} görsel
+          </span>
+        }
       >
         <div className="flex flex-wrap gap-2">
           <select
@@ -75,7 +110,15 @@ export default function GalleryPage() {
         </div>
       </PageHeader>
 
-      <main className="p-6">
+      <main className="p-6 space-y-4">
+        {/* Gallery Actions Bar */}
+        <GalleryActions
+          items={campaignsWithImages}
+          selectedIds={selectedIds}
+          onSelectionChange={handleSelectionChange}
+          isLoading={isLoading}
+        />
+
         {isLoading ? (
           <div className="grid grid-cols-2 md:grid-cols-4 lg:grid-cols-6 gap-4">
             {Array.from({ length: 12 }).map((_, i) => (
@@ -89,21 +132,37 @@ export default function GalleryPage() {
         ) : (
           <div className="grid grid-cols-2 md:grid-cols-4 lg:grid-cols-6 gap-4">
             {campaignsWithImages.map((campaign) => (
-              <button
-                key={campaign.id}
-                onClick={() => setSelectedCampaignId(campaign.id)}
-                className="group aspect-square rounded-2xl overflow-hidden border bg-card hover:-translate-y-0.5 hover:ring-2 hover:ring-primary/40 transition-all"
-              >
-                <img
-                  src={campaign.primaryImage!}
-                  alt={campaign.title}
-                  className="w-full h-full object-cover"
-                />
-                <div className="hidden p-3 text-left group-hover:block">
-                  <div className="line-clamp-1 text-sm font-medium">{campaign.title}</div>
-                  <div className="text-xs text-muted-foreground">{campaign.site?.name}</div>
-                </div>
-              </button>
+              <div key={campaign.id} className="relative group">
+                <button
+                  onClick={() => setSelectedCampaignId(campaign.id)}
+                  className="group aspect-square rounded-2xl overflow-hidden border bg-card hover:-translate-y-0.5 hover:ring-2 hover:ring-primary/40 transition-all w-full"
+                >
+                  <img
+                    src={campaign.primaryImage!}
+                    alt={campaign.title}
+                    className="w-full h-full object-cover"
+                  />
+                  <div className="hidden p-3 text-left group-hover:block absolute bottom-0 left-0 right-0 bg-gradient-to-t from-black/70 to-transparent">
+                    <div className="line-clamp-1 text-sm font-medium text-white">{campaign.title}</div>
+                    <div className="text-xs text-white/70">{campaign.site?.name}</div>
+                  </div>
+                </button>
+                {/* Checkbox for selection */}
+                <button
+                  onClick={(e) => toggleSelect(campaign.id, e)}
+                  className={`absolute top-2 left-2 p-1.5 rounded-lg transition-all ${
+                    selectedIds.has(campaign.id)
+                      ? 'bg-primary text-primary-foreground'
+                      : 'bg-black/30 text-white opacity-0 group-hover:opacity-100'
+                  }`}
+                >
+                  {selectedIds.has(campaign.id) ? (
+                    <CheckSquare className="h-4 w-4" />
+                  ) : (
+                    <Square className="h-4 w-4" />
+                  )}
+                </button>
+              </div>
             ))}
           </div>
         )}

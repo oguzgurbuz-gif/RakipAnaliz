@@ -2,7 +2,7 @@ import { Page, ElementHandle } from 'puppeteer';
 import { BaseAdapter } from './base';
 import { RawCampaignCard, NormalizedCampaignInput } from '../types';
 import { buildFingerprint, buildRawFingerprint } from '../normalizers/fingerprint';
-import { extractNumericValue } from '../normalizers/text';
+import { extractNumericValue, isLikelyRealCampaignTitle } from '../normalizers/text';
 import { normalizeImageUrl } from '../normalizers/image';
 import { extractDatesFromCampaignText } from '../date-extraction/parser';
 
@@ -10,6 +10,11 @@ export class AtYarisiAdapter extends BaseAdapter {
   private static readonly SITE_CODE = 'atyarisi';
   private static readonly BASE_URL = 'https://www.atyarisi.com';
   public readonly campaignsUrl = 'https://www.atyarisi.com/kampanyalar';
+
+  // Bilinen kampanya slug/ID çiftleri - /kampanyalar sayfası login gerektirdiği için direkt URL'ler kullanılıyor
+  private static readonly KNOWN_CAMPAIGNS: { slug: string; id: number }[] = [
+    { slug: 'sabit-ihtimallilerde-yuzde-25-ekstra-kazanc', id: 716 },
+  ];
 
   protected readonly selectors = {
     campaignCard: [
@@ -73,136 +78,101 @@ export class AtYarisiAdapter extends BaseAdapter {
 
   async extractCards(page: Page): Promise<RawCampaignCard[]> {
     const cards: RawCampaignCard[] = [];
-    const seenUrls = new Set<string>();
 
-    await this.triggerLazyLoading(page);
+    // /kampanyalar sayfası login gerektiriyor, bu yüzden bilinen kampanya URL'lerini direkt kullan
+    const knownCampaignUrls = AtYarisiAdapter.KNOWN_CAMPAIGNS.map(
+      c => `${AtYarisiAdapter.BASE_URL}/kampanyalar/${c.slug}/${c.id}`
+    );
 
-    const cardSelectors = [
-      '[class*="bonus"]',
-      '[class*="promosyon"]',
-      '[class*="promotion"]',
-      '[class*="campaign"]',
-      '[class*="item"]',
-      '[class*="card"]',
-      '[class*="offer"]',
-      'article',
-    ];
+    console.log(`AtYarisi: Using ${knownCampaignUrls.length} known campaign URLs`);
 
-    let cardElements: ElementHandle<Element>[] = [];
-    for (const selector of cardSelectors) {
+    for (const campaignUrl of knownCampaignUrls) {
       try {
-        cardElements = await page.$$(selector);
-        if (cardElements.length > 0) {
-          console.log(`AtYarisi: Found ${cardElements.length} cards with selector: ${selector}`);
-          break;
-        }
-      } catch (e) {
-        continue;
-      }
-    }
+        const result = await this.visitDetailPage(page, campaignUrl, { waitMs: 1000 });
 
-    if (cardElements.length === 0) {
-      cardElements = await this.fallbackCardDiscovery(page, seenUrls);
-    }
-
-    for (const cardEl of cardElements) {
-      try {
-        const rawId = await page.evaluate((el) => el.getAttribute('data-id') || el.getAttribute('id') || `atyarisi-${Date.now()}`, cardEl);
-
-        const title = await cardEl.$eval(this.selectors.campaignTitle, (el: Element) => el.textContent?.trim() ?? '').catch(() => '');
-
-        const description = await cardEl.$eval(this.selectors.campaignDescription, (el: Element) => el.textContent?.trim() ?? null).catch(() => null);
-
-        const bonusAmountText = await cardEl.$eval(this.selectors.bonusAmount, (el: Element) => el.textContent?.trim() ?? null).catch(() => null);
-
-        const bonusPercentageText = await cardEl.$eval(this.selectors.bonusPercentage, (el: Element) => el.textContent?.trim() ?? null).catch(() => null);
-
-        const minDepositText = await cardEl.$eval(this.selectors.minDeposit, (el: Element) => el.textContent?.trim() ?? null).catch(() => null);
-
-        const code = await cardEl.$eval(this.selectors.code, (el: Element) => el.textContent?.trim() ?? null).catch(() => null);
-
-        const campaignUrl = await cardEl.$eval(this.selectors.campaignUrl, (el: Element) => {
-          const href = el.getAttribute('href');
-          if (href && (href.includes('bonus') || href.includes('kampanya') || href.includes('promosyon') || href.startsWith('/'))) {
-            return href;
-          }
-          return '';
-        }).catch(() => '');
-
-        if (campaignUrl && seenUrls.has(campaignUrl)) {
+        if (!result?.body) {
+          console.log(`AtYarisi: No content from ${campaignUrl}`);
           continue;
         }
-        if (campaignUrl) {
-          seenUrls.add(campaignUrl);
-        }
 
-        const imageUrl = await cardEl.$eval(this.selectors.campaignImage, (el: Element) => el.getAttribute('src') ?? el.getAttribute('data-src') ?? null).catch(() => null);
+        // Detail page'den kampanya bilgilerini çıkar
+        const cardData = await page.evaluate((body: string) => {
+          const parser = new DOMParser();
+          const doc = parser.parseFromString(body, 'text/html');
 
-        const startDateText = await cardEl.$eval(this.selectors.startDate, (el: Element) => el.textContent?.trim() ?? null).catch(() => null);
+          const title = doc.querySelector('h1')?.textContent?.trim() 
+            || doc.querySelector('[class*="title"]')?.textContent?.trim() 
+            || '';
 
-        const endDateText = await cardEl.$eval(this.selectors.endDate, (el: Element) => el.textContent?.trim() ?? null).catch(() => null);
+          const description = doc.querySelector('[class*="desc"], [class*="description"], [class*="content"], p')?.textContent?.trim() 
+            || null;
 
-        const termsUrl = await cardEl.$eval(this.selectors.termsUrl, (el: Element) => el.getAttribute('href') ?? null).catch(() => null);
+          const bonusPercentageText = doc.querySelector('[class*="oran"], [class*="rate"], [class*="percent"]')?.textContent?.trim() 
+            || null;
 
-        const category = await cardEl.$eval(this.selectors.category, (el: Element) => el.textContent?.trim() ?? null).catch(() => null);
+          const termsEl = doc.querySelector('a[href*="kosullar"], a[href*="sart"], a[href*="terms"]');
+          const termsUrl = termsEl?.getAttribute('href') ?? null;
 
-        const badge = await cardEl.$eval(this.selectors.badge, (el: Element) => el.textContent?.trim() ?? null).catch(() => null);
+          const imgEl = doc.querySelector('img[class*="image"], [class*="img"] img, picture img');
+          const imageUrl = imgEl?.getAttribute('src') ?? imgEl?.getAttribute('data-src') ?? null;
 
-        const isFeatured = await cardEl.$(this.selectors.featured).then((el: ElementHandle | null) => el !== null).catch(() => false);
+          // Tarihleri sayfadaki metinden çıkar
+          const pageText = doc.body?.textContent || '';
+          const dateMatch = pageText.match(/(\d{2}[./]\d{2}[./]\d{4})/g);
+          let startDateText = null;
+          let endDateText = null;
+          if (dateMatch && dateMatch.length >= 2) {
+            startDateText = dateMatch[0];
+            endDateText = dateMatch[1];
+          } else if (dateMatch && dateMatch.length === 1) {
+            endDateText = dateMatch[0];
+          }
 
-        const isExclusive = await cardEl.$(this.selectors.exclusive).then((el: ElementHandle | null) => el !== null).catch(() => false);
+          return {
+            title,
+            description,
+            bonusPercentageText,
+            termsUrl,
+            imageUrl,
+            startDateText,
+            endDateText,
+          };
+        }, result.body);
+
+        // URL'den slug ve ID çıkar
+        const urlMatch = campaignUrl.match(/\/kampanyalar\/([^/]+)\/(\d+)/);
+        const slug = urlMatch?.[1] || '';
+        const id = urlMatch?.[2] || `${Date.now()}`;
 
         const card: RawCampaignCard = {
           siteCode: this.siteCode,
-          rawId,
-          title,
-          description,
-          bonusAmount: bonusAmountText,
-          bonusPercentage: extractNumericValue(bonusPercentageText),
-          minDeposit: minDepositText,
+          rawId: `atyarisi-${id}`,
+          title: cardData.title,
+          description: cardData.description || result.body?.substring(0, 500) || null,
+          bonusAmount: null,
+          bonusPercentage: extractNumericValue(cardData.bonusPercentageText),
+          minDeposit: null,
           maxBonus: null,
-          code: code?.replace(/KOD:|KUPON:?/gi, '').trim() ?? null,
-          url: this.buildCampaignUrl(campaignUrl),
-          imageUrl: normalizeImageUrl(this.baseUrl, imageUrl),
-          startDate: startDateText,
-          endDate: endDateText,
-          termsUrl,
-          category,
-          badge,
-          isFeatured,
-          isExclusive,
-          rawData: {},
+          code: null,
+          url: campaignUrl,
+          imageUrl: normalizeImageUrl(this.baseUrl, cardData.imageUrl),
+          startDate: cardData.startDateText,
+          endDate: cardData.endDateText,
+          termsUrl: cardData.termsUrl ? this.buildCampaignUrl(cardData.termsUrl) : null,
+          category: null,
+          badge: null,
+          isFeatured: false,
+          isExclusive: false,
+          rawData: { slug, campaignId: id },
           scrapedAt: new Date(),
         };
 
         cards.push(card);
+        console.log(`AtYarisi: Extracted campaign: ${card.title}`);
       } catch (error) {
-        console.error(`Error extracting card: ${error}`);
+        console.error(`AtYarisi: Error extracting campaign from ${campaignUrl}: ${error}`);
       }
     }
-
-    const listingUrl = this.campaignsUrl;
-    for (const card of cards) {
-      if (!card.url || card.url.endsWith('/kampanyalar') || card.url.endsWith('/kampanyalar/')) {
-        continue;
-      }
-
-      try {
-        const result = await this.visitDetailPage(page, card.url, { waitMs: 800 });
-
-        if (result?.body && result.body.length > (card.description?.length ?? 0)) {
-          card.description = result.body;
-        }
-
-        if (result?.termsUrl) {
-          card.termsUrl = result.termsUrl;
-        }
-      } catch (error) {
-        console.error(`Error visiting detail page for card ${card.rawId}: ${error}`);
-      }
-    }
-
-    await page.goto(listingUrl, { waitUntil: 'domcontentloaded' });
 
     return cards;
   }
@@ -250,7 +220,12 @@ export class AtYarisiAdapter extends BaseAdapter {
     return cards;
   }
 
-  normalize(card: RawCampaignCard): NormalizedCampaignInput {
+  normalize(card: RawCampaignCard): NormalizedCampaignInput | null {
+    // Safety check: validate title quality
+    if (!isLikelyRealCampaignTitle(card.title)) {
+      return null;
+    }
+
     const bonusAmount = extractNumericValue(card.bonusAmount);
     const bonusPercentage = card.bonusPercentage;
     const minDeposit = extractNumericValue(card.minDeposit);

@@ -196,11 +196,27 @@ export async function updateCampaign(campaignId: string, normalized: NormalizedC
   const db = getDb();
   const now = new Date();
 
+  // Status, normalized.visibility ve valid_to'ya göre türetilir.
+  // Hardcoded 'active' (önceki davranış) eski tarihli kampanyaları yanlış aktif
+  // gösteriyordu — bulk recalc job düzeltiyordu ama her scrape geri bozuyordu.
+  let derivedStatus: 'active' | 'expired' | 'pending' | 'hidden' = 'active';
+  if (normalized.visibility === 'hidden') {
+    derivedStatus = 'hidden';
+  } else if (normalized.visibility === 'pending') {
+    derivedStatus = 'pending';
+  } else if (normalized.endDate && normalized.endDate < now) {
+    derivedStatus = 'expired';
+  } else if (normalized.visibility === 'expired') {
+    derivedStatus = 'expired';
+  }
+
   await queries.updateCampaign(db, campaignId, {
     title: normalized.title,
     body: normalized.description,
-    status: 'active',
+    status: derivedStatus,
     lastSeenAt: now.toISOString(),
+    validFrom: normalized.startDate ?? null,
+    validTo: normalized.endDate ?? null,
   });
 }
 

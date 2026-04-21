@@ -148,63 +148,86 @@ export default function WeeklyReportDetailPage({ params }: { params: Promise<{ i
               <InsightCard icon={AlertTriangle} title="Biten Kampanya" value={data.endedCount} description="Hafta içinde kapanan kampanyalar" />
             </div>
 
-            {data.executiveSummary && (
-              <Card>
-                <CardHeader>
-                  <SectionHeader
-                    title="Yönetici Özeti"
-                    description="Haftanın en önemli değişimlerini üst seviyede özetler."
-                  />
-                </CardHeader>
-                <CardContent>
+            <Card>
+              <CardHeader>
+                <SectionHeader
+                  title="Yönetici Özeti"
+                  description="Haftanın en önemli değişimlerini üst seviyede özetler."
+                />
+              </CardHeader>
+              <CardContent>
+                {data.executiveSummary ? (
                   <p className="text-sm">{data.executiveSummary}</p>
-                </CardContent>
-              </Card>
-            )}
+                ) : (
+                  <p className="text-sm text-muted-foreground italic">
+                    AI yönetici özeti henüz üretilmedi.
+                  </p>
+                )}
+              </CardContent>
+            </Card>
 
             <ReportSummaryComponent data={data} showDetails />
 
             <div className="grid gap-6 md:grid-cols-2">
-              {data.risks && data.risks.length > 0 && (
-                <Card>
-                  <CardHeader>
-                    <SectionHeader
-                      title="Riskler"
-                      description="Takip gerektiren olumsuz veya zayıf sinyaller."
-                    />
-                  </CardHeader>
-                  <CardContent>
+              <Card>
+                <CardHeader>
+                  <SectionHeader
+                    title="Riskler"
+                    description="Takip gerektiren olumsuz veya zayıf sinyaller."
+                  />
+                </CardHeader>
+                <CardContent>
+                  {data.risks && data.risks.length > 0 ? (
                     <ul className="space-y-2">
                       {data.risks.map((risk, index) => (
-                        <li key={index} className="rounded-xl border border-destructive/20 bg-destructive/5 px-4 py-3 text-sm">{risk}</li>
+                        <li
+                          key={index}
+                          className="rounded-xl border border-destructive/20 bg-destructive/5 px-4 py-3 text-sm"
+                        >
+                          <div className="flex items-start gap-2">
+                            <AlertTriangle className="mt-0.5 h-4 w-4 text-destructive" />
+                            <span>{risk}</span>
+                          </div>
+                        </li>
                       ))}
                     </ul>
-                  </CardContent>
-                </Card>
-              )}
+                  ) : (
+                    <p className="text-sm text-muted-foreground italic">
+                      Risk analizi henüz üretilmedi.
+                    </p>
+                  )}
+                </CardContent>
+              </Card>
 
-              {data.recommendations && data.recommendations.length > 0 && (
-                <Card>
-                  <CardHeader>
-                    <SectionHeader
-                      title="Öneriler"
-                      description="Bu haftanın verisine göre aksiyon alınabilecek kısa öneriler."
-                    />
-                  </CardHeader>
-                  <CardContent>
+              <Card>
+                <CardHeader>
+                  <SectionHeader
+                    title="Öneriler"
+                    description="Bu haftanın verisine göre aksiyon alınabilecek kısa öneriler."
+                  />
+                </CardHeader>
+                <CardContent>
+                  {data.recommendations && data.recommendations.length > 0 ? (
                     <ul className="space-y-2">
                       {data.recommendations.map((rec, index) => (
-                        <li key={index} className="rounded-xl border border-primary/15 bg-primary/5 px-4 py-3 text-sm">
+                        <li
+                          key={index}
+                          className="rounded-xl border border-emerald-500/30 bg-emerald-500/5 px-4 py-3 text-sm"
+                        >
                           <div className="flex items-start gap-2">
-                            <Lightbulb className="mt-0.5 h-4 w-4 text-primary" />
+                            <Lightbulb className="mt-0.5 h-4 w-4 text-emerald-600 dark:text-emerald-400" />
                             <span>{rec}</span>
                           </div>
                         </li>
                       ))}
                     </ul>
-                  </CardContent>
-                </Card>
-              )}
+                  ) : (
+                    <p className="text-sm text-muted-foreground italic">
+                      Öneriler henüz üretilmedi.
+                    </p>
+                  )}
+                </CardContent>
+              </Card>
             </div>
 
             <div className="grid gap-6 md:grid-cols-2">

@@ -3,6 +3,7 @@ import { z } from 'zod';
 import { query } from '@/lib/db';
 import { successResponse, errorResponse, handleApiError, getCorsHeaders } from '@/lib/response';
 import { NotFoundError, ValidationError } from '@bitalih/shared/errors';
+import { logRequestAction } from '@/lib/audit';
 
 const recalculateSchema = z.object({
   campaignIds: z.array(z.string().uuid()).min(1).max(1000),
@@ -124,6 +125,18 @@ export async function POST(request: NextRequest) {
       notFoundIds,
       timestamp: new Date().toISOString(),
     })]);
+
+    await logRequestAction(request, {
+      action: 'campaign.status.recalc',
+      resourceType: 'campaign',
+      resourceId: campaigns.length === 1 ? campaigns[0].id : null,
+      changes: {
+        campaignCount: campaigns.length,
+        changedCount: changedIds.length,
+        changedIds,
+        notFoundIds,
+      },
+    });
 
     return successResponse({
       campaignsProcessed: results.length,

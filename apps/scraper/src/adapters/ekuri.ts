@@ -1,8 +1,8 @@
-import { Page, ElementHandle } from 'puppeteer';
+import { Page } from 'puppeteer';
 import { BaseAdapter } from './base';
 import { RawCampaignCard, NormalizedCampaignInput } from '../types';
 import { buildFingerprint, buildRawFingerprint } from '../normalizers/fingerprint';
-import { extractNumericValue } from '../normalizers/text';
+import { extractNumericValue, isLikelyRealCampaignTitle } from '../normalizers/text';
 import { parseDateText } from '../normalizers/date';
 import { normalizeImageUrl } from '../normalizers/image';
 import { extractDatesFromCampaignText } from '../date-extraction/parser';
@@ -50,8 +50,8 @@ export class EkuriAdapter extends BaseAdapter {
       '[class*="code"]',
       '[class*="coupon"]',
     ].join(', '),
-    campaignUrl: 'a[href]',
-    campaignImage: 'img[class*="image"], [class*="img"] img, picture img',
+    campaignUrl: 'a[href], button',
+    campaignImage: 'img',
     startDate: '[class*="start"], [class*="date"]',
     endDate: '[class*="end"], [class*="date"]',
     termsUrl: 'a[href*="kosul"], a[href*="sart"], a[href*="terms"]',
@@ -72,109 +72,153 @@ export class EkuriAdapter extends BaseAdapter {
 
   async extractCards(page: Page): Promise<RawCampaignCard[]> {
     const cards: RawCampaignCard[] = [];
-    const seenUrls = new Set<string>();
 
     await this.triggerLazyLoading(page);
 
     const cardSelectors = [
-      '[class*="campaign"]',
-      '[class*="item"]',
-      '[class*="card"]',
-      '[class*="bonus"]',
-      '[class*="offer"]',
-      'article',
-      '.widget',
+      '.campaign-item',
+      '.campaign-widget',
+      '[class*="campaign"][class*="item"]',
+      '[class*="campaign"][class*="card"]',
     ];
 
-    let cardElements: ElementHandle<Element>[] = [];
-    for (const selector of cardSelectors) {
-      try {
-        cardElements = await page.$$(selector);
-        if (cardElements.length > 0) {
-          console.log(`Ekuri: Found ${cardElements.length} cards with selector: ${selector}`);
-          break;
-        }
-      } catch (e) {
-        continue;
-      }
-    }
+    const selectorStr = cardSelectors.join(', ');
 
-    if (cardElements.length === 0) {
-      cardElements = await this.fallbackCardDiscovery(page, seenUrls);
-    }
+    const cardData = await page.evaluate((selector) => {
+      const results: any[] = [];
+      const seenUrls: string[] = [];
+      const cardEls = document.querySelectorAll(selector);
+      const baseUrl = 'https://www.ekuri.com';
 
-    for (const cardEl of cardElements) {
-      try {
-        const rawId = await page.evaluate((el) => el.getAttribute('data-id') || el.getAttribute('id') || `ekuri-${Date.now()}`, cardEl);
+      cardEls.forEach((card, index) => {
+        // Skip cards with very little text (likely noise)
+        if (card.textContent && card.textContent.trim().length < 30) return;
 
-        const title = await cardEl.$eval(this.selectors.campaignTitle, (el: Element) => el.textContent?.trim() ?? '').catch(() => '');
-
-        const description = await cardEl.$eval(this.selectors.campaignDescription, (el: Element) => el.textContent?.trim() ?? null).catch(() => null);
-
-        const bonusAmountText = await cardEl.$eval(this.selectors.bonusAmount, (el: Element) => el.textContent?.trim() ?? null).catch(() => null);
-
-        const bonusPercentageText = await cardEl.$eval(this.selectors.bonusPercentage, (el: Element) => el.textContent?.trim() ?? null).catch(() => null);
-
-        const code = await cardEl.$eval(this.selectors.code, (el: Element) => el.textContent?.trim() ?? null).catch(() => null);
-
-        const campaignUrl = await cardEl.$eval(this.selectors.campaignUrl, (el: Element) => {
-          const href = el.getAttribute('href');
-          if (href && (href.includes('kampanya') || href.includes('bonus') || href.startsWith('/'))) {
-            return href;
+        let title = '';
+        const titleEl = card.querySelector('[class*="title"]:not(h1):not(h2):not(h3):not(h4)');
+        if (titleEl?.textContent?.trim()) {
+          title = titleEl.textContent.trim();
+        } else {
+          const headings = Array.from(card.querySelectorAll('h1, h2, h3, h4'));
+          for (const h of headings) {
+            const text = h.textContent?.trim() ?? '';
+            if (text && text.length < 200) { title = text; break; }
           }
-          return '';
-        }).catch(() => '');
+          if (!title) { const text = card.textContent?.trim() ?? ''; title = text.length < 300 ? text : ''; }
+        }
+        if (!title || title.length < 3) return;
 
-        if (campaignUrl && seenUrls.has(campaignUrl)) {
-          continue;
+        const rawId = card.getAttribute('data-id') || card.getAttribute('id') || `ekuri-${Date.now()}-${index}`;
+
+        const descriptionEl = card.querySelector('[class*="sub-title"], [class*="subtitle"], [class*="description"], [class*="desc"], p');
+        const description = descriptionEl?.textContent?.trim() ?? null;
+
+        const bonusAmountEl = card.querySelector('[class*="amount"], [class*="value"], [class*="bonus"]');
+        const bonusAmountText = bonusAmountEl?.textContent?.trim() ?? null;
+
+        const bonusPercentageEl = card.querySelector('[class*="percent"], [class*="rate"]');
+        const bonusPercentageText = bonusPercentageEl?.textContent?.trim() ?? null;
+
+        const codeEl = card.querySelector('[class*="code"], [class*="coupon"]');
+        const code = codeEl?.textContent?.trim() ?? null;
+
+        const campaignUrlEl = card.querySelector('a[href]');
+        let campaignUrl = '';
+        if (campaignUrlEl) {
+          const href = campaignUrlEl.getAttribute('href');
+          if (href && (href.includes('kampanya') || href.includes('bonus') || href.startsWith('/'))) {
+            campaignUrl = href;
+          }
+        } else {
+          // Check button onclick attribute
+          const buttonEl = card.querySelector('button');
+          if (buttonEl) {
+            const onclick = buttonEl.getAttribute('onclick');
+            if (onclick) {
+              // Extract URL from onclick like "window.location.href='/kampanya/...'"
+              const match = onclick.match(/window\.location\.href\s*=\s*['"]([^'"]+)['"]/);
+              if (match && match[1]) {
+                campaignUrl = match[1];
+              }
+            }
+          }
+        }
+
+        if (campaignUrl && seenUrls.includes(campaignUrl)) {
+          return; // skip duplicate
         }
         if (campaignUrl) {
-          seenUrls.add(campaignUrl);
+          seenUrls.push(campaignUrl);
         }
 
-        const imageUrl = await cardEl.$eval(this.selectors.campaignImage, (el: Element) => el.getAttribute('src') ?? el.getAttribute('data-src') ?? null).catch(() => null);
+        const imageEl = card.querySelector('img');
+        const imageUrl = imageEl?.getAttribute('src') ?? imageEl?.getAttribute('data-src') ?? null;
 
-        const startDateText = await cardEl.$eval(this.selectors.startDate, (el: Element) => el.textContent?.trim() ?? null).catch(() => null);
+        const startDateEl = card.querySelector('[class*="start"], [class*="date"]');
+        const startDateText = startDateEl?.textContent?.trim() ?? null;
 
-        const endDateText = await cardEl.$eval(this.selectors.endDate, (el: Element) => el.textContent?.trim() ?? null).catch(() => null);
+        const endDateEl = card.querySelector('[class*="end"], [class*="date"]');
+        const endDateText = endDateEl?.textContent?.trim() ?? null;
 
-        const termsUrl = await cardEl.$eval(this.selectors.termsUrl, (el: Element) => el.getAttribute('href') ?? null).catch(() => null);
+        const termsEl = card.querySelector('a[href*="kosul"], a[href*="sart"], a[href*="terms"]');
+        const termsUrl = termsEl?.getAttribute('href') ?? null;
 
-        const category = await cardEl.$eval(this.selectors.category, (el: Element) => el.textContent?.trim() ?? null).catch(() => null);
+        const categoryEl = card.querySelector('[class*="category"], [class*="type"]');
+        const category = categoryEl?.textContent?.trim() ?? null;
 
-        const badge = await cardEl.$eval(this.selectors.badge, (el: Element) => el.textContent?.trim() ?? null).catch(() => null);
+        const badgeEl = card.querySelector('[class*="badge"], [class*="tag"], [class*="label"]');
+        const badge = badgeEl?.textContent?.trim() ?? null;
 
-        const isFeatured = await cardEl.$(this.selectors.featured).then((el: ElementHandle | null) => el !== null).catch(() => false);
+        const isFeatured = !!(card.querySelector('[class*="featured"], [class*="highlight"]'));
+        const isExclusive = !!(card.querySelector('[class*="exclusive"], [class*="special"]'));
 
-        const isExclusive = await cardEl.$(this.selectors.exclusive).then((el: ElementHandle | null) => el !== null).catch(() => false);
-
-        const card: RawCampaignCard = {
-          siteCode: this.siteCode,
+        results.push({
           rawId,
           title,
           description,
-          bonusAmount: bonusAmountText,
-          bonusPercentage: extractNumericValue(bonusPercentageText),
-          minDeposit: null,
-          maxBonus: null,
-          code: code?.replace(/KOD:|KUPON:?/gi, '').trim() ?? null,
-          url: this.buildCampaignUrl(campaignUrl),
-          imageUrl: normalizeImageUrl(this.baseUrl, imageUrl),
-          startDate: startDateText,
-          endDate: endDateText,
+          bonusAmountText,
+          bonusPercentageText,
+          code,
+          campaignUrl,
+          imageUrl,
+          startDateText,
+          endDateText,
           termsUrl,
           category,
           badge,
           isFeatured,
           isExclusive,
-          rawData: {},
-          scrapedAt: new Date(),
-        };
+        });
+      });
 
-        cards.push(card);
-      } catch (error) {
-        console.error(`Error extracting card: ${error}`);
-      }
+      return results;
+    }, selectorStr);
+
+    for (const data of cardData) {
+      const card: RawCampaignCard = {
+        siteCode: this.siteCode,
+        rawId: data.rawId,
+        title: data.title,
+        description: data.description,
+        bonusAmount: data.bonusAmountText,
+        bonusPercentage: extractNumericValue(data.bonusPercentageText),
+        minDeposit: null,
+        maxBonus: null,
+        code: data.code?.replace(/KOD:|KUPON:?/gi, '').trim() ?? null,
+        url: this.buildCampaignUrl(data.campaignUrl),
+        imageUrl: normalizeImageUrl(this.baseUrl, data.imageUrl),
+        startDate: data.startDateText,
+        endDate: data.endDateText,
+        termsUrl: data.termsUrl,
+        category: data.category,
+        badge: data.badge,
+        isFeatured: data.isFeatured,
+        isExclusive: data.isExclusive,
+        rawData: {},
+        scrapedAt: new Date(),
+      };
+
+      cards.push(card);
     }
 
     const listingUrl = page.url();
@@ -185,9 +229,10 @@ export class EkuriAdapter extends BaseAdapter {
           await page.goto(card.url, { waitUntil: 'networkidle0', timeout: 15000 });
           await new Promise(r => setTimeout(r, 500));
           
-          card.description = await page.evaluate(() => {
-            return document.body?.innerText?.trim() || '';
-          });
+          card.description = await this.extractDetailBody(page);
+          if (card.description) {
+            card.description = this.cleanBodyText(card.description);
+          }
         } catch (err) {
           console.error(`Failed to scrape detail page for ${card.url}:`, err);
         }
@@ -216,35 +261,16 @@ export class EkuriAdapter extends BaseAdapter {
       });
       await new Promise(r => setTimeout(r, 500));
     } catch (e) {
+      // Ignore lazy loading errors
     }
   }
 
-  private async fallbackCardDiscovery(page: Page, seenUrls: Set<string>): Promise<any[]> {
-    const cards: any[] = [];
-    try {
-      const result = await page.evaluate(() => {
-        const links = Array.from(document.querySelectorAll('a[href*="kampanya"], a[href*="bonus"]'));
-        return links.map((link: Element) => {
-          const container = link.closest('[class*="item"], [class*="card"], [class*="campaign"], [class*="widget"], article, section');
-          return container || link;
-        }).filter((el: Element, idx: number, arr: Element[]) => arr.findIndex(e => e === el) === idx);
-      });
-      const campaignLinks = Array.isArray(result) ? result : [];
-
-      for (const cardData of campaignLinks) {
-        const href = cardData.querySelector?.('a')?.getAttribute('href') || cardData.getAttribute?.('href');
-        if (href && !seenUrls.has(href)) {
-          seenUrls.add(href);
-          cards.push(cardData);
-        }
-      }
-    } catch (e) {
-      console.error('Fallback card discovery failed:', e);
+  normalize(card: RawCampaignCard): NormalizedCampaignInput | null {
+    // Safety check: validate title quality
+    if (!isLikelyRealCampaignTitle(card.title)) {
+      return null;
     }
-    return cards;
-  }
 
-  normalize(card: RawCampaignCard): NormalizedCampaignInput {
     const rawFingerprint = buildRawFingerprint({
       siteCode: card.siteCode,
       rawId: card.rawId,

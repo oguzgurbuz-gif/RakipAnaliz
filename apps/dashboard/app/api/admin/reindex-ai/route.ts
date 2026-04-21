@@ -3,6 +3,7 @@ import { z } from 'zod';
 import { query } from '@/lib/db';
 import { createdResponse, errorResponse, handleApiError, getCorsHeaders } from '@/lib/response';
 import { NotFoundError } from '@bitalih/shared/errors';
+import { logRequestAction } from '@/lib/audit';
 
 const reindexSchema = z.object({
   campaignIds: z.array(z.string().uuid()).min(1),
@@ -73,6 +74,20 @@ export async function POST(request: NextRequest) {
       analysisType,
       timestamp: new Date().toISOString(),
     })]);
+
+    await logRequestAction(request, {
+      action: 'ai.reindex',
+      resourceType: 'campaign',
+      resourceId: validCampaigns.length === 1 ? validCampaigns[0].id : null,
+      changes: {
+        analysisType,
+        priority,
+        campaignCount: validCampaigns.length,
+        campaignIds: validCampaigns.map(c => c.id),
+        notFoundIds,
+        jobsCreated,
+      },
+    });
 
     return createdResponse({
       jobsCreated,

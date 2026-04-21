@@ -2,9 +2,10 @@ import { Page, ElementHandle } from 'puppeteer';
 import { BaseAdapter } from './base';
 import { RawCampaignCard, NormalizedCampaignInput } from '../types';
 import { buildFingerprint, buildRawFingerprint } from '../normalizers/fingerprint';
-import { extractNumericValue } from '../normalizers/text';
+import { extractNumericValue, isLikelyRealCampaignTitle } from '../normalizers/text';
 import { normalizeImageUrl } from '../normalizers/image';
 import { extractDatesFromCampaignText } from '../date-extraction/parser';
+import { logger } from '../utils/logger';
 
 export class NesineAdapter extends BaseAdapter {
   private static readonly SITE_CODE = 'nesine';
@@ -78,6 +79,7 @@ export class NesineAdapter extends BaseAdapter {
 
     await this.triggerLazyLoading(page);
 
+    // Use page.evaluate (bitalih pattern) — more reliable than cardEl.evaluate()
     const cardSelectors = [
       '[class*="ns-"]',
       '[class*="campaign"]',
@@ -89,105 +91,114 @@ export class NesineAdapter extends BaseAdapter {
       'article',
     ];
 
-    let cardElements: ElementHandle<Element>[] = [];
-    let fallbackCards: RawCampaignCard[] = [];
-    for (const selector of cardSelectors) {
-      try {
-        cardElements = await page.$$(selector);
-        if (cardElements.length > 0) {
-          console.log(`Nesine: Found ${cardElements.length} cards with selector: ${selector}`);
-          break;
-        }
-      } catch (e) {
-        continue;
-      }
-    }
+    const selectorStr = cardSelectors.join(', ');
+    const cardData = await page.evaluate((selector) => {
+      const results: any[] = [];
+      const cardEls = document.querySelectorAll(selector);
 
-    if (cardElements.length === 0) {
-      fallbackCards = await this.fallbackCardDiscovery(page, seenUrls);
-    } else {
-      for (const cardEl of cardElements) {
-        try {
-          const rawId = await page.evaluate((el) => el.getAttribute('data-id') || el.getAttribute('id') || `nesine-${Date.now()}`, cardEl);
+      cardEls.forEach((card, index) => {
+        // Skip very small elements (likely not real cards)
+        if (card.textContent && card.textContent.trim().length < 30) return;
 
-          const title = await cardEl.$eval(this.selectors.campaignTitle, (el: Element) => el.textContent?.trim() ?? '').catch(() => '');
-
-          const description = await cardEl.$eval(this.selectors.campaignDescription, (el: Element) => el.textContent?.trim() ?? null).catch(() => null);
-
-          const bonusAmountText = await cardEl.$eval(this.selectors.bonusAmount, (el: Element) => el.textContent?.trim() ?? null).catch(() => null);
-
-          const bonusPercentageText = await cardEl.$eval(this.selectors.bonusPercentage, (el: Element) => el.textContent?.trim() ?? null).catch(() => null);
-
-          const minDepositText = await cardEl.$eval(this.selectors.minDeposit, (el: Element) => el.textContent?.trim() ?? null).catch(() => null);
-
-          const code = await cardEl.$eval(this.selectors.code, (el: Element) => el.textContent?.trim() ?? null).catch(() => null);
-
-          const campaignUrl = await cardEl.$eval(this.selectors.campaignUrl, (el: Element) => {
-            const href = el.getAttribute('href');
-            if (href && (href.includes('kampanya') || href.includes('bonus') || href.startsWith('/'))) {
-              return href;
+        // Title extraction with multiple fallback strategies
+        let title = '';
+        const titleEl = card.querySelector('[class*="title"]:not(h1):not(h2):not(h3):not(h4), [class*="ns-title"]');
+        if (titleEl?.textContent?.trim()) {
+          title = titleEl.textContent.trim();
+        } else {
+          const headings = Array.from(card.querySelectorAll('h1, h2, h3, h4'));
+          for (const h of headings) {
+            const text = h.textContent?.trim() ?? '';
+            if (text && !text.match(/^Kampanyalar?$/i) && text.length < 200) {
+              title = text;
+              break;
             }
-            return '';
-          }).catch(() => '');
-
-          if (campaignUrl && seenUrls.has(campaignUrl)) {
-            continue;
           }
-          if (campaignUrl) {
-            seenUrls.add(campaignUrl);
+          if (!title) {
+            const text = card.textContent?.trim() ?? '';
+            title = text.length < 300 ? text : '';
           }
-
-          const imageUrl = await cardEl.$eval(this.selectors.campaignImage, (el: Element) => el.getAttribute('src') ?? el.getAttribute('data-src') ?? null).catch(() => null);
-
-          const startDateText = await cardEl.$eval(this.selectors.startDate, (el: Element) => el.textContent?.trim() ?? null).catch(() => null);
-
-          const endDateText = await cardEl.$eval(this.selectors.endDate, (el: Element) => el.textContent?.trim() ?? null).catch(() => null);
-
-          const termsUrl = await cardEl.$eval(this.selectors.termsUrl, (el: Element) => el.getAttribute('href') ?? null).catch(() => null);
-
-          const category = await cardEl.$eval(this.selectors.category, (el: Element) => el.textContent?.trim() ?? null).catch(() => null);
-
-          const badge = await cardEl.$eval(this.selectors.badge, (el: Element) => el.textContent?.trim() ?? null).catch(() => null);
-
-          const isFeatured = await cardEl.$(this.selectors.featured).then((el: ElementHandle | null) => el !== null).catch(() => false);
-
-          const isExclusive = await cardEl.$(this.selectors.exclusive).then((el: ElementHandle | null) => el !== null).catch(() => false);
-
-          const card: RawCampaignCard = {
-            siteCode: this.siteCode,
-            rawId,
-            title,
-            description,
-            bonusAmount: bonusAmountText,
-            bonusPercentage: extractNumericValue(bonusPercentageText),
-            minDeposit: minDepositText,
-            maxBonus: null,
-            code: code?.replace(/KOD:|KUPON:?/gi, '').trim() ?? null,
-            url: this.buildCampaignUrl(campaignUrl),
-            imageUrl: normalizeImageUrl(this.baseUrl, imageUrl),
-            startDate: startDateText,
-            endDate: endDateText,
-            termsUrl,
-            category,
-            badge,
-            isFeatured,
-            isExclusive,
-            rawData: {},
-            scrapedAt: new Date(),
-          };
-
-          cards.push(card);
-        } catch (error) {
-          console.error(`Error extracting card: ${error}`);
         }
-      }
-    }
 
-    if (fallbackCards.length > 0) {
-      cards.push(...fallbackCards);
-    }
+        // Skip if no meaningful title found
+        if (!title || title.length < 3) return;
+
+        const descEl = card.querySelector('[class*="desc"], [class*="info"], [class*="detail"], p');
+        const amountEl = card.querySelector('[class*="amount"], [class*="value"], [class*="ns-amount"]');
+        const percentEl = card.querySelector('[class*="percent"], [class*="rate"], [class*="ns-rate"]');
+        const minEl = card.querySelector('[class*="min"], [class*="deposit"]');
+        const codeEl = card.querySelector('[class*="code"], [class*="coupon"], [class*="ns-code"]');
+        const imgEl = card.querySelector('img');
+        const linkEl = card.querySelector('a[href]');
+        const startEl = card.querySelector('[class*="start"], [class*="from"]');
+        const endEl = card.querySelector('[class*="end"], [class*="to"]');
+        const termsEl = card.querySelector('a[href*="sartlar"], a[href*="kosul"], a[href*="terms"]');
+        const catEl = card.querySelector('[class*="type"], [class*="category"]');
+        const badgeEl = card.querySelector('[class*="badge"], [class*="tag"], [class*="ns-badge"]');
+        const featuredEl = card.querySelector('[class*="featured"], [class*="highlight"]');
+        const exclusiveEl = card.querySelector('[class*="exclusive"], [class*="special"]');
+
+        let href = linkEl?.getAttribute('href') || '';
+        if (href && (href.includes('kampanya') || href.includes('bonus') || href.startsWith('/'))) {
+          // Valid URL
+        } else {
+          href = '';
+        }
+
+        results.push({
+          rawId: card.getAttribute('data-id') || card.getAttribute('id') || `nesine-${index}-${Date.now()}`,
+          title,
+          description: descEl?.textContent?.trim() || null,
+          bonusAmount: amountEl?.textContent?.trim() || null,
+          bonusPercentage: percentEl?.textContent?.trim() || null,
+          minDeposit: minEl?.textContent?.trim() || null,
+          code: codeEl?.textContent?.replace(/KOD:|KUPON:?/gi, '').trim() || null,
+          campaignUrl: href,
+          imageUrl: imgEl?.getAttribute('src') || imgEl?.getAttribute('data-src') || null,
+          startDate: startEl?.textContent?.trim() || null,
+          endDate: endEl?.textContent?.trim() || null,
+          termsUrl: termsEl?.getAttribute('href') || null,
+          category: catEl?.textContent?.trim() || null,
+          badge: badgeEl?.textContent?.trim() || null,
+          isFeatured: featuredEl !== null,
+          isExclusive: exclusiveEl !== null,
+        });
+      });
+
+      return results;
+    }, selectorStr);
 
     const listingUrl = page.url();
+
+    for (const data of cardData) {
+      if (data.campaignUrl && seenUrls.has(data.campaignUrl)) continue;
+      if (data.campaignUrl) seenUrls.add(data.campaignUrl);
+
+      const card: RawCampaignCard = {
+        siteCode: this.siteCode,
+        rawId: data.rawId,
+        title: data.title,
+        description: data.description,
+        bonusAmount: data.bonusAmount,
+        bonusPercentage: extractNumericValue(data.bonusPercentage),
+        minDeposit: data.minDeposit,
+        maxBonus: null,
+        code: data.code,
+        url: this.buildCampaignUrl(data.campaignUrl),
+        imageUrl: normalizeImageUrl(this.baseUrl, data.imageUrl),
+        startDate: data.startDate,
+        endDate: data.endDate,
+        termsUrl: data.termsUrl,
+        category: data.category,
+        badge: data.badge,
+        isFeatured: data.isFeatured,
+        isExclusive: data.isExclusive,
+        rawData: {},
+        scrapedAt: new Date(),
+      };
+
+      cards.push(card);
+    }
 
     for (const card of cards) {
       if (!card.url || card.url.includes('/bonus-kampanyalari')) {
@@ -293,7 +304,13 @@ export class NesineAdapter extends BaseAdapter {
     return cards;
   }
 
-  normalize(card: RawCampaignCard): NormalizedCampaignInput {
+  normalize(card: RawCampaignCard): NormalizedCampaignInput | null {
+    // Safety check: validate title quality
+    if (!isLikelyRealCampaignTitle(card.title)) {
+      logger.debug(`Skipping card with invalid title: "${card.title.substring(0, 50)}..."`, { siteCode: this.siteCode });
+      return null;
+    }
+
     const bonusAmount = extractNumericValue(card.bonusAmount);
     const bonusPercentage = card.bonusPercentage;
     const minDeposit = extractNumericValue(card.minDeposit);

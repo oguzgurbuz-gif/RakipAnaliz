@@ -6,6 +6,8 @@ import { successResponse, handleApiError, getCorsHeaders } from '@/lib/response'
 const querySchema = z.object({
   page: z.coerce.number().int().positive().default(1),
   pageSize: z.coerce.number().int().positive().max(100).default(10),
+  from: z.string().optional(),
+  to: z.string().optional(),
 });
 
 type WeeklyReportRow = {
@@ -28,19 +30,34 @@ type WeeklyReportRow = {
 export async function GET(request: NextRequest) {
   try {
     const searchParams = Object.fromEntries(new URLSearchParams(request.nextUrl.search));
-    const { page, pageSize } = querySchema.parse(searchParams);
+    const { page, pageSize, from, to } = querySchema.parse(searchParams);
     const offset = (page - 1) * pageSize;
 
-    const countResult = await query<{ total: string }>(`
-      SELECT COUNT(*) as total FROM weekly_reports
-    `);
+    const conditions: string[] = [];
+    const filterValues: unknown[] = [];
+    let placeholderIndex = 1;
+    if (from) {
+      conditions.push(`COALESCE(period_start, report_week_start) >= $${placeholderIndex++}`);
+      filterValues.push(from);
+    }
+    if (to) {
+      conditions.push(`COALESCE(period_end, report_week_end) <= $${placeholderIndex++}`);
+      filterValues.push(to);
+    }
+    const whereClause = conditions.length > 0 ? `WHERE ${conditions.join(' AND ')}` : '';
+
+    const countResult = await query<{ total: string }>(
+      `SELECT COUNT(*) as total FROM weekly_reports ${whereClause}`,
+      filterValues
+    );
     const total = parseInt(countResult[0]?.total || '0', 10);
 
-    const rows = await query<WeeklyReportRow>(`
-      SELECT 
+    const rows = await query<WeeklyReportRow>(
+      `
+      SELECT
         id,
-        report_week_start,
-        report_week_end,
+        COALESCE(report_week_start, period_start) AS report_week_start,
+        COALESCE(report_week_end, period_end) AS report_week_end,
         title,
         executive_summary,
         status,
@@ -53,9 +70,12 @@ export async function GET(request: NextRequest) {
         passive_count,
         created_at
       FROM weekly_reports
-      ORDER BY report_week_start DESC
-      LIMIT $1 OFFSET $2
-    `, [pageSize, offset]);
+      ${whereClause}
+      ORDER BY COALESCE(report_week_start, period_start) DESC
+      LIMIT $${placeholderIndex} OFFSET $${placeholderIndex + 1}
+      `,
+      [...filterValues, pageSize, offset]
+    );
 
     const reports = rows.map((row: WeeklyReportRow) => {
       const startDate = new Date(row.report_week_start);

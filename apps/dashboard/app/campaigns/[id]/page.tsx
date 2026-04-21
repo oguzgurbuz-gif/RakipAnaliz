@@ -3,6 +3,7 @@
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import Image from 'next/image'
 import Link from 'next/link'
+import * as Tabs from '@radix-ui/react-tabs'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
@@ -16,6 +17,8 @@ import { Skeleton } from '@/components/ui/skeleton'
 import { ErrorDisplay } from '@/components/ui/error'
 import { CampaignTable } from '@/components/campaign/campaign-table'
 import { StatusBadge } from '@/components/campaign/status-badge'
+import { VersionDiff } from '@/components/campaign/version-diff'
+import { CompetitorView } from '@/components/campaign/competitor-view'
 import {
   fetchCampaign,
   addCampaignNote,
@@ -23,10 +26,69 @@ import {
 } from '@/lib/api'
 import { extractBodyDateRange, getDateSourceLabel } from '@/lib/campaign-dates'
 import { getCampaignQualitySignals, getCampaignTypeLabel, getDisplaySentimentLabel } from '@/lib/campaign-presentation'
-import type { Campaign } from '@/types'
+import type { Campaign, CampaignVersion } from '@/types'
 import { formatDate, formatDateTime, formatDateRange, getSentimentColor } from '@/lib/utils'
-import { ArrowLeft, Calendar, AlertTriangle, CheckCircle, MessageSquare, Plus, Pencil, X, Save, Flag, Shapes, TimerReset } from 'lucide-react'
+import { ArrowLeft, Calendar, AlertTriangle, CheckCircle, MessageSquare, Plus, Pencil, X, Save, Flag, Shapes, TimerReset, Users, GitCompare } from 'lucide-react'
 import { useState, useEffect } from 'react'
+
+// camp-05: Mock rival campaigns for parallel view
+const MOCK_RIVAL_CAMPAIGNS = [
+  {
+    id: 'rival-1',
+    siteName: 'Betboo',
+    siteCode: 'betboo',
+    title: '%200 Hoş Geldin Bonusu',
+    bonusPercentage: 200,
+    validFrom: '2026-01-01',
+    validTo: '2026-12-31',
+    status: 'active',
+    sentiment: 'positive',
+  },
+  {
+    id: 'rival-2',
+    siteName: 'Tipobet',
+    siteCode: 'tipobet',
+    title: '1000 TL İlk Yatırım Bonusu',
+    bonusAmount: 1000,
+    validFrom: '2026-01-15',
+    validTo: '2026-06-30',
+    status: 'active',
+    sentiment: 'positive',
+  },
+  {
+    id: 'rival-3',
+    siteName: 'Youwin',
+    siteCode: 'youwin',
+    title: '%150 Casino Bonusu',
+    bonusPercentage: 150,
+    validFrom: '2026-02-01',
+    validTo: '2026-08-31',
+    status: 'active',
+    sentiment: 'neutral',
+  },
+  {
+    id: 'rival-4',
+    siteName: 'Superbetin',
+    siteCode: 'superbetin',
+    title: '500 TL Freebet',
+    bonusAmount: 500,
+    validFrom: '2026-03-01',
+    validTo: '2026-05-31',
+    status: 'active',
+    sentiment: 'positive',
+  },
+  {
+    id: 'rival-5',
+    siteName: 'Tempobet',
+    siteCode: 'tempobet',
+    title: '%100 Spor Bonusu',
+    bonusPercentage: 100,
+    validFrom: '2026-01-01',
+    validTo: '2026-04-30',
+    status: 'active',
+    sentiment: 'negative',
+  },
+]
 
 const extractedTagLabels: Record<string, string> = {
   min_deposit: 'Min Yatirim',
@@ -308,326 +370,395 @@ export default function CampaignDetailPage({ params }: { params: { id: string } 
               <InsightCard icon={AlertTriangle} title="Kalite Sinyali" value={qualitySignals.length} description={qualitySignals.length > 0 ? qualitySignals.map((signal) => signal.label).join(', ') : 'Önemli uyarı yok'} tone={qualitySignals.length > 0 ? 'warning' : 'positive'} />
             </div>
 
-            {(aiSummary || aiKeyPoints.length > 0 || aiRiskFlags.length > 0) && (
-              <Card>
-                <CardHeader>
-                  <SectionHeader title="Overview" description="AI özeti, ana noktalar ve risk sinyalleri." />
-                </CardHeader>
-                <CardContent className="space-y-4">
-                  {aiSummary && (
-                    <div>
-                      <h4 className="font-medium mb-2">Özet</h4>
-                      <p className="text-sm text-muted-foreground">{aiSummary}</p>
-                    </div>
+            {/* camp-05 & camp-06: Tabs for Rakipler and Degisiklikler - always show tabs */}
+            <Tabs.Root defaultValue="overview" className="w-full">
+              <Tabs.List className="flex border-b mb-6">
+                <Tabs.Trigger value="overview" className="px-4 py-2 text-sm font-medium text-muted-foreground hover:text-foreground data-[state=active]:text-foreground data-[state=active]:border-b-2 data-[state=active]:border-primary">
+                  Genel Bakış
+                </Tabs.Trigger>
+                <Tabs.Trigger value="rivals" className="px-4 py-2 text-sm font-medium text-muted-foreground hover:text-foreground data-[state=active]:text-foreground data-[state=active]:border-b-2 data-[state=active]:border-primary flex items-center gap-2">
+                  <Users className="h-4 w-4" />
+                  Rakipler
+                </Tabs.Trigger>
+                <Tabs.Trigger value="changes" className="px-4 py-2 text-sm font-medium text-muted-foreground hover:text-foreground data-[state=active]:text-foreground data-[state=active]:border-b-2 data-[state=active]:border-primary flex items-center gap-2">
+                  <GitCompare className="h-4 w-4" />
+                  Değişiklikler
+                  {campaign.versions && campaign.versions.length > 0 && (
+                    <Badge variant="outline" className="ml-1 h-5 px-1.5">{campaign.versions.length}</Badge>
                   )}
+                </Tabs.Trigger>
+              </Tabs.List>
 
-                  {aiKeyPoints.length > 0 && (
-                    <div>
-                      <h4 className="font-medium mb-2">Ana Noktalar</h4>
-                      <ul className="list-disc list-inside space-y-1">
-                        {aiKeyPoints.map((point: string, index: number) => (
-                          <li key={index} className="text-sm">{point}</li>
-                        ))}
-                      </ul>
-                    </div>
-                  )}
-
-                  {aiRiskFlags.length > 0 && (
-                    <div>
-                      <h4 className="font-medium mb-2 flex items-center gap-2 text-destructive">
-                        <AlertTriangle className="h-4 w-4" />
-                        Risk Bayrakları
-                      </h4>
-                      <ul className="list-disc list-inside space-y-1">
-                        {aiRiskFlags.map((flag: string, index: number) => (
-                          <li key={index} className="text-sm text-destructive">{flag}</li>
-                        ))}
-                      </ul>
-                    </div>
-                  )}
-                </CardContent>
-              </Card>
-            )}
-
-            {hasExtractedDetails && (
-              <Card>
-                <CardHeader>
-                  <SectionHeader title="Campaign Details" description="Bonus, limit ve kampanya mekaniklerinin normalize özeti." />
-                </CardHeader>
-                <CardContent>
-                  <div className="grid grid-cols-2 gap-4">
-                    {Object.entries(extractedTagLabels).map(([key, label]) => {
-                      const formatted = formatDetailValue(extractedTags[key])
-                      if (!formatted) return null
-
-                      const suffix = ['min_deposit', 'min_bet', 'max_bet', 'max_bonus', 'bonus_amount', 'free_bet_amount', 'freebet_amount'].includes(key) ? ' TL' : ''
-                      const prefix = ['bonus_percentage', 'cashback_percent'].includes(key) ? '%' : ''
-
-                      return (
-                        <div key={key}>
-                          <label className="text-sm font-medium text-muted-foreground">{label}</label>
-                          <p className="mt-1">{prefix}{formatted}{suffix}</p>
-                        </div>
-                      )
-                    })}
-                    {Object.entries(arrayFieldLabels).map(([key, label]) => {
-                      const formatted = formatDetailValue(extractedTags[key])
-                      if (!formatted) return null
-
-                      return (
-                        <div key={key} className="col-span-2">
-                          <label className="text-sm font-medium text-muted-foreground">{label}</label>
-                          <p className="mt-1">{formatted}</p>
-                        </div>
-                      )
-                    })}
-                  </div>
-                </CardContent>
-              </Card>
-            )}
-
-            {aiCampaignType && (
-              <Card>
-                <CardHeader>
-                  <SectionHeader title="Type Classification" description="AI sınıflandırmasının kampanya tipi kararı." />
-                </CardHeader>
-                <CardContent>
-                  <div className="flex items-center gap-2">
-                    <Badge className="text-sm">
-                      {aiCampaignType}
-                    </Badge>
-                    {aiTypeConfidence !== null && (
-                      <span className="text-xs text-muted-foreground">
-                        Güven: {(aiTypeConfidence * 100).toFixed(0)}%
-                      </span>
-                    )}
-                  </div>
-                  {aiTypeReasoning && (
-                    <p className="text-sm text-muted-foreground mt-2">
-                      {aiTypeReasoning}
-                    </p>
-                  )}
-                </CardContent>
-              </Card>
-            )}
-
-            {hasConditionDetails && (
-              <Card>
-                <CardHeader>
-                  <SectionHeader title="Participation Conditions" description="Kampanyaya dahil olma ve kullanım şartları." />
-                </CardHeader>
-                <CardContent>
-                  <ul className="space-y-2 text-sm">
-                    {requiredActions.length > 0 && (
-                      <li className="flex items-start gap-2">
-                        <span className="font-medium shrink-0">Yapılması gereken:</span>
-                        <span>{requiredActions.join(', ')}</span>
-                      </li>
-                    )}
-                    {membershipRequirements.length > 0 && (
-                      <li className="flex items-start gap-2">
-                        <span className="font-medium shrink-0">Üyelik:</span>
-                        <span>{membershipRequirements.join(', ')}</span>
-                      </li>
-                    )}
-                    {eligibleProducts.length > 0 && (
-                      <li className="flex items-start gap-2">
-                        <span className="font-medium shrink-0">Geçerli ürünler:</span>
-                        <span>{eligibleProducts.join(', ')}</span>
-                      </li>
-                    )}
-                    {depositMethods.length > 0 && (
-                      <li className="flex items-start gap-2">
-                        <span className="font-medium shrink-0">Yatırım yöntemi:</span>
-                        <span>{depositMethods.join(', ')}</span>
-                      </li>
-                    )}
-                    {targetSegment.length > 0 && (
-                      <li className="flex items-start gap-2">
-                        <span className="font-medium shrink-0">Hedef kitle:</span>
-                        <span>{targetSegment.join(', ')}</span>
-                      </li>
-                    )}
-                    {excludedGames.length > 0 && (
-                      <li className="flex items-start gap-2">
-                        <span className="font-medium shrink-0">Hariç olanlar:</span>
-                        <span>{excludedGames.join(', ')}</span>
-                      </li>
-                    )}
-                    {promoCode && (
-                      <li className="flex items-start gap-2">
-                        <span className="font-medium shrink-0">Kod:</span>
-                        <span>{promoCode}</span>
-                      </li>
-                    )}
-                    {maxUsesPerUser && (
-                      <li className="flex items-start gap-2">
-                        <span className="font-medium shrink-0">Kullanım limiti:</span>
-                        <span>{maxUsesPerUser}</span>
-                      </li>
-                    )}
-                    {timeRestrictions && (
-                      <li className="flex items-start gap-2">
-                        <span className="font-medium shrink-0">Zaman:</span>
-                        <span>{timeRestrictions}</span>
-                      </li>
-                    )}
-                  </ul>
-                </CardContent>
-              </Card>
-            )}
-
-            <Card>
-              <CardHeader>
-                <SectionHeader title="Dates" description="Kampanyanın başlangıç, bitiş ve görünürlük bilgileri." />
-              </CardHeader>
-              <CardContent className="space-y-4">
-                <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
-                  <div>
-                    <label className="text-sm font-medium text-muted-foreground">Başlangıç Tarihi</label>
-                    {isEditing ? (
-                      <Input
-                        type="date"
-                        value={editedValidFrom}
-                        onChange={(e) => setEditedValidFrom(e.target.value)}
-                        className="mt-1"
-                      />
-                    ) : (
-                      <>
-                        <p className="mt-1 font-medium">{startDateDisplay || 'Belirlenemedi'}</p>
-                        <p className="text-xs text-muted-foreground mt-1">Kaynak: {startDateSource}</p>
-                        {campaign.validFromConfidence !== null && campaign.validFromConfidence !== undefined && (
-                          <p className="text-xs text-muted-foreground">
-                            Güven: {(campaign.validFromConfidence * 100).toFixed(0)}%
-                          </p>
-                        )}
-                      </>
-                    )}
-                  </div>
-                  <div>
-                    <label className="text-sm font-medium text-muted-foreground">Bitiş Tarihi</label>
-                    {isEditing ? (
-                      <Input
-                        type="date"
-                        value={editedValidTo}
-                        onChange={(e) => setEditedValidTo(e.target.value)}
-                        className="mt-1"
-                      />
-                    ) : (
-                      <>
-                        <p className="mt-1 font-medium">{endDateDisplay || 'Belirlenemedi'}</p>
-                        <p className="text-xs text-muted-foreground mt-1">Kaynak: {endDateSource}</p>
-                        {campaign.validToConfidence !== null && campaign.validToConfidence !== undefined && (
-                          <p className="text-xs text-muted-foreground">
-                            Güven: {(campaign.validToConfidence * 100).toFixed(0)}%
-                          </p>
-                        )}
-                      </>
-                    )}
-                  </div>
-                  <div>
-                    <label className="text-sm font-medium text-muted-foreground">İlk Görülme</label>
-                    <p className="mt-1">{formatDateTime(campaign.firstSeen)}</p>
-                  </div>
-                  <div>
-                    <label className="text-sm font-medium text-muted-foreground">Son Görülme</label>
-                    <p className="mt-1">{formatDateTime(campaign.lastSeen)}</p>
-                  </div>
-                </div>
-                {!isEditing && (
-                  <div className="rounded-lg border bg-muted/30 px-3 py-2 text-sm text-muted-foreground">
-                    <Calendar className="inline h-4 w-4 mr-1" />
-                    Geçerlilik Aralığı: {startDateDisplay || 'Belirsiz'} - {endDateDisplay || 'Belirsiz'}
-                  </div>
-                )}
-              </CardContent>
-            </Card>
-
-            {campaign.primaryImage && (
-              <Card className="overflow-hidden">
-                <CardContent className="p-0">
-                  <img
-                    src={campaign.primaryImage}
-                    alt={campaign.title}
-                    className="w-full h-64 md:h-80 lg:h-96 object-cover"
-                  />
-                </CardContent>
-              </Card>
-            )}
-
-            {campaign.body && (
-              <Card>
-                <CardHeader>
-                  <SectionHeader title="Raw Description" description="Scrape edilen açıklama, gürültü azaltılmış görünümle listelenir." />
-                </CardHeader>
-                <CardContent className="space-y-4">
-                  {isEditing ? (
-                    <Textarea
-                      value={editedBody}
-                      onChange={(e) => setEditedBody(e.target.value)}
-                      className="min-h-[220px]"
-                    />
-                  ) : (
-                    <>
-                      {organizedDescriptionSummary.length > 0 && (
-                        <div className="grid gap-3">
-                          {organizedDescriptionSummary.map((line, index) => (
-                            <div key={`${index}-${line}`} className="rounded-lg border bg-muted/20 px-4 py-3">
-                              <p className="text-sm leading-relaxed">{line}</p>
-                            </div>
-                          ))}
+              <Tabs.Content value="overview" className="space-y-6">
+                {/* AI Overview Card */}
+                {(aiSummary || aiKeyPoints.length > 0 || aiRiskFlags.length > 0) && (
+                  <Card>
+                    <CardHeader>
+                      <SectionHeader title="Overview" description="AI özeti, ana noktalar ve risk sinyalleri." />
+                    </CardHeader>
+                    <CardContent className="space-y-4">
+                      {aiSummary && (
+                        <div>
+                          <h4 className="font-medium mb-2">Özet</h4>
+                          <p className="text-sm text-muted-foreground">{aiSummary}</p>
                         </div>
                       )}
-                      {organizedDescriptionRest.length > 0 && (
+
+                      {aiKeyPoints.length > 0 && (
                         <div>
-                          <h4 className="mb-2 text-sm font-medium text-muted-foreground">Diğer Detaylar</h4>
-                          <ul className="space-y-2">
-                            {organizedDescriptionRest.map((line, index) => (
-                              <li key={`${index}-${line}`} className="rounded-md border px-3 py-2 text-sm leading-relaxed">
-                                {line}
-                              </li>
+                          <h4 className="font-medium mb-2">Ana Noktalar</h4>
+                          <ul className="list-disc list-inside space-y-1">
+                            {aiKeyPoints.map((point: string, index: number) => (
+                              <li key={index} className="text-sm">{point}</li>
                             ))}
                           </ul>
                         </div>
                       )}
-                    </>
-                  )}
-                </CardContent>
-              </Card>
-            )}
 
-            {isEditing && (
-              <div className="flex justify-end gap-2">
-                <Button
-                  variant="outline"
-                  onClick={() => {
-                    setIsEditing(false)
-                    if (campaign) {
-                      setEditedValidFrom(campaign.validFrom ? campaign.validFrom.split('T')[0] : '')
-                      setEditedValidTo(campaign.validTo ? campaign.validTo.split('T')[0] : '')
-                      setEditedBody(campaign.body || '')
-                    }
-                  }}
-                >
-                  <X className="h-4 w-4 mr-1" />
-                  İptal
-                </Button>
-                <Button
-                  onClick={() => {
-                    updateMutation.mutate({
-                      validFrom: editedValidFrom || null,
-                      validTo: editedValidTo || null,
-                      body: editedBody,
-                    })
-                  }}
-                  disabled={updateMutation.isPending}
-                >
-                  <Save className="h-4 w-4 mr-1" />
-                  {updateMutation.isPending ? 'Kaydediliyor...' : 'Kaydet'}
-                </Button>
-              </div>
-            )}
+                      {aiRiskFlags.length > 0 && (
+                        <div>
+                          <h4 className="font-medium mb-2 flex items-center gap-2 text-destructive">
+                            <AlertTriangle className="h-4 w-4" />
+                            Risk Bayrakları
+                          </h4>
+                          <ul className="list-disc list-inside space-y-1">
+                            {aiRiskFlags.map((flag: string, index: number) => (
+                              <li key={index} className="text-sm text-destructive">{flag}</li>
+                            ))}
+                          </ul>
+                        </div>
+                      )}
+                    </CardContent>
+                  </Card>
+                )}
 
+                {/* Campaign Details Card */}
+                {hasExtractedDetails && (
+                  <Card>
+                    <CardHeader>
+                      <SectionHeader title="Campaign Details" description="Bonus, limit ve kampanya mekaniklerinin normalize özeti." />
+                    </CardHeader>
+                    <CardContent>
+                      <div className="grid grid-cols-2 gap-4">
+                        {Object.entries(extractedTagLabels).map(([key, label]) => {
+                          const formatted = formatDetailValue(extractedTags[key])
+                          if (!formatted) return null
+
+                          const suffix = ['min_deposit', 'min_bet', 'max_bet', 'max_bonus', 'bonus_amount', 'free_bet_amount', 'freebet_amount'].includes(key) ? ' TL' : ''
+                          const prefix = ['bonus_percentage', 'cashback_percent'].includes(key) ? '%' : ''
+
+                          return (
+                            <div key={key}>
+                              <label className="text-sm font-medium text-muted-foreground">{label}</label>
+                              <p className="mt-1">{prefix}{formatted}{suffix}</p>
+                            </div>
+                          )
+                        })}
+                        {Object.entries(arrayFieldLabels).map(([key, label]) => {
+                          const formatted = formatDetailValue(extractedTags[key])
+                          if (!formatted) return null
+
+                          return (
+                            <div key={key} className="col-span-2">
+                              <label className="text-sm font-medium text-muted-foreground">{label}</label>
+                              <p className="mt-1">{formatted}</p>
+                            </div>
+                          )
+                        })}
+                      </div>
+                    </CardContent>
+                  </Card>
+                )}
+
+                {/* Type Classification Card */}
+                {aiCampaignType && (
+                  <Card>
+                    <CardHeader>
+                      <SectionHeader title="Type Classification" description="AI sınıflandırmasının kampanya tipi kararı." />
+                    </CardHeader>
+                    <CardContent>
+                      <div className="flex items-center gap-2">
+                        <Badge className="text-sm">
+                          {aiCampaignType}
+                        </Badge>
+                        {aiTypeConfidence !== null && (
+                          <span className="text-xs text-muted-foreground">
+                            Güven: {(aiTypeConfidence * 100).toFixed(0)}%
+                          </span>
+                        )}
+                      </div>
+                      {aiTypeReasoning && (
+                        <p className="text-sm text-muted-foreground mt-2">
+                          {aiTypeReasoning}
+                        </p>
+                      )}
+                    </CardContent>
+                  </Card>
+                )}
+
+                {/* Participation Conditions Card */}
+                {hasConditionDetails && (
+                  <Card>
+                    <CardHeader>
+                      <SectionHeader title="Participation Conditions" description="Kampanyaya dahil olma ve kullanım şartları." />
+                    </CardHeader>
+                    <CardContent>
+                      <ul className="space-y-2 text-sm">
+                        {requiredActions.length > 0 && (
+                          <li className="flex items-start gap-2">
+                            <span className="font-medium shrink-0">Yapılması gereken:</span>
+                            <span>{requiredActions.join(', ')}</span>
+                          </li>
+                        )}
+                        {membershipRequirements.length > 0 && (
+                          <li className="flex items-start gap-2">
+                            <span className="font-medium shrink-0">Üyelik:</span>
+                            <span>{membershipRequirements.join(', ')}</span>
+                          </li>
+                        )}
+                        {eligibleProducts.length > 0 && (
+                          <li className="flex items-start gap-2">
+                            <span className="font-medium shrink-0">Geçerli ürünler:</span>
+                            <span>{eligibleProducts.join(', ')}</span>
+                          </li>
+                        )}
+                        {depositMethods.length > 0 && (
+                          <li className="flex items-start gap-2">
+                            <span className="font-medium shrink-0">Yatırım yöntemi:</span>
+                            <span>{depositMethods.join(', ')}</span>
+                          </li>
+                        )}
+                        {targetSegment.length > 0 && (
+                          <li className="flex items-start gap-2">
+                            <span className="font-medium shrink-0">Hedef kitle:</span>
+                            <span>{targetSegment.join(', ')}</span>
+                          </li>
+                        )}
+                        {excludedGames.length > 0 && (
+                          <li className="flex items-start gap-2">
+                            <span className="font-medium shrink-0">Hariç olanlar:</span>
+                            <span>{excludedGames.join(', ')}</span>
+                          </li>
+                        )}
+                        {promoCode && (
+                          <li className="flex items-start gap-2">
+                            <span className="font-medium shrink-0">Kod:</span>
+                            <span>{promoCode}</span>
+                          </li>
+                        )}
+                        {maxUsesPerUser && (
+                          <li className="flex items-start gap-2">
+                            <span className="font-medium shrink-0">Kullanım limiti:</span>
+                            <span>{maxUsesPerUser}</span>
+                          </li>
+                        )}
+                        {timeRestrictions && (
+                          <li className="flex items-start gap-2">
+                            <span className="font-medium shrink-0">Zaman:</span>
+                            <span>{timeRestrictions}</span>
+                          </li>
+                        )}
+                      </ul>
+                    </CardContent>
+                  </Card>
+                )}
+
+                {/* Dates Card */}
+                <Card>
+                  <CardHeader>
+                    <SectionHeader title="Dates" description="Kampanyanın başlangıç, bitiş ve görünürlük bilgileri." />
+                  </CardHeader>
+                  <CardContent className="space-y-4">
+                    <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
+                      <div>
+                        <label className="text-sm font-medium text-muted-foreground">Başlangıç Tarihi</label>
+                        {isEditing ? (
+                          <Input
+                            type="date"
+                            value={editedValidFrom}
+                            onChange={(e) => setEditedValidFrom(e.target.value)}
+                            className="mt-1"
+                          />
+                        ) : (
+                          <>
+                            <p className="mt-1 font-medium">{startDateDisplay || 'Belirlenemedi'}</p>
+                            <p className="text-xs text-muted-foreground mt-1">Kaynak: {startDateSource}</p>
+                            {campaign.validFromConfidence !== null && campaign.validFromConfidence !== undefined && (
+                              <p className="text-xs text-muted-foreground">
+                                Güven: {(campaign.validFromConfidence * 100).toFixed(0)}%
+                              </p>
+                            )}
+                          </>
+                        )}
+                      </div>
+                      <div>
+                        <label className="text-sm font-medium text-muted-foreground">Bitiş Tarihi</label>
+                        {isEditing ? (
+                          <Input
+                            type="date"
+                            value={editedValidTo}
+                            onChange={(e) => setEditedValidTo(e.target.value)}
+                            className="mt-1"
+                          />
+                        ) : (
+                          <>
+                            <p className="mt-1 font-medium">{endDateDisplay || 'Belirlenemedi'}</p>
+                            <p className="text-xs text-muted-foreground mt-1">Kaynak: {endDateSource}</p>
+                            {campaign.validToConfidence !== null && campaign.validToConfidence !== undefined && (
+                              <p className="text-xs text-muted-foreground">
+                                Güven: {(campaign.validToConfidence * 100).toFixed(0)}%
+                              </p>
+                            )}
+                          </>
+                        )}
+                      </div>
+                      <div>
+                        <label className="text-sm font-medium text-muted-foreground">İlk Görülme</label>
+                        <p className="mt-1">{formatDateTime(campaign.firstSeen)}</p>
+                      </div>
+                      <div>
+                        <label className="text-sm font-medium text-muted-foreground">Son Görülme</label>
+                        <p className="mt-1">{formatDateTime(campaign.lastSeen)}</p>
+                      </div>
+                    </div>
+                    {!isEditing && (
+                      <div className="rounded-lg border bg-muted/30 px-3 py-2 text-sm text-muted-foreground">
+                        <Calendar className="inline h-4 w-4 mr-1" />
+                        Geçerlilik Aralığı: {startDateDisplay || 'Belirsiz'} - {endDateDisplay || 'Belirsiz'}
+                      </div>
+                    )}
+                  </CardContent>
+                </Card>
+
+                {/* Primary Image Card */}
+                {campaign.primaryImage && (
+                  <Card className="overflow-hidden">
+                    <CardContent className="p-0">
+                      <img
+                        src={campaign.primaryImage}
+                        alt={campaign.title}
+                        className="w-full h-64 md:h-80 lg:h-96 object-cover"
+                      />
+                    </CardContent>
+                  </Card>
+                )}
+
+                {/* Raw Description Card */}
+                {campaign.body && (
+                  <Card>
+                    <CardHeader>
+                      <SectionHeader title="Raw Description" description="Scrape edilen açıklama, gürültü azaltılmış görünümle listelenir." />
+                    </CardHeader>
+                    <CardContent className="space-y-4">
+                      {isEditing ? (
+                        <Textarea
+                          value={editedBody}
+                          onChange={(e) => setEditedBody(e.target.value)}
+                          className="min-h-[220px]"
+                        />
+                      ) : (
+                        <>
+                          {organizedDescriptionSummary.length > 0 && (
+                            <div className="grid gap-3">
+                              {organizedDescriptionSummary.map((line, index) => (
+                                <div key={`${index}-${line}`} className="rounded-lg border bg-muted/20 px-4 py-3">
+                                  <p className="text-sm leading-relaxed">{line}</p>
+                                </div>
+                              ))}
+                            </div>
+                          )}
+                          {organizedDescriptionRest.length > 0 && (
+                            <div>
+                              <h4 className="mb-2 text-sm font-medium text-muted-foreground">Diğer Detaylar</h4>
+                              <ul className="space-y-2">
+                                {organizedDescriptionRest.map((line, index) => (
+                                  <li key={`${index}-${line}`} className="rounded-md border px-3 py-2 text-sm leading-relaxed">
+                                    {line}
+                                  </li>
+                                ))}
+                              </ul>
+                            </div>
+                          )}
+                        </>
+                      )}
+                    </CardContent>
+                  </Card>
+                )}
+
+                {/* Edit buttons */}
+                {isEditing && (
+                  <div className="flex justify-end gap-2">
+                    <Button
+                      variant="outline"
+                      onClick={() => {
+                        setIsEditing(false)
+                        if (campaign) {
+                          setEditedValidFrom(campaign.validFrom ? campaign.validFrom.split('T')[0] : '')
+                          setEditedValidTo(campaign.validTo ? campaign.validTo.split('T')[0] : '')
+                          setEditedBody(campaign.body || '')
+                        }
+                      }}
+                    >
+                      <X className="h-4 w-4 mr-1" />
+                      İptal
+                    </Button>
+                    <Button
+                      onClick={() => {
+                        updateMutation.mutate({
+                          validFrom: editedValidFrom || null,
+                          validTo: editedValidTo || null,
+                          body: editedBody,
+                        })
+                      }}
+                      disabled={updateMutation.isPending}
+                    >
+                      <Save className="h-4 w-4 mr-1" />
+                      {updateMutation.isPending ? 'Kaydediliyor...' : 'Kaydet'}
+                    </Button>
+                  </div>
+                )}
+              </Tabs.Content>
+
+              <Tabs.Content value="rivals">
+                <CompetitorView
+                  rivalCampaigns={MOCK_RIVAL_CAMPAIGNS}
+                  yourCampaign={{
+                    title: campaign.title,
+                    bonusAmount: (campaign.metadata as any)?.ai_analysis?.extractedTags?.bonus_amount as number || undefined,
+                    bonusPercentage: (campaign.metadata as any)?.ai_analysis?.extractedTags?.bonus_percentage as number || undefined,
+                    siteName: campaign.site?.name || 'Bu Site',
+                    status: campaign.status,
+                  }}
+                />
+              </Tabs.Content>
+
+              <Tabs.Content value="changes">
+                {campaign.versions && campaign.versions.length > 0 ? (
+                  <VersionDiff
+                    versions={campaign.versions}
+                    currentData={{
+                      title: campaign.title,
+                      body: campaign.body,
+                      status: campaign.status,
+                      validFrom: campaign.validFrom,
+                      validTo: campaign.validTo,
+                      category: campaign.category,
+                      sentiment: campaign.sentiment,
+                    }}
+                  />
+                ) : (
+                  <Card>
+                    <CardContent className="py-8 text-center text-muted-foreground">
+                      <GitCompare className="h-12 w-12 mx-auto mb-4 opacity-20" />
+                      <p>Bu kampanya için versiyon geçmişi bulunmuyor.</p>
+                      <p className="text-sm mt-1">Versiyon takibi etkinleştirildiğinde burada görünecek.</p>
+                    </CardContent>
+                  </Card>
+                )}
+              </Tabs.Content>
+            </Tabs.Root>
+
+            {/* Status History, Notes, and Similar Campaigns - outside tabs, always visible */}
             <div className="grid gap-6 lg:grid-cols-3">
               <div className="lg:col-span-2 space-y-6">
                 {campaign.statusHistory && campaign.statusHistory.length > 0 && (

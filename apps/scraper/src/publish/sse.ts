@@ -78,7 +78,7 @@ export interface ScrapeEvent {
 }
 
 export interface CampaignEvent {
-  type: 'campaign:created' | 'campaign:updated' | 'campaign:expired' | 'campaign:hidden';
+  type: 'campaign:created' | 'campaign:updated' | 'campaign:expired' | 'campaign:hidden' | 'campaign:ai-analyzed';
   campaignId: string;
   fingerprint: string;
   data: Campaign | null;

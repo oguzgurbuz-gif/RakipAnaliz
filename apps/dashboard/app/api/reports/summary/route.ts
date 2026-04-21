@@ -4,9 +4,15 @@ import { query } from '@/lib/db';
 import { successResponse, getCorsHeaders } from '@/lib/response';
 import { getCategoryLabel, isGenericCategory } from '@/lib/category-labels';
 
+// Accept both `from`/`to` (canonical, matches campaigns/audit/etc) and the
+// legacy `dateFrom`/`dateTo` aliases that lib/api.ts#fetchReportSummary still
+// emits. Without the alias the API silently fell back to its default last-7d
+// window even when the UI requested a real range — see audit notes.
 const querySchema = z.object({
   from: z.string().optional(),
   to: z.string().optional(),
+  dateFrom: z.string().optional(),
+  dateTo: z.string().optional(),
 });
 
 type SummaryRow = {
@@ -24,10 +30,18 @@ type SummaryRow = {
 export async function GET(request: NextRequest) {
   try {
     const searchParams = Object.fromEntries(new URLSearchParams(request.nextUrl.search));
-    const { from, to } = querySchema.parse(searchParams);
+    const parsed = querySchema.parse(searchParams);
+    // Canonical from/to wins when both forms are present.
+    const from = parsed.from ?? parsed.dateFrom;
+    const to = parsed.to ?? parsed.dateTo;
 
     const dateFrom = from ? new Date(from) : new Date(Date.now() - 7 * 24 * 60 * 60 * 1000);
     const dateTo = to ? new Date(to) : new Date();
+
+    // Previous period dates (same duration before dateFrom)
+    const periodDuration = dateTo.getTime() - dateFrom.getTime();
+    const prevDateTo = new Date(dateFrom.getTime() - 1); // 1ms before to keep same duration
+    const prevDateFrom = new Date(prevDateTo.getTime() - periodDuration);
 
     const statusCounts = await query<{
       started_count: string;
@@ -49,6 +63,27 @@ export async function GET(request: NextRequest) {
          OR (updated_at >= $1 AND updated_at <= $2)
          OR (valid_from IS NULL AND created_at >= $1 AND created_at <= $2)
     `, [dateFrom, dateTo]);
+
+    const prevStatusCounts = await query<{
+      started_count: string;
+      ended_count: string;
+      active_count: string;
+      passive_count: string;
+      changed_count: string;
+    }>(`
+      SELECT 
+        COUNT(CASE WHEN status = 'active' AND (valid_from >= $1 AND valid_from <= $2 OR (valid_from IS NULL AND created_at >= $1 AND created_at <= $2)) THEN 1 END) as started_count,
+        COUNT(CASE WHEN status = 'active' AND valid_to >= $1 AND valid_to <= $2 THEN 1 END) as ended_count,
+        COUNT(CASE WHEN status = 'active' AND (valid_from <= $2 AND (valid_to IS NULL OR valid_to >= $1) OR (valid_from IS NULL AND created_at <= $2)) THEN 1 END) as active_count,
+        COUNT(CASE WHEN status = 'pending' OR status = 'hidden' THEN 1 END) as passive_count,
+        COUNT(CASE WHEN status = 'updated' AND updated_at >= $1 AND updated_at <= $2 THEN 1 END) as changed_count
+      FROM campaigns
+      WHERE (valid_from >= $1 AND valid_from <= $2)
+         OR (valid_to >= $1 AND valid_to <= $2)
+         OR (valid_from <= $2 AND (valid_to IS NULL OR valid_to >= $1))
+         OR (updated_at >= $1 AND updated_at <= $2)
+         OR (valid_from IS NULL AND created_at >= $1 AND created_at <= $2)
+    `, [prevDateFrom, prevDateTo]);
 
     const topCategoriesRaw = await query<{ category: string; count: string }>(`
       SELECT 
@@ -94,6 +129,26 @@ export async function GET(request: NextRequest) {
       changed_count: '0',
     };
 
+    const prevCounts = prevStatusCounts[0] || {
+      started_count: '0',
+      ended_count: '0',
+      active_count: '0',
+      passive_count: '0',
+      changed_count: '0',
+    };
+
+    // Helper to calculate delta with percentage
+    const calcDelta = (current: number, prev: number) => {
+      const diff = current - prev;
+      const pct = prev > 0 ? Math.round((diff / prev) * 100) : current > 0 ? 100 : 0;
+      return { diff, pct, direction: diff > 0 ? 'up' : diff < 0 ? 'down' : 'neutral' as const };
+    };
+
+    const activeDelta = calcDelta(parseInt(counts.active_count || '0', 10), parseInt(prevCounts.active_count || '0', 10));
+    const startedDelta = calcDelta(parseInt(counts.started_count || '0', 10), parseInt(prevCounts.started_count || '0', 10));
+    const endedDelta = calcDelta(parseInt(counts.ended_count || '0', 10), parseInt(prevCounts.ended_count || '0', 10));
+    const changedDelta = calcDelta(parseInt(counts.changed_count || '0', 10), parseInt(prevCounts.changed_count || '0', 10));
+
     const parsedTopCategories = topCategoriesRaw.map((c) => ({
       category: c.category,
       label: getCategoryLabel(c.category),
@@ -112,6 +167,16 @@ export async function GET(request: NextRequest) {
       activeCount: parseInt(counts.active_count || '0', 10),
       passiveCount: parseInt(counts.passive_count || '0', 10),
       changedCount: parseInt(counts.changed_count || '0', 10),
+      // Period comparison deltas (vs previous period of same length)
+      deltas: {
+        active: activeDelta,
+        started: startedDelta,
+        ended: endedDelta,
+        changed: changedDelta,
+      },
+      // Previous period dates for reference
+      prevPeriodFrom: prevDateFrom.toISOString(),
+      prevPeriodTo: prevDateTo.toISOString(),
       topCategories: visibleTopCategories.map((c) => ({
         category: c.category,
         label: c.label,
@@ -135,6 +200,14 @@ export async function GET(request: NextRequest) {
       activeCount: 0,
       passiveCount: 0,
       changedCount: 0,
+      deltas: {
+        active: { diff: 0, pct: 0, direction: 'neutral' },
+        started: { diff: 0, pct: 0, direction: 'neutral' },
+        ended: { diff: 0, pct: 0, direction: 'neutral' },
+        changed: { diff: 0, pct: 0, direction: 'neutral' },
+      },
+      prevPeriodFrom: new Date(0).toISOString(),
+      prevPeriodTo: new Date(0).toISOString(),
       topCategories: [],
       topSites: [],
       fallback: true,

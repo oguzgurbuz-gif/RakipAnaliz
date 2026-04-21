@@ -22,9 +22,14 @@ const DATE_MODE_OPTIONS = [
   { value: 'seen_in_range', label: 'Görülme tarihi' },
 ]
 
+// Backend (scraper) writes status values from the set
+// {'active', 'expired', 'hidden', 'passive', 'changed'}. The legacy filter
+// only exposed the 'ended' / 'passive' aliases, which never matched any row
+// after the bulk recalc job started writing 'expired' / 'hidden'.
 const STATUS_OPTIONS = [
   { value: 'active', label: 'Aktif' },
-  { value: 'ended', label: 'Bitmiş' },
+  { value: 'expired', label: 'Bitmiş' },
+  { value: 'hidden', label: 'Gizli' },
   { value: 'passive', label: 'Pasif' },
   { value: 'changed', label: 'Değişmiş' },
 ]
@@ -67,6 +72,10 @@ const SORT_OPTIONS = [
   { value: 'title', label: 'Başlık (A-Z)' },
   { value: '-title', label: 'Başlık (Z-A)' },
   { value: 'status', label: 'Durum' },
+  { value: 'bonus_amount', label: 'Bonus miktarı' },
+  { value: '-bonus_amount', label: 'Bonus miktarı (azalan)' },
+  { value: 'duration', label: 'Kampanya süresi' },
+  { value: '-duration', label: 'Kampanya süresi (azalan)' },
 ]
 
 export function CampaignFilters({ filters, onFiltersChange, sites }: CampaignFiltersProps) {
@@ -103,7 +112,7 @@ export function CampaignFilters({ filters, onFiltersChange, sites }: CampaignFil
         )}
       </div>
 
-      <div className="grid grid-cols-2 gap-4 md:grid-cols-4 lg:grid-cols-8">
+      <div className="grid grid-cols-2 gap-4 md:grid-cols-4 lg:grid-cols-7">
         <div>
           <label className="text-sm font-medium text-muted-foreground">Tarih Modu</label>
           <Select
@@ -118,26 +127,6 @@ export function CampaignFilters({ filters, onFiltersChange, sites }: CampaignFil
               </option>
             ))}
           </Select>
-        </div>
-
-        <div>
-          <label className="text-sm font-medium text-muted-foreground">Başlangıç</label>
-          <Input
-            type="date"
-            value={filters.dateFrom || ''}
-            onChange={(e) => handleChange('dateFrom', e.target.value)}
-            className="mt-1"
-          />
-        </div>
-
-        <div>
-          <label className="text-sm font-medium text-muted-foreground">Bitiş</label>
-          <Input
-            type="date"
-            value={filters.dateTo || ''}
-            onChange={(e) => handleChange('dateTo', e.target.value)}
-            className="mt-1"
-          />
         </div>
 
         <div>
@@ -193,6 +182,22 @@ export function CampaignFilters({ filters, onFiltersChange, sites }: CampaignFil
           <Select
             value={filters.campaign_type || ''}
             onChange={(e) => handleChange('campaign_type', e.target.value)}
+            className="mt-1"
+          >
+            <option value="">Tümü</option>
+            {CAMPAIGN_TYPE_OPTIONS.map((opt) => (
+              <option key={opt.value} value={opt.value}>
+                {opt.label}
+              </option>
+            ))}
+          </Select>
+        </div>
+
+        <div>
+          <label className="text-sm font-medium text-muted-foreground">Kategori</label>
+          <Select
+            value={filters.category || ''}
+            onChange={(e) => handleChange('category', e.target.value)}
             className="mt-1"
           >
             <option value="">Tümü</option>

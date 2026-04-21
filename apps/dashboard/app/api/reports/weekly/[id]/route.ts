@@ -17,7 +17,28 @@ type WeeklyReportRow = {
   top_bonuses: string;
   status: string;
   generated_at: Date;
+  executive_summary: string | null;
+  risks: string | string[] | null;
+  recommendations: string | string[] | null;
 };
+
+function parseStringArray(value: string | string[] | null | undefined): string[] {
+  if (!value) return [];
+  if (Array.isArray(value)) {
+    return value.filter((entry): entry is string => typeof entry === 'string');
+  }
+  if (typeof value === 'string') {
+    try {
+      const parsed = JSON.parse(value);
+      if (Array.isArray(parsed)) {
+        return parsed.filter((entry): entry is string => typeof entry === 'string');
+      }
+    } catch {
+      return [];
+    }
+  }
+  return [];
+}
 
 export async function GET(
   request: NextRequest,
@@ -27,15 +48,18 @@ export async function GET(
     const { id } = paramsSchema.parse(await params);
 
     const report = await queryOne<WeeklyReportRow>(`
-      SELECT 
+      SELECT
         id,
-        period_start,
-        period_end,
+        COALESCE(period_start, report_week_start) AS period_start,
+        COALESCE(period_end, report_week_end) AS period_end,
         summary,
         by_site,
         top_bonuses,
         status,
-        generated_at
+        COALESCE(generated_at, created_at) AS generated_at,
+        executive_summary,
+        risks,
+        recommendations
       FROM weekly_reports
       WHERE id = $1
     `, [id]);
@@ -64,7 +88,7 @@ export async function GET(
       weekNumber,
       year: startDate.getFullYear(),
       title: `Haftalık Rapor - ${startDate.toLocaleDateString('tr-TR')}`,
-      executiveSummary: null,
+      executiveSummary: report.executive_summary ?? null,
       status: report.status,
       siteCoverageCount: summary.activeSites || 0,
       campaignCount: summary.totalCampaigns || 0,
@@ -75,8 +99,8 @@ export async function GET(
       passiveCount: 0,
       topCategories: [],
       topSites,
-      risks: [],
-      recommendations: [],
+      risks: parseStringArray(report.risks),
+      recommendations: parseStringArray(report.recommendations),
       createdAt: report.generated_at,
       updatedAt: report.generated_at,
       items: topBonuses.map((bonus: Record<string, unknown>, index: number) => ({

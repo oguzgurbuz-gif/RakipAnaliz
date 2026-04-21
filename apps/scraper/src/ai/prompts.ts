@@ -1,3 +1,5 @@
+import { ShdecnMessage } from './client';
+
 export interface DateExtractionTemplateData {
   reference_date: string;
   title: string;
@@ -367,6 +369,88 @@ Tarih ipucu (varsa):
 - "00:00-23:59 arası geçerli" → time_restrictions: "Günlük 00:00-23:59"
 
 Sadece JSON çıktı ver, yorum yazma.`;
+
+// BE-10: Batch analysis prompt for processing multiple campaigns in single API call
+export const BATCH_ANALYSIS_SYSTEM_PROMPT = `Sen Türk bahis/kumar platformlarındaki kampanya metinlerini analiz eden bir yapay zeka motorusun.
+Birden fazla kampanyayı tek seferde analiz edeceksin.
+
+Kurallar:
+1. Her kampanya için ayrı JSON objesi döndür
+2. Kampanya ID'leri korunmalı
+3. Sadece kesin bilgileri çıkar, tahmin yapma
+4. Tarihler ISO 8601 formatında (YYYY-MM-DD)
+5. Türkiye saat dilimi (Europe/Istanbul)
+6. Her kampanya için confidence skoru ver (0-1)
+7. Tüm sonuçları tek JSON array içinde döndür`;
+
+export const BATCH_ANALYSIS_USER_PROMPT_TEMPLATE = `Aşağıdaki {{count}} kampanyayı analiz et ve her biri için yapılandırılmış veri çıkar.
+
+Her kampanya için şu formatta JSON objesi oluştur:
+{
+  "campaign_id": "orijinal_id",
+  "category": "kampanya_tipi_kodu",
+  "sentiment": "positive|neutral|negative",
+  "summary": "2-3 kelimelik özet",
+  "key_points": ["nokta1", "nokta2"],
+  "min_deposit": number or null,
+  "max_bonus": number or null,
+  "turnover": "Nx" or null,
+  "free_bet_amount": number or null,
+  "cashback_percent": number or null,
+  "bonus_amount": number or null,
+  "bonus_percentage": number or null
+}
+
+Kampanya tipleri:
+- hoş-geldin-bonusu: Yeni üyelere özel bonus
+- ek-kazanç: Kayıp iadesi, cashback
+- yüksek-oran: Oran artışı, boosted odds
+- freebet: Bedava bahis
+- spesifik-bahis: Ganyan, at yarışı özel
+- sadakat: VIP, sadakat programı
+- turnuva: Tournament, leaderboard
+- spor-bonus: Futbol, basketbol
+- casino-bonus: Casino oyunları
+- slot-bonus: Slot, freespin
+- diğer: Hiçbiri uymuyorsa
+
+{{campaigns}}
+
+Çıktı: Sadece JSON array, yorum veya açıklama yok.`;
+
+export interface BatchAnalysisCampaign {
+  campaignId: string;
+  title: string;
+  body: string;
+  siteName: string;
+}
+
+export function buildBatchAnalysisPrompt(campaigns: BatchAnalysisCampaign[]): {
+  system: string;
+  user: string;
+  messages: ShdecnMessage[];
+} {
+  const campaignsText = campaigns
+    .map((c, i) => `KAMPANYA ${i + 1}:
+ID: ${c.campaignId}
+Başlık: ${c.title}
+İçerik: ${c.body.substring(0, 1000)}${c.body.length > 1000 ? '...' : ''}
+Site: ${c.siteName}`)
+    .join('\n\n');
+
+  const userPrompt = BATCH_ANALYSIS_USER_PROMPT_TEMPLATE
+    .replace('{{count}}', String(campaigns.length))
+    .replace('{{campaigns}}', campaignsText);
+
+  return {
+    system: BATCH_ANALYSIS_SYSTEM_PROMPT,
+    user: userPrompt,
+    messages: [
+      { role: 'system', content: BATCH_ANALYSIS_SYSTEM_PROMPT },
+      { role: 'user', content: userPrompt },
+    ],
+  };
+}
 
 export function buildComprehensiveExtractionPrompt(data: {
   title: string;

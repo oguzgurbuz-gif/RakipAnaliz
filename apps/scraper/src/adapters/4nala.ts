@@ -1,34 +1,34 @@
-import { Page, ElementHandle } from 'puppeteer';
+import { Page } from 'puppeteer';
 import { BaseAdapter } from './base';
 import { RawCampaignCard, NormalizedCampaignInput } from '../types';
 import { buildFingerprint, buildRawFingerprint } from '../normalizers/fingerprint';
-import { extractNumericValue } from '../normalizers/text';
-import { normalizeImageUrl } from '../normalizers/image';
+import { extractNumericValue, isLikelyRealCampaignTitle } from '../normalizers/text';
 import { extractDatesFromCampaignText } from '../date-extraction/parser';
+
+interface ApiCampaign {
+  id: number;
+  name: string;
+  title_abbreviated: string;
+  photo: string;
+  mobile_photo: string;
+  is_valid: boolean;
+  status: string;
+  create_date: string;
+}
+
+interface ApiCampaignDetail {
+  slug: string;
+  description: string;
+  participation_requirement: string;
+}
 
 export class ForNalaAdapter extends BaseAdapter {
   private static readonly SITE_CODE = '4nala';
   private static readonly BASE_URL = 'https://www.4nala.com';
-  public readonly campaignsUrl = 'https://4nala.com/kampanyalar';
-
-  protected readonly selectors = {
-    campaignCard: '[class*="campaign"], [class*="bonus"], [class*="offer"], article, .item, [class*="card"]',
-    campaignTitle: 'h1, h2, h3, h4, [class*="title"], [class*="headline"]',
-    campaignDescription: '[class*="desc"], [class*="text"], [class*="content"], p',
-    bonusAmount: '[class*="amount"], [class*="değer"], [class*="bonus"]',
-    bonusPercentage: '[class*="percent"], [class*="ratio"], [class*="orani"]',
-    minDeposit: '[class*="min"], [class*="deposit"], [class*="yatırım"]',
-    code: '[class*="code"], [class*="kod"], .coupon',
-    campaignUrl: 'a[href]',
-    campaignImage: 'img[class*="campaign"], img[class*="bonus"], img[class*="offer"]',
-    startDate: '[class*="start"], [class*="basla"], time',
-    endDate: '[class*="end"], [class*="biti"], [class*="son"], time',
-    termsUrl: 'a[href*="terms"], a[href*="kosul"], a[href*="sart"]',
-    category: '[class*="category"], [class*="type"], [class*="tur"]',
-    badge: '[class*="badge"], [class*="tag"], [class*="label"]',
-    featured: '[class*="featured"], [class*="spotlight"], [class*="highlight"]',
-    exclusive: '[class*="exclusive"], [class*="ozel"], [class*="vip"]',
-  };
+  private static readonly API_BASE = 'https://api.4nala.com';
+  private static readonly API_LIST_URL = 'https://api.4nala.com/misc/api/campaign/list/';
+  private static readonly API_DETAIL_URL = 'https://api.4nala.com/misc/api/campaign/detail/';
+  public readonly campaignsUrl = 'https://www.4nala.com/kampanyalar';
 
   constructor() {
     super(ForNalaAdapter.SITE_CODE, ForNalaAdapter.BASE_URL);
@@ -42,241 +42,167 @@ export class ForNalaAdapter extends BaseAdapter {
   async extractCards(page: Page): Promise<RawCampaignCard[]> {
     const cards: RawCampaignCard[] = [];
 
-    await this.waitForSelector(page, 'body', { timeout: 10000 });
-
-    await page.evaluate(() => new Promise((resolve) => {
-      let totalHeight = 0;
-      const distance = 100;
-      const timer = setInterval(() => {
-        const scrollHeight = document.body.scrollHeight;
-        window.scrollBy(0, distance);
-        totalHeight += distance;
-        if (totalHeight >= scrollHeight) {
-          clearInterval(timer);
-          resolve(true);
-        }
-      }, 100);
-      setTimeout(resolve, 5000);
-    }));
-
-    let cardElements: ElementHandle<Element>[] = [];
     try {
-      cardElements = await page.$$(this.selectors.campaignCard);
-    } catch {
-      cardElements = [];
-    }
+      // Fetch campaign list from API
+      const response = await fetch(ForNalaAdapter.API_LIST_URL, {
+        method: 'GET',
+        headers: {
+          'Accept': 'application/json',
+          'Content-Type': 'application/json',
+        },
+      });
 
-    if (cardElements.length === 0) {
-      try {
-        const fallback: ElementHandle<Element>[] = await page.$$('a[href*="bonus"], a[href*="kampanya"], a[href*="offer"], a[href*="promotion"]');
-        if (fallback.length > 0) {
-          cardElements = fallback;
-        }
-      } catch {
-      }
-    }
-
-    if (cardElements.length === 0) {
-      let fallbackElements: Element[] = [];
-      try {
-        const result = await page.evaluate(() => {
-          const allLinks = Array.from(document.querySelectorAll('a[href]'));
-          const campaignLinks = allLinks.filter((link: Element) => {
-            const href = link.getAttribute('href') || '';
-            const text = link.textContent?.trim() || '';
-            const isCampaignLink = /bonus|kampanya|offer|promotion|promo|bonusu?|advantage/i.test(href) ||
-              /bonus|kampanya|offer|promotion|promo|bonusu?|advantage/i.test(text);
-            return isCampaignLink && href.startsWith('/') || href.includes('4nala');
-          });
-          return campaignLinks.map((link: Element) => {
-            const parent = link.closest('div, article, section, li, card');
-            return parent || link;
-          });
-        });
-        fallbackElements = Array.isArray(result) ? result : [];
-      } catch {
-        fallbackElements = [];
+      if (!response.ok) {
+        console.error(`API request failed: ${response.status} ${response.statusText}`);
+        return cards;
       }
 
-      if (fallbackElements.length > 0) {
-        cardElements = fallbackElements as unknown as ElementHandle<Element>[];
-      }
-    }
+      const apiData = await response.json();
+      
+      // API returns array directly or wrapped in object
+      const campaigns: ApiCampaign[] = Array.isArray(apiData) 
+        ? apiData 
+        : apiData.results ?? apiData.data ?? apiData.campaigns ?? [];
 
-    if (cardElements.length === 0) {
-      let fallbackElements2: Element[] = [];
-      try {
-        const result = await page.evaluate(() => {
-          const clickableElements: Element[] = [];
-          const seen = new Set<Element>();
-          document.querySelectorAll('a[href], button, [onclick], [role="button"]').forEach((el: Element) => {
-            const parent = el.closest('div[class], article, section');
-            if (parent && !seen.has(parent)) {
-              seen.add(parent);
-              clickableElements.push(parent);
+      // Filter only valid (active) campaigns
+      const validCampaigns = campaigns.filter((c: ApiCampaign) => c.is_valid === true);
+
+      if (validCampaigns.length === 0) {
+        console.log('No valid (is_valid=true) campaigns found in API response');
+        return cards;
+      }
+
+      // Process each valid campaign
+      for (const campaign of validCampaigns) {
+        try {
+          // Fetch detail for additional data (description, participation_requirement)
+          let detail: ApiCampaignDetail | null = null;
+          try {
+            const detailResponse = await fetch(
+              `${ForNalaAdapter.API_DETAIL_URL}${campaign.id}/`,
+              {
+                method: 'GET',
+                headers: {
+                  'Accept': 'application/json',
+                  'Content-Type': 'application/json',
+                },
+              }
+            );
+
+            if (detailResponse.ok) {
+              detail = await detailResponse.json();
             }
-          });
-          return clickableElements;
-        });
-        fallbackElements2 = Array.isArray(result) ? result : [];
-      } catch {
-        fallbackElements2 = [];
-      }
-
-      if (fallbackElements2.length > 0) {
-        cardElements = fallbackElements2 as unknown as ElementHandle<Element>[];
-      }
-    }
-
-    const seenUrls = new Set<string>();
-
-    for (const cardEl of cardElements) {
-      try {
-        const rawId = await page.evaluate((el) => el.getAttribute('data-id') || el.getAttribute('id') || `card-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`, cardEl);
-
-        const title = await page.evaluate((el) => {
-          const titleEl = el.querySelector('h1, h2, h3, h4, [class*="title"], [class*="headline"]');
-          return titleEl?.textContent?.trim() ?? el.textContent?.trim().slice(0, 100) ?? '';
-        }, cardEl);
-
-        const description = await page.evaluate((el) => {
-          const descEl = el.querySelector('[class*="desc"], [class*="text"], [class*="content"], p');
-          return descEl?.textContent?.trim().slice(0, 500) ?? null;
-        }, cardEl);
-
-        const bonusAmountText = await page.evaluate((el) => {
-          const amountEl = el.querySelector('[class*="amount"], [class*="değer"], [class*="bonus"]');
-          return amountEl?.textContent?.trim() ?? null;
-        }, cardEl);
-
-        const bonusPercentageText = await page.evaluate((el) => {
-          const percentEl = el.querySelector('[class*="percent"], [class*="ratio"], [class*="orani"]');
-          return percentEl?.textContent?.trim() ?? null;
-        }, cardEl);
-
-        const minDepositText = await page.evaluate((el) => {
-          const minEl = el.querySelector('[class*="min"], [class*="deposit"], [class*="yatırım"]');
-          return minEl?.textContent?.trim() ?? null;
-        }, cardEl);
-
-        const code = await page.evaluate((el) => {
-          const codeEl = el.querySelector('[class*="code"], [class*="kod"], .coupon');
-          return codeEl?.textContent?.trim() ?? null;
-        }, cardEl);
-
-        const campaignUrl = await page.evaluate((el) => {
-          const linkEl = el.querySelector('a[href]');
-          return linkEl?.getAttribute('href') ?? '';
-        }, cardEl);
-
-        const imageUrl = await page.evaluate((el) => {
-          const imgEl = el.querySelector('img[class*="campaign"], img[class*="bonus"], img[class*="offer"], img');
-          return imgEl?.getAttribute('src') ?? imgEl?.getAttribute('data-src') ?? null;
-        }, cardEl);
-
-        const startDateText = await page.evaluate((el) => {
-          const startEl = el.querySelector('[class*="start"], [class*="basla"], time');
-          return startEl?.textContent?.trim() ?? null;
-        }, cardEl);
-
-        const endDateText = await page.evaluate((el) => {
-          const endEl = el.querySelector('[class*="end"], [class*="biti"], [class*="son"], time');
-          return endEl?.textContent?.trim() ?? null;
-        }, cardEl);
-
-        const termsUrl = await page.evaluate((el) => {
-          const termsEl = el.querySelector('a[href*="terms"], a[href*="kosul"], a[href*="sart"]');
-          return termsEl?.getAttribute('href') ?? null;
-        }, cardEl);
-
-        const category = await page.evaluate((el) => {
-          const catEl = el.querySelector('[class*="category"], [class*="type"], [class*="tur"]');
-          return catEl?.textContent?.trim() ?? null;
-        }, cardEl);
-
-        const badge = await page.evaluate((el) => {
-          const badgeEl = el.querySelector('[class*="badge"], [class*="tag"], [class*="label"]');
-          return badgeEl?.textContent?.trim() ?? null;
-        }, cardEl);
-
-        const isFeatured = await page.evaluate((el) => {
-          const featuredEl = el.querySelector('[class*="featured"], [class*="spotlight"], [class*="highlight"]');
-          return featuredEl !== null;
-        }, cardEl);
-
-        const isExclusive = await page.evaluate((el) => {
-          const exclusiveEl = el.querySelector('[class*="exclusive"], [class*="ozel"], [class*="vip"]');
-          return exclusiveEl !== null;
-        }, cardEl);
-
-        if (!title || title.length < 3) {
-          continue;
-        }
-
-        const fullUrl = this.buildCampaignUrl(campaignUrl);
-        if (fullUrl && !fullUrl.endsWith('/kampanyalar') && !fullUrl.endsWith('/kampanyalar/')) {
-          if (seenUrls.has(fullUrl)) {
-            continue;
+          } catch (detailError) {
+            console.warn(`Failed to fetch detail for campaign ${campaign.id}: ${detailError}`);
           }
-          seenUrls.add(fullUrl);
+
+          // Build campaign URL
+          const campaignUrl = detail?.slug 
+            ? `${ForNalaAdapter.BASE_URL}/kampanya/${detail.slug}`
+            : `${ForNalaAdapter.BASE_URL}/kampanya/${campaign.id}`;
+
+          // Extract description from HTML
+          let description: string | null = null;
+          if (detail?.description) {
+            // Strip HTML tags for plain text description
+            description = detail.description.replace(/<[^>]*>/g, '').trim().slice(0, 500);
+          }
+
+          // Extract requirements text from HTML
+          let requirements: string | null = null;
+          if (detail?.participation_requirement) {
+            requirements = detail.participation_requirement.replace(/<[^>]*>/g, '').trim();
+          }
+
+          // Build image URL
+          const imageUrl = campaign.mobile_photo || campaign.photo || null;
+
+          // Extract numeric values from description/requirements for bonus amount
+          let bonusAmount: string | null = null;
+          let bonusPercentage: number | null = null;
+
+          const textToSearch = `${description || ''} ${requirements || ''}`;
+          
+          // Try to find percentage (e.g., "100%", "%100", "yüzde 100")
+          const percentMatch = textToSearch.match(/(\d+)\s*%/);
+          if (percentMatch) {
+            bonusPercentage = parseInt(percentMatch[1], 10);
+          }
+
+          // Try to find amount (e.g., "500 TL", "500₺", "500 TL bonus")
+          const amountMatch = textToSearch.match(/(\d[\d.,]*)\s*(?:TL|₺|lira)/i);
+          if (amountMatch) {
+            bonusAmount = amountMatch[1].replace(',', '.');
+          }
+
+          const card: RawCampaignCard = {
+            siteCode: this.siteCode,
+            rawId: String(campaign.id),
+            title: campaign.name || campaign.title_abbreviated || `Kampanya ${campaign.id}`,
+            description,
+            bonusAmount,
+            bonusPercentage,
+            minDeposit: null,
+            maxBonus: null,
+            code: null,
+            url: campaignUrl,
+            imageUrl: imageUrl ? this.normalizeImageUrl(imageUrl) : null,
+            startDate: campaign.create_date || null,
+            endDate: null,
+            termsUrl: null,
+            category: null,
+            badge: campaign.status ? this.normalizeStatus(campaign.status) : null,
+            isFeatured: false,
+            isExclusive: false,
+            rawData: {
+              apiResponse: campaign,
+              detailResponse: detail,
+              requirements,
+            },
+            scrapedAt: new Date(),
+          };
+
+          cards.push(card);
+        } catch (campaignError) {
+          console.error(`Error processing campaign ${campaign.id}: ${campaignError}`);
         }
-
-        const card: RawCampaignCard = {
-          siteCode: this.siteCode,
-          rawId,
-          title,
-          description,
-          bonusAmount: bonusAmountText,
-          bonusPercentage: extractNumericValue(bonusPercentageText),
-          minDeposit: minDepositText,
-          maxBonus: null,
-          code: code?.replace(/KOD:|CODE:|KUPON:?/gi, '').trim() ?? null,
-          url: fullUrl,
-          imageUrl: normalizeImageUrl(this.baseUrl, imageUrl),
-          startDate: startDateText,
-          endDate: endDateText,
-          termsUrl,
-          category,
-          badge,
-          isFeatured,
-          isExclusive,
-          rawData: {},
-          scrapedAt: new Date(),
-        };
-
-        cards.push(card);
-      } catch (error) {
-        console.error(`Error extracting card: ${error}`);
       }
+    } catch (error) {
+      console.error(`Failed to fetch campaigns from API: ${error}`);
     }
-
-    const listingUrl = this.campaignsUrl;
-    for (const card of cards) {
-      if (!card.url || card.url.endsWith('/kampanyalar') || card.url.endsWith('/kampanyalar/')) {
-        continue;
-      }
-
-      try {
-        const result = await this.visitDetailPage(page, card.url, { waitMs: 800 });
-
-        if (result?.body && result.body.length > (card.description?.length ?? 0)) {
-          card.description = result.body;
-        }
-
-        if (result?.termsUrl) {
-          card.termsUrl = result.termsUrl;
-        }
-      } catch (error) {
-        console.error(`Error visiting detail page for card ${card.rawId}: ${error}`);
-      }
-    }
-
-    await page.goto(listingUrl, { waitUntil: 'domcontentloaded' });
 
     return cards;
   }
 
-  normalize(card: RawCampaignCard): NormalizedCampaignInput {
+  private normalizeStatus(status: string): string | null {
+    if (!status) return null;
+    const lower = status.toLowerCase();
+    if (lower.includes('yeni') || lower.includes('new')) return 'Yeni';
+    if (lower.includes('hot') || lower.includes('popüler')) return 'Popüler';
+    if (lower.includes('expired') || lower.includes('sona eren')) return 'Sona Erdi';
+    return status;
+  }
+
+  private normalizeImageUrl(url: string): string | null {
+    if (!url) return null;
+    // If already absolute URL, return as is
+    if (url.startsWith('http://') || url.startsWith('https://')) {
+      return url;
+    }
+    // If starts with // (protocol relative), add https:
+    if (url.startsWith('//')) {
+      return `https:${url}`;
+    }
+    // Otherwise prepend base URL
+    return `${ForNalaAdapter.BASE_URL}${url}`;
+  }
+
+  normalize(card: RawCampaignCard): NormalizedCampaignInput | null {
+    // Safety check: validate title quality
+    if (!isLikelyRealCampaignTitle(card.title)) {
+      return null;
+    }
+
     const bonusAmount = extractNumericValue(card.bonusAmount);
     const bonusPercentage = card.bonusPercentage;
     const minDeposit = extractNumericValue(card.minDeposit);
@@ -295,7 +221,7 @@ export class ForNalaAdapter extends BaseAdapter {
       bonusType = 'mixed';
     }
 
-    const dateResult = extractDatesFromCampaignText(card.title, card.description);
+    const dateResult = extractDatesFromCampaignText(card.title, card.description ?? null);
     const startDate = dateResult.startDate;
     const endDate = dateResult.endDate;
 

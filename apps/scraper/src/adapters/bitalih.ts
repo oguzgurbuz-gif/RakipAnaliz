@@ -2,7 +2,7 @@ import { Page } from 'puppeteer';
 import { BaseAdapter } from './base';
 import { RawCampaignCard, NormalizedCampaignInput } from '../types';
 import { buildFingerprint, buildRawFingerprint } from '../normalizers/fingerprint';
-import { extractNumericValue } from '../normalizers/text';
+import { extractNumericValue, isLikelyRealCampaignTitle } from '../normalizers/text';
 import { parseDateText } from '../normalizers/date';
 import { normalizeImageUrl } from '../normalizers/image';
 
@@ -28,6 +28,8 @@ export class BitalihAdapter extends BaseAdapter {
     badge: null,
     featured: null,
     exclusive: null,
+    pastCampaignsTab: 'button:has-text("Geçmiş"), [class*="tab"]:has-text("Geçmiş"), [role="tab"]:has-text("Geçmiş")',
+    currentCampaignsTab: 'button:has-text("Güncel"), [class*="tab"]:has-text("Güncel"), [role="tab"]:has-text("Güncel")',
   };
 
   constructor() {
@@ -40,60 +42,126 @@ export class BitalihAdapter extends BaseAdapter {
   }
 
   async extractCards(page: Page): Promise<RawCampaignCard[]> {
-    const cards: RawCampaignCard[] = [];
+    // Internal card type with campaignUrl for deduplication
+    interface InternalCard {
+      rawId: string;
+      title: string;
+      imageUrl: string | null;
+      campaignUrl: string;
+      startDate: string | null;
+      endDate: string | null;
+    }
+    const internalCards: InternalCard[] = [];
 
     await this.waitForSelector(page, this.selectors.campaignCard!, { timeout: 15000 });
     await new Promise(r => setTimeout(r, 1000));
     await page.evaluate(() => window.scrollTo(0, 300));
     await new Promise(r => setTimeout(r, 500));
 
-    const cardData = await page.evaluate(() => {
-      const results: any[] = [];
-      const cardEls = document.querySelectorAll('div.border.flex.flex-col.border-gray-200.rounded-xl');
-      
-      cardEls.forEach((card, index) => {
-        const titleEl = card.querySelector('span.font-bold.text-base');
-        const imgEl = card.querySelector('img');
-        const linkEl = card.querySelector('a[href*="kampanyalar/"]');
-        
-        const title = titleEl?.textContent?.trim() || '';
-        const imageUrl = imgEl?.src || imgEl?.getAttribute('data-src') || null;
-        const campaignUrl = linkEl?.getAttribute('href') || '';
-        
-        const dateEls = card.querySelectorAll('span.font-medium.text-sm');
-        let startDate: string | null = null;
-        let endDate: string | null = null;
-        
-        dateEls.forEach(el => {
-          const text = el.textContent?.trim() || '';
-          if (text.includes('Başlangıç')) {
-            const nextEl = el.nextElementSibling;
-            startDate = nextEl?.textContent?.trim() || null;
-          }
-          if (text.includes('Bitiş')) {
-            const nextEl = el.nextElementSibling;
-            endDate = nextEl?.textContent?.trim() || null;
-          }
+    // Helper: extract cards from current visible list
+    const extractFromCurrentList = async (): Promise<InternalCard[]> => {
+      return page.evaluate(() => {
+        const results: InternalCard[] = [];
+        const cardEls = document.querySelectorAll('div.border.flex.flex-col.border-gray-200.rounded-xl');
+
+        cardEls.forEach((card, index) => {
+          const titleEl = card.querySelector('span.font-bold.text-base');
+          const imgEl = card.querySelector('img');
+          const linkEl = card.querySelector('a[href*="kampanyalar/"]');
+
+          const title = titleEl?.textContent?.trim() || '';
+          const imageUrl = imgEl?.src || imgEl?.getAttribute('data-src') || null;
+          const campaignUrl = linkEl?.getAttribute('href') || '';
+
+          const dateEls = card.querySelectorAll('span.font-medium.text-sm');
+          let startDate: string | null = null;
+          let endDate: string | null = null;
+
+          dateEls.forEach(el => {
+            const text = el.textContent?.trim() || '';
+            if (text.includes('Başlangıç')) {
+              const nextEl = el.nextElementSibling;
+              startDate = nextEl?.textContent?.trim() || null;
+            }
+            if (text.includes('Bitiş')) {
+              const nextEl = el.nextElementSibling;
+              endDate = nextEl?.textContent?.trim() || null;
+            }
+          });
+
+          const rawId = card.getAttribute('data-id') || `bitalih-${index}-${Date.now()}`;
+
+          results.push({
+            rawId,
+            title,
+            imageUrl,
+            campaignUrl,
+            startDate,
+            endDate,
+          });
         });
 
-        const rawId = card.getAttribute('data-id') || `bitalih-${index}-${Date.now()}`;
-
-        results.push({
-          rawId,
-          title,
-          imageUrl,
-          campaignUrl,
-          startDate,
-          endDate,
-        });
+        return results;
       });
-      
-      return results;
-    });
+    };
+
+    // Extract current campaigns first
+    const currentCards = await extractFromCurrentList();
+    internalCards.push(...currentCards);
+
+    // Try to click "Geçmiş" (Past) tab to get historical campaigns
+    try {
+      const pastTabSelectors = [
+        'button:has-text("Geçmiş")',
+        '[class*="tab"]:has-text("Geçmiş")',
+        '[role="tab"]:has-text("Geçmiş")',
+        'button',
+        '[class*="tab"]',
+        '[role="tab"]',
+      ];
+
+      let tabClicked = false;
+      for (const tabSelector of pastTabSelectors) {
+        try {
+          const tabs = await page.$$(tabSelector);
+          for (const tab of tabs) {
+            const text = await tab.evaluate((el) => el.textContent?.trim() || '');
+            if (text.includes('Geçmiş')) {
+              await tab.click();
+              tabClicked = true;
+              break;
+            }
+          }
+          if (tabClicked) break;
+        } catch {
+          continue;
+        }
+      }
+
+      if (tabClicked) {
+        // Wait for new cards to load (different content after tab click)
+        await new Promise(r => setTimeout(r, 2000));
+        await page.evaluate(() => window.scrollTo(0, 300));
+        await new Promise(r => setTimeout(r, 1000));
+
+        // Extract past campaigns
+        const pastCards = await extractFromCurrentList();
+
+        // Deduplicate by URL
+        const existingUrls = new Set(internalCards.map(c => c.campaignUrl));
+        const newPastCards = pastCards.filter(p => !existingUrls.has(p.campaignUrl));
+        internalCards.push(...newPastCards);
+      }
+    } catch (err) {
+      console.error('Failed to click past campaigns tab:', err);
+    }
 
     const listingUrl = page.url();
 
-    for (const data of cardData) {
+    // Convert internal cards to RawCampaignCard
+    const cards: RawCampaignCard[] = [];
+
+    for (const data of internalCards) {
       const card: RawCampaignCard = {
         siteCode: this.siteCode,
         rawId: data.rawId,
@@ -117,30 +185,32 @@ export class BitalihAdapter extends BaseAdapter {
         scrapedAt: new Date(),
       };
 
-      cards.push(card);
-    }
+      // Extract bonus amount/percentage from title via regex
+      const titleBonusAmountMatch = data.title.match(/(\d{1,3}(?:\.\d{3})*)\s*(?:TL|₺|lira)/i);
+      if (titleBonusAmountMatch) {
+        card.bonusAmount = titleBonusAmountMatch[1].replace(/\./g, '');
+      }
+      const titleBonusPctMatch = data.title.match(/(\d+)\s*%/);
+      if (titleBonusPctMatch) {
+        card.bonusPercentage = parseFloat(titleBonusPctMatch[1]);
+      }
 
-    for (const card of cards) {
+      // Navigate to detail page for description
       if (card.url) {
         try {
           await page.goto(card.url, { waitUntil: 'networkidle0', timeout: 15000 });
           await new Promise(r => setTimeout(r, 500));
-          
-          card.description = await page.evaluate(() => {
-            const allDivs = Array.from(document.querySelectorAll('div'));
-            let bestDiv: HTMLElement | null = null;
-            for (const div of allDivs) {
-              if (div.innerText && div.innerText.includes('Kampanya Detayı') && div.innerText.length > 2000) {
-                bestDiv = div;
-                break;
-              }
-            }
-            return bestDiv?.innerText?.trim() || '';
-          });
+
+          card.description = await this.extractDetailBody(page);
+          if (card.description) {
+            card.description = this.cleanBodyText(card.description);
+          }
         } catch (err) {
           console.error(`Failed to scrape detail page for ${card.url}:`, err);
         }
       }
+
+      cards.push(card);
     }
 
     if (listingUrl) {
@@ -150,7 +220,12 @@ export class BitalihAdapter extends BaseAdapter {
     return cards;
   }
 
-  normalize(card: RawCampaignCard): NormalizedCampaignInput {
+  normalize(card: RawCampaignCard): NormalizedCampaignInput | null {
+    // Safety check: validate title quality
+    if (!isLikelyRealCampaignTitle(card.title)) {
+      return null;
+    }
+
     let bonusAmount = extractNumericValue(card.bonusAmount);
     const bonusPercentage = card.bonusPercentage;
     const minDeposit = extractNumericValue(card.minDeposit);

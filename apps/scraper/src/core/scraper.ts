@@ -13,6 +13,11 @@ export class ScrapeManager {
   private browser: Browser | null = null;
   private activeSites: Map<string, boolean> = new Map();
   private activeRuns: Map<string, ScrapeRun> = new Map();
+  // BE-10: Batch AI analysis collector per site
+  private pendingAiBatch: Map<string, Array<{ campaignId: string; normalized: NormalizedCampaignInput }>> = new Map();
+  private batchScheduleTimeout: Map<string, NodeJS.Timeout> = new Map();
+  private readonly BATCH_SIZE = 20; // Schedule batch when this many campaigns accumulate
+  private readonly BATCH_TIMEOUT_MS = 30000; // Or after 30 seconds of inactivity
 
   async initialize(): Promise<void> {
     logger.info('Initializing ScrapeManager');
@@ -100,7 +105,8 @@ export class ScrapeManager {
 
       await this.scrapeWithAdapter(adapter, config, run);
 
-      run.status = run.errors.length > 0 && run.cardsFound === 0 ? 'failed' : run.errors.length > 0 ? 'partial' : 'success';
+      const hasRealErrors = run.errors.some(e => !e.message.includes('Campaign became hidden'));
+      run.status = hasRealErrors && run.cardsFound === 0 ? 'failed' : hasRealErrors ? 'partial' : 'success';
 
     } catch (error) {
       const errorMessage = error instanceof Error ? error.message : 'Unknown error';
@@ -151,6 +157,9 @@ export class ScrapeManager {
       }
 
       this.activeRuns.delete(siteCode);
+
+      // BE-10: Flush any remaining AI analysis batches
+      await this.flushAllAiBatches();
     }
 
     return run;
@@ -194,6 +203,32 @@ export class ScrapeManager {
 
   private async loadPage(page: Page, url: string, run: ScrapeRun): Promise<void> {
     try {
+      // Try networkidle2 first (better for JS-rendered SPAs like 4nala)
+      await retry(
+        async () => {
+          await page.goto(url, {
+            waitUntil: 'networkidle2',
+            timeout: 45000,
+          });
+        },
+        {
+          maxAttempts: 2,
+          initialDelayMs: 2000,
+          maxDelayMs: 15000,
+          backoffMultiplier: 2,
+        },
+        `page.goto:${run.siteCode}:networkidle2`
+      );
+
+      // Additional wait for JS-rendered content
+      await new Promise((resolve) => setTimeout(resolve, 3000));
+
+    } catch (primaryError) {
+      // Fallback to domcontentloaded if networkidle2 times out (common for sites with WebSocket/keep-alive)
+      logger.warn(`networkidle2 failed for ${run.siteCode}, falling back to domcontentloaded`, {
+        error: primaryError instanceof Error ? primaryError.message : 'Unknown',
+      });
+
       await retry(
         async () => {
           await page.goto(url, {
@@ -207,20 +242,11 @@ export class ScrapeManager {
           maxDelayMs: 10000,
           backoffMultiplier: 2,
         },
-        `page.goto:${run.siteCode}`
+        `page.goto:${run.siteCode}:domcontentloaded`
       );
 
-      await new Promise((resolve) => setTimeout(resolve, 2000));
-
-    } catch (error) {
-      const errorMessage = error instanceof Error ? error.message : 'Unknown error';
-      run.errors.push({
-        phase: 'navigation',
-        message: `Failed to load page: ${errorMessage}`,
-        url,
-        timestamp: new Date(),
-      });
-      throw error;
+      // Wait for JS hydration after fallback too
+      await new Promise((resolve) => setTimeout(resolve, 3000));
     }
   }
 
@@ -252,6 +278,9 @@ export class ScrapeManager {
       for (const card of cards) {
         try {
           const normalized = adapter.normalize(card);
+          if (!normalized) {
+            continue; // isLikelyRealCampaignTitle failed in adapter
+          }
           const invalidReason = getInvalidCampaignReason(normalized.title, normalized.description);
 
           if (invalidReason) {
@@ -286,6 +315,14 @@ export class ScrapeManager {
 
         } catch (error) {
           const errorMessage = error instanceof Error ? error.message : 'Unknown error';
+          const errorStack = error instanceof Error ? error.stack : undefined;
+          logger.error(`Failed to process card`, {
+            siteCode: run.siteCode,
+            error: errorMessage,
+            stack: errorStack,
+            url: card.url,
+            cardTitle: card.title,
+          });
           run.errors.push({
             phase: 'normalization',
             message: `Failed to process card: ${errorMessage}`,
@@ -309,11 +346,14 @@ export class ScrapeManager {
 
     } catch (error) {
       const errorMessage = error instanceof Error ? error.message : 'Unknown error';
-      run.errors.push({
-        phase: 'extraction',
-        message: `Failed to extract cards: ${errorMessage}`,
-        timestamp: new Date(),
-      });
+      // Only add to errors if it's a real extraction failure (not just hidden campaigns)
+      if (!errorMessage.includes('Campaign became hidden')) {
+        run.errors.push({
+          phase: 'extraction',
+          message: `Failed to extract cards: ${errorMessage}`,
+          timestamp: new Date(),
+        });
+      }
       throw error;
     }
 
@@ -409,33 +449,80 @@ export class ScrapeManager {
     normalized: NormalizedCampaignInput
   ): Promise<void> {
     try {
-      const { jobScheduler } = await import('../jobs/scheduler');
-
-      await jobScheduler.scheduleJob(
-        'ai-analysis',
-        {
-          campaignId,
-          title: normalized.title,
-          description: normalized.description,
-          termsUrl: normalized.termsUrl,
-          termsText: null,
-          priority: 'high',
-          validFrom: normalized.startDate?.toISOString() ?? null,
-          validTo: normalized.endDate?.toISOString() ?? null,
-          bonusAmount: normalized.bonusAmount,
-          bonusPercentage: normalized.bonusPercentage,
-          minDeposit: normalized.minDeposit,
-          maxBonus: normalized.maxBonus,
-          isFreebet: normalized.bonusType === 'freebet' || normalized.bonusType === 'mixed',
-          isCashback: normalized.bonusType === 'cashback' || normalized.bonusType === 'mixed',
-          sportsType: normalized.category,
-        },
-        { priority: 80 }
-      );
+      // BE-10: Add to batch collector instead of scheduling individual jobs
+      await this.addToAiBatch(campaignId, normalized);
     } catch (error) {
-      logger.warn(`Failed to schedule AI analysis for updated campaign ${campaignId}`, {
+      logger.warn(`Failed to add to AI batch for campaign ${campaignId}`, {
         error: error instanceof Error ? error.message : 'Unknown error',
       });
+    }
+  }
+
+  // BE-10: Batch AI analysis collector
+  private async addToAiBatch(
+    campaignId: string,
+    normalized: NormalizedCampaignInput
+  ): Promise<void> {
+    const siteCode = normalized.siteCode;
+
+    if (!this.pendingAiBatch.has(siteCode)) {
+      this.pendingAiBatch.set(siteCode, []);
+    }
+
+    this.pendingAiBatch.get(siteCode)!.push({ campaignId, normalized });
+
+    // Clear existing timeout for this site
+    const existingTimeout = this.batchScheduleTimeout.get(siteCode);
+    if (existingTimeout) {
+      clearTimeout(existingTimeout);
+    }
+
+    const batch = this.pendingAiBatch.get(siteCode)!;
+
+    // If we reached batch size, schedule immediately
+    if (batch.length >= this.BATCH_SIZE) {
+      await this.flushAiBatch(siteCode);
+      return;
+    }
+
+    // Otherwise, set timeout to flush after inactivity
+    const timeout = setTimeout(async () => {
+      await this.flushAiBatch(siteCode);
+    }, this.BATCH_TIMEOUT_MS);
+
+    this.batchScheduleTimeout.set(siteCode, timeout);
+  }
+
+  // BE-10: Flush batch and schedule single batch job
+  private async flushAiBatch(siteCode: string): Promise<void> {
+    const batch = this.pendingAiBatch.get(siteCode);
+    if (!batch || batch.length === 0) return;
+
+    // Clear the batch and timeout
+    this.pendingAiBatch.set(siteCode, []);
+    const timeout = this.batchScheduleTimeout.get(siteCode);
+    if (timeout) {
+      clearTimeout(timeout);
+      this.batchScheduleTimeout.delete(siteCode);
+    }
+
+    const campaignIds = batch.map((b) => b.campaignId);
+
+    logger.info(`Scheduling batch AI analysis for ${campaignIds.length} campaigns on ${siteCode}`);
+
+    const { jobScheduler } = await import('../jobs/scheduler');
+    await jobScheduler.scheduleJob(
+      'ai-analysis-batch',
+      { campaignIds, priority: 'high' },
+      { priority: 80 }
+    );
+  }
+
+  // BE-10: Flush all pending batches (call at end of scrape)
+  async flushAllAiBatches(): Promise<void> {
+    const siteCodes = Array.from(this.pendingAiBatch.keys());
+    for (const siteCode of siteCodes) {
+      await this.flushAiBatch(siteCode);
     }
   }
 
