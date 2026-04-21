@@ -2,7 +2,7 @@ import { Page, ElementHandle } from 'puppeteer';
 import { BaseAdapter } from './base';
 import { RawCampaignCard, NormalizedCampaignInput } from '../types';
 import { buildFingerprint, buildRawFingerprint } from '../normalizers/fingerprint';
-import { extractNumericValue } from '../normalizers/text';
+import { extractNumericValue, isLikelyRealCampaignTitle } from '../normalizers/text';
 import { normalizeImageUrl } from '../normalizers/image';
 import { extractDatesFromCampaignText } from '../date-extraction/parser';
 
@@ -109,80 +109,133 @@ export class BilyonerAdapter extends BaseAdapter {
     if (cardElements.length === 0) {
       fallbackCards = await this.fallbackCardDiscovery(page, seenUrls);
     } else {
-      for (const cardEl of cardElements) {
-        try {
-          const rawId = await page.evaluate((el) => el.getAttribute('data-id') || el.getAttribute('id') || `bilyoner-${Date.now()}`, cardEl);
+      const selectorStr = cardSelectors.join(', ');
+      const selectors = this.selectors;
 
-          const title = await cardEl.$eval(this.selectors.campaignTitle, (el: Element) => el.textContent?.trim() ?? '').catch(() => '');
+      const extractedCards = await page.evaluate((selector) => {
+        const results: any[] = [];
+        const cardEls = document.querySelectorAll(selector);
 
-          const description = await cardEl.$eval(this.selectors.campaignDescription, (el: Element) => el.textContent?.trim() ?? null).catch(() => null);
-
-          const bonusAmountText = await cardEl.$eval(this.selectors.bonusAmount, (el: Element) => el.textContent?.trim() ?? null).catch(() => null);
-
-          const bonusPercentageText = await cardEl.$eval(this.selectors.bonusPercentage, (el: Element) => el.textContent?.trim() ?? null).catch(() => null);
-
-          const minDepositText = await cardEl.$eval(this.selectors.minDeposit, (el: Element) => el.textContent?.trim() ?? null).catch(() => null);
-
-          const code = await cardEl.$eval(this.selectors.code, (el: Element) => el.textContent?.trim() ?? null).catch(() => null);
-
-          const campaignUrl = await cardEl.$eval(this.selectors.campaignUrl, (el: Element) => {
-            const href = el.getAttribute('href');
-            if (href && (href.includes('bonus') || href.includes('kampanya') || href.startsWith('/'))) {
-              return href;
+        cardEls.forEach((el: Element) => {
+          const titleEl = el.querySelector('[class*="title"]:not(h1):not(h2):not(h3):not(h4)');
+          let title = '';
+          if (titleEl?.textContent?.trim()) {
+            title = titleEl.textContent.trim();
+          } else {
+            const headings = Array.from(el.querySelectorAll('h1, h2, h3, h4'));
+            for (const h of headings) {
+              const text = h.textContent?.trim() ?? '';
+              if (text && text.length < 200) {
+                title = text;
+                break;
+              }
             }
-            return '';
-          }).catch(() => '');
-
-          if (campaignUrl && seenUrls.has(campaignUrl)) {
-            continue;
-          }
-          if (campaignUrl) {
-            seenUrls.add(campaignUrl);
+            if (!title) {
+              const text = el.textContent?.trim() ?? '';
+              title = text.length < 300 ? text : '';
+            }
           }
 
-          const imageUrl = await cardEl.$eval(this.selectors.campaignImage, (el: Element) => el.getAttribute('src') ?? el.getAttribute('data-src') ?? null).catch(() => null);
+          const descriptionEl = el.querySelector('[class*="description"], [class*="desc"], [class*="info"], p');
+          const description = descriptionEl?.textContent?.trim() ?? null;
 
-          const startDateText = await cardEl.$eval(this.selectors.startDate, (el: Element) => el.textContent?.trim() ?? null).catch(() => null);
+          const amountEl = el.querySelector('[class*="amount"], [class*="value"], [class*="bonus"]');
+          const bonusAmount = amountEl?.textContent?.trim() ?? null;
 
-          const endDateText = await cardEl.$eval(this.selectors.endDate, (el: Element) => el.textContent?.trim() ?? null).catch(() => null);
+          const percentEl = el.querySelector('[class*="percent"], [class*="yuzde"], [class*="rate"]');
+          const bonusPercentage = percentEl?.textContent?.trim() ?? null;
 
-          const termsUrl = await cardEl.$eval(this.selectors.termsUrl, (el: Element) => el.getAttribute('href') ?? null).catch(() => null);
+          const minEl = el.querySelector('[class*="min"], [class*="deposit"]');
+          const minDeposit = minEl?.textContent?.trim() ?? null;
 
-          const category = await cardEl.$eval(this.selectors.category, (el: Element) => el.textContent?.trim() ?? null).catch(() => null);
+          const codeEl = el.querySelector('[class*="code"], [class*="coupon"], [class*="kod"]');
+          const code = codeEl?.textContent?.trim() ?? null;
 
-          const badge = await cardEl.$eval(this.selectors.badge, (el: Element) => el.textContent?.trim() ?? null).catch(() => null);
+          const linkEl = el.querySelector('a[href]');
+          let campaignUrl = '';
+          if (linkEl) {
+            const href = linkEl.getAttribute('href');
+            if (href && (href.includes('bonus') || href.includes('kampanya') || href.startsWith('/'))) {
+              campaignUrl = href;
+            }
+          }
 
-          const isFeatured = await cardEl.$(this.selectors.featured).then((el: ElementHandle | null) => el !== null).catch(() => false);
+          const imgEl = el.querySelector('img[class*="image"], [class*="img"] img, picture img');
+          const imageUrl = imgEl?.getAttribute('src') ?? imgEl?.getAttribute('data-src') ?? null;
 
-          const isExclusive = await cardEl.$(this.selectors.exclusive).then((el: ElementHandle | null) => el !== null).catch(() => false);
+          const startEl = el.querySelector('[class*="start"], [class*="baslangic"]');
+          const startDate = startEl?.textContent?.trim() ?? null;
 
-          const card: RawCampaignCard = {
-            siteCode: this.siteCode,
-            rawId,
+          const endEl = el.querySelector('[class*="end"], [class*="bitis"]');
+          const endDate = endEl?.textContent?.trim() ?? null;
+
+          const termsEl = el.querySelector('a[href*="sart"], a[href*="kosul"], a[href*="terms"]');
+          const termsUrl = termsEl?.getAttribute('href') ?? null;
+
+          const catEl = el.querySelector('[class*="category"], [class*="type"]');
+          const category = catEl?.textContent?.trim() ?? null;
+
+          const badgeEl = el.querySelector('[class*="badge"], [class*="tag"], [class*="label"]');
+          const badge = badgeEl?.textContent?.trim() ?? null;
+
+          const isFeatured = el.querySelector('[class*="featured"], [class*="highlight"]') !== null;
+          const isExclusive = el.querySelector('[class*="exclusive"], [class*="special"]') !== null;
+
+          results.push({
+            rawId: el.getAttribute('data-id') || el.getAttribute('id') || `bilyoner-${Date.now()}`,
             title,
             description,
-            bonusAmount: bonusAmountText,
-            bonusPercentage: extractNumericValue(bonusPercentageText),
-            minDeposit: minDepositText,
-            maxBonus: null,
-            code: code?.replace(/KOD:|KUPON:?/gi, '').trim() ?? null,
-            url: this.buildCampaignUrl(campaignUrl),
-            imageUrl: normalizeImageUrl(this.baseUrl, imageUrl),
-            startDate: startDateText,
-            endDate: endDateText,
+            bonusAmount,
+            bonusPercentage,
+            minDeposit,
+            code,
+            campaignUrl,
+            imageUrl,
+            startDate,
+            endDate,
             termsUrl,
             category,
             badge,
             isFeatured,
             isExclusive,
-            rawData: {},
-            scrapedAt: new Date(),
-          };
+          });
+        });
 
-          cards.push(card);
-        } catch (error) {
-          console.error(`Error extracting card: ${error}`);
+        return results;
+      }, selectorStr);
+
+      for (const cardData of extractedCards) {
+        if (cardData.campaignUrl && seenUrls.has(cardData.campaignUrl)) {
+          continue;
         }
+        if (cardData.campaignUrl) {
+          seenUrls.add(cardData.campaignUrl);
+        }
+
+        const card: RawCampaignCard = {
+          siteCode: this.siteCode,
+          rawId: cardData.rawId,
+          title: cardData.title,
+          description: cardData.description,
+          bonusAmount: cardData.bonusAmount,
+          bonusPercentage: extractNumericValue(cardData.bonusPercentage),
+          minDeposit: cardData.minDeposit,
+          maxBonus: null,
+          code: cardData.code?.replace(/KOD:|KUPON:?/gi, '').trim() ?? null,
+          url: this.buildCampaignUrl(cardData.campaignUrl),
+          imageUrl: normalizeImageUrl(this.baseUrl, cardData.imageUrl),
+          startDate: cardData.startDate,
+          endDate: cardData.endDate,
+          termsUrl: cardData.termsUrl,
+          category: cardData.category,
+          badge: cardData.badge,
+          isFeatured: cardData.isFeatured,
+          isExclusive: cardData.isExclusive,
+          rawData: {},
+          scrapedAt: new Date(),
+        };
+
+        cards.push(card);
       }
     }
 
@@ -296,7 +349,12 @@ export class BilyonerAdapter extends BaseAdapter {
     return cards;
   }
 
-  normalize(card: RawCampaignCard): NormalizedCampaignInput {
+  normalize(card: RawCampaignCard): NormalizedCampaignInput | null {
+    // Safety check: validate title quality
+    if (!isLikelyRealCampaignTitle(card.title)) {
+      return null;
+    }
+
     const bonusAmount = extractNumericValue(card.bonusAmount);
     const bonusPercentage = card.bonusPercentage;
     const minDeposit = extractNumericValue(card.minDeposit);

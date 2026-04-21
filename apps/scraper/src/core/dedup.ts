@@ -207,7 +207,11 @@ function serializeValue(value: unknown): string {
     return '';
   }
   if (value instanceof Date) {
-    return value.toISOString();
+    // Normalize to second-level precision to avoid microsecond drift
+    // between scraped dates and stored timestamps
+    const d = new Date(value);
+    d.setMilliseconds(0);
+    return d.toISOString();
   }
   return String(value);
 }

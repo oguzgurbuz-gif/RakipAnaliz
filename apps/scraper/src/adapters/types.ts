@@ -9,7 +9,7 @@ export interface SiteAdapter {
 
   extractCards(page: Page): Promise<RawCampaignCard[]>;
 
-  normalize(card: RawCampaignCard): NormalizedCampaignInput;
+  normalize(card: RawCampaignCard): NormalizedCampaignInput | null;
 
   expandAll?(page: Page, expandButtonSelector: string, options?: {
     maxExpands?: number;

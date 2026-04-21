@@ -34,13 +34,19 @@ const DATE_RANGE_RULES: DateExtractionRule[] = [
     examples: ['01.01.2024 - 31.12.2024', '15/03/2024 - 20/03/2024'],
   },
   {
-    pattern: /(\d{1,2}\s+(${TURKISH_MONTHS})\s+\d{4})\s*[–-]\s*(\d{1,2}\s+(${TURKISH_MONTHS})\s+\d{4})/i,
+    pattern: /(\d{1,2}\s+(Ocak|Şubat|Mart|Nisan|Mayıs|Haziran|Temmuz|Ağustos|Eylül|Ekim|Kasım|Aralık)\s+\d{4})\s*\((\d{2}:\d{2})\)\s*[–-]\s*(\d{1,2}\s+(Ocak|Şubat|Mart|Nisan|Mayıs|Haziran|Temmuz|Ağustos|Eylül|Ekim|Kasım|Aralık)\s+\d{4})\s*\((\d{2}:\d{2})\)/i,
+    extract: (m) => parseDateText(m[1]),
+    priority: 96,
+    examples: ['31 Mart 2026 (08.00) - 30 Nisan 2026 (08.00)'],
+  },
+  {
+    pattern: /(\d{1,2}\s+(Ocak|Şubat|Mart|Nisan|Mayıs|Haziran|Temmuz|Ağustos|Eylül|Ekim|Kasım|Aralık)\s+\d{4})\s*[–-]\s*(\d{1,2}\s+(Ocak|Şubat|Mart|Nisan|Mayıs|Haziran|Temmuz|Ağustos|Eylül|Ekim|Kasım|Aralık)\s+\d{4})/i,
     extract: (m) => parseDateText(m[1]),
     priority: 95,
     examples: ['1 Ocak 2024 - 31 Aralık 2024', '20 Mart - 31 Mart 2026'],
   },
   {
-    pattern: /(\d{1,2}\s+(${TURKISH_MONTHS})\s+\d{4})\s*[–-]\s*(\d{1,2}\s+(${TURKISH_MONTHS_SHORT})\.?\s+\d{4})/i,
+    pattern: /(\d{1,2}\s+(Ocak|Şubat|Mart|Nisan|Mayıs|Haziran|Temmuz|Ağustos|Eylül|Ekim|Kasım|Aralık)\s+\d{4})\s*[–-]\s*(\d{1,2}\s+(Ocak|Şubat|Mar|Nis|May|Haz|Tem|Ağu|Eyl|Eki|Kas|Ara)\.?\s+\d{4})/i,
     extract: (m) => parseDateText(m[1]),
     priority: 94,
     examples: ['1 Ocak 2026 - 31 Ara 2026'],
@@ -52,13 +58,11 @@ const DATE_RANGE_RULES: DateExtractionRule[] = [
     examples: ['01.01. - 31.12. 2024'],
   },
   {
-    pattern: /(${TURKISH_MONTHS})\s+(\d{1,2})\s*[-–]\s*(${TURKISH_MONTHS})\s+(\d{1,2}),?\s*(\d{4})/i,
+    pattern: /(Ocak|Şubat|Mart|Nisan|Mayıs|Haziran|Temmuz|Ağustos|Eylül|Ekim|Kasım|Aralık)\s+(\d{1,2})\s*[-–]\s*(Ocak|Şubat|Mart|Nisan|Mayıs|Haziran|Temmuz|Ağustos|Eylül|Ekim|Kasım|Aralık)\s+(\d{1,2}),?\s*(\d{4})/i,
     extract: (m) => {
       const monthMap: Record<string, number> = {
         'Ocak': 0, 'Şubat': 1, 'Mart': 2, 'Nisan': 3, 'Mayıs': 4, 'Haziran': 5,
         'Temmuz': 6, 'Ağustos': 7, 'Eylül': 8, 'Ekim': 9, 'Kasım': 10, 'Aralık': 11,
-        'Oca': 0, 'Şub': 1, 'Mar': 2, 'Nis': 3, 'May': 4, 'Haz': 5,
-        'Tem': 6, 'Ağu': 7, 'Eyl': 8, 'Eki': 9, 'Kas': 10, 'Ara': 11,
       };
       const month = monthMap[m[1]];
       const day = parseInt(m[2], 10);
@@ -151,6 +155,21 @@ const RELATIVE_DATE_RULES: DateExtractionRule[] = [
 
 const STANDALONE_DATE_RULES: DateExtractionRule[] = [
   {
+    // BE-6: Hipodrom-specific: "Başlama Tarihi: DD.MM.YYYY" and "Bitiş Tarihi: DD.MM.YYYY"
+    // These must be checked BEFORE the generic "Kampanya DD.MM.YYYY-DD.MM.YYYY" rule
+    // because Kampanya rule incorrectly matches when dates appear in different contexts
+    pattern: /başlama\s*tarihi\s*:?\s*(\d{1,2}[\.\/]\d{1,2}[\.\/]\d{2,4})/i,
+    extract: (m) => parseDateText(m[1]),
+    priority: 95,
+    examples: ['Başlama Tarihi: 20.03.2025', 'Başlama Tarihi 20.03.2025'],
+  },
+  {
+    pattern: /bit[iı]ş\s*tarihi\s*:?\s*(\d{1,2}[\.\/]\d{1,2}[\.\/]\d{2,4})/i,
+    extract: (m) => parseDateText(m[1]),
+    priority: 95,
+    examples: ['Bitiş Tarihi: 31.12.2026', 'Bitiş Tarihi 31.12.2026'],
+  },
+  {
     pattern: /geçerlilik\s*:?\s*(\d{1,2}[\.\/]\d{1,2}[\.\/]\d{2,4})/i,
     extract: (m) => parseDateText(m[1]),
     priority: 80,
@@ -167,6 +186,13 @@ const STANDALONE_DATE_RULES: DateExtractionRule[] = [
     extract: (m) => parseDateText(m[1]),
     priority: 90,
     examples: ['Kampanya 01.01.2024-31.12.2024'],
+  },
+  {
+    // Standalone Turkish date with optional time: "10 Nisan 2026 (saat:14.30)"
+    pattern: /(\d{1,2}\s+(Ocak|Şubat|Mart|Nisan|Mayıs|Haziran|Temmuz|Ağustos|Eylül|Ekim|Kasım|Aralık)\s+\d{4})(?:\s*\(saat[:\.]?\s*\d{1,2}[.:]\d{2}\))?/i,
+    extract: (m) => parseDateText(m[1]),
+    priority: 82,
+    examples: ['10 Nisan 2026', '10 Nisan 2026 (saat:14.30)', '1 Ocak 2026'],
   },
 ];
 

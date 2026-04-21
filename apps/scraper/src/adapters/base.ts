@@ -26,7 +26,7 @@ export abstract class BaseAdapter {
 
   abstract extractCards(page: Page): Promise<RawCampaignCard[]>;
 
-  abstract normalize(card: RawCampaignCard): NormalizedCampaignInput;
+  abstract normalize(card: RawCampaignCard): NormalizedCampaignInput | null;
 
   protected async loadListing(
     page: Page,
@@ -207,6 +207,113 @@ export abstract class BaseAdapter {
     });
   }
 
+  /**
+   * Visit multiple detail pages with controlled concurrency (BE-2)
+   * Uses a semaphore pattern to limit simultaneous visits
+   */
+  public async visitDetailPagesConcurrently(
+    browser: Browser,
+    urls: string[],
+    options: {
+      concurrency?: number;
+      waitMs?: number;
+      timeout?: number;
+    } = {}
+  ): Promise<Map<string, DetailPageResult>> {
+    const { concurrency = 3, waitMs = 500, timeout = 30000 } = options;
+    const results = new Map<string, DetailPageResult>();
+    let activeCount = 0;
+    let currentIndex = 0;
+
+    const processNext = async (): Promise<void> => {
+      while (true) {
+        while (activeCount >= concurrency) {
+          await new Promise(resolve => setTimeout(resolve, 100));
+        }
+        
+        if (currentIndex >= urls.length) break;
+        
+        const url = urls[currentIndex++];
+        activeCount++;
+        
+        const page = await browser.newPage();
+        try {
+          const result = await this.visitDetailPage(page, url, { waitMs, timeout });
+          results.set(url, result);
+        } catch (error) {
+          logger.warn(`Failed to visit detail page: ${url}`, {
+            siteCode: this.siteCode,
+            error: error instanceof Error ? error.message : 'Unknown',
+          });
+          results.set(url, { body: null, rawDateText: null, termsUrl: null });
+        } finally {
+          await page.close();
+          activeCount--;
+        }
+      }
+    };
+
+    // Start concurrent workers
+    const workers = Array(Math.min(concurrency, urls.length))
+      .fill(null)
+      .map(() => processNext());
+
+    await Promise.all(workers);
+    return results;
+  }
+
+  /**
+   * BE-1: Semantic selectors for more robust extraction
+   * Falls back to semantic/ARIA selectors when CSS selectors fail
+   */
+  protected async extractWithSemanticFallback(
+    page: Page,
+    cssSelector: string,
+    semanticSelector: string
+  ): Promise<string | null> {
+    // Try CSS selector first
+    try {
+      const result = await this.extractText(page, cssSelector);
+      if (result) return result;
+    } catch {}
+
+    // Fall back to semantic selector
+    try {
+      const result = await page.evaluate((sel) => {
+        const el = document.querySelector(sel);
+        return el?.textContent?.trim() ?? null;
+      }, semanticSelector);
+      if (result) return result;
+    } catch {}
+
+    return null;
+  }
+
+  /**
+   * BE-1: AI-based extraction as ultimate fallback (when selectors and semantic fail)
+   */
+  protected async extractWithAiFallback(
+    page: Page,
+    failedSelectors: string[]
+  ): Promise<string | null> {
+    // Get page content
+    const content = await page.evaluate(() => {
+      const main = document.querySelector('main, [role="main"], article, .content, #content');
+      return main?.textContent?.trim() ?? document.body.textContent?.trim() ?? null;
+    });
+
+    if (!content || content.length < 50) return null;
+
+    logger.info(`AI fallback extraction triggered for ${this.siteCode}`, {
+      failedSelectors,
+      contentLength: content.length,
+    });
+
+    // The AI fallback would be triggered here
+    // For now, return the content for manual processing
+    return content.length > 5000 ? content.substring(0, 5000) : content;
+  }
+
   public async visitDetailPage(
     page: Page,
     detailUrl: string,
@@ -237,24 +344,98 @@ export abstract class BaseAdapter {
     };
   }
 
+  /**
+   * BE-3: Setup Intersection Observer for lazy loading scroll triggers
+   * Returns a function to check if more content should be loaded
+   */
+  protected setupLazyLoadingObserver(
+    page: Page,
+    options: {
+      rootMargin?: string;
+      threshold?: number;
+    } = {}
+  ): { observe: () => Promise<void>; disconnect: () => void } {
+    const { rootMargin = '200px', threshold = 0 } = options;
+    let triggered = false;
+
+    const observer = {
+      triggered: false,
+      disconnect: () => {
+        triggered = true;
+      },
+    };
+
+    return {
+      async observe() {
+        await page.evaluate(({ rootMargin, threshold }) => {
+          return new Promise<void>((resolve) => {
+            let observerCallback: IntersectionObserverCallback;
+            
+            observerCallback = (entries) => {
+              for (const entry of entries) {
+                if (entry.isIntersecting) {
+                  // Set a flag that can be checked later
+                  (window as any).__lazyLoadTriggered = true;
+                  resolve();
+                  break;
+                }
+              }
+            };
+
+            const observer = new IntersectionObserver(observerCallback, {
+              rootMargin,
+              threshold,
+            });
+
+            // Observe the last element or a sentinel
+            const sentinel = document.querySelector('.campaign-card:last-child, .load-more-sentinel, [data-lazy-load]');
+            if (sentinel) {
+              observer.observe(sentinel);
+            } else {
+              resolve();
+            }
+          });
+        }, { rootMargin, threshold });
+      },
+      disconnect: () => {
+        triggered = true;
+      },
+    };
+  }
+
+  /**
+   * Extracts clean campaign body text from a detail page.
+   * Falls back to progressively broader selectors, stopping before full document.body.
+   * Returns null if no meaningful content is found.
+   */
   public async extractDetailBody(page: Page): Promise<string | null> {
-    const selectors = [
+    // Specific campaign detail selectors — most reliable
+    const specificSelectors = [
       '.campaign-detail',
-      '.campaign-content',
+      '.campaign-detail-content',
+      '.campaign-description',
+      '.campaign-info',
+      '[class*="campaign-detail"]',
+      '[class*="campaign-info"]',
+      '[class*="terms"]',
       '.detail-body',
-      '[class*="description"]',
-      '[class*="content"]',
       'article',
-      '.content',
-      'main',
     ];
 
-    for (const selector of selectors) {
+    // Article-like containers — second tier
+    const articleSelectors = [
+      'main',
+      '[role="main"]',
+      '.content',
+      '#content',
+    ];
+
+    for (const selector of [...specificSelectors, ...articleSelectors]) {
       try {
         const element = await page.$(selector);
         if (element) {
           const text = await element.evaluate((el) => el.textContent?.trim() ?? null);
-          if (text) {
+          if (text && text.length > 50) {
             return text;
           }
         }
@@ -263,11 +444,46 @@ export abstract class BaseAdapter {
       }
     }
 
+    // Last resort: get the largest text block that looks like campaign content
+    // Never use raw document.body.innerText as it grabs full SPA shell
     try {
-      return await page.evaluate(() => document.body.innerText?.trim() ?? null);
+      const result = await page.evaluate(() => {
+        const candidates = Array.from(document.querySelectorAll('p, li, td, th, span, div'));
+        let bestText = '';
+        let bestLen = 0;
+
+        for (const el of candidates) {
+          const text = el.textContent?.trim() ?? '';
+          // Skip navigation, header, footer elements
+          const tag = el.tagName.toLowerCase();
+          const className = el.className ?? '';
+          const id = el.id ?? '';
+          if (tag === 'nav' || tag === 'header' || tag === 'footer' || tag === 'script' || tag === 'style') continue;
+          if (className.includes('nav') || className.includes('menu') || className.includes('footer') || className.includes('header')) continue;
+          if (id.includes('nav') || id.includes('menu') || id.includes('footer') || id.includes('header')) continue;
+
+          if (text.length > bestLen && text.length > 100) {
+            bestLen = text.length;
+            bestText = text;
+          }
+        }
+        return bestText || null;
+      });
+      return result;
     } catch {
       return null;
     }
+  }
+
+  /**
+   * Cleans extracted body text by removing navigation noise, excessive whitespace, etc.
+   */
+  protected cleanBodyText(text: string): string {
+    if (!text) return '';
+    return text
+      .replace(/\s+/g, ' ')
+      .replace(/\n\s*/g, '\n')
+      .trim();
   }
 
   private async extractDateText(page: Page): Promise<string | null> {

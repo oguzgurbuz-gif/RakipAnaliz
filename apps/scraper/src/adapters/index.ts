@@ -26,7 +26,9 @@ export class AdapterRegistry {
       new ForNalaAdapter(),
       new AltiliGanyanAdapter(),
       new AtYarisiAdapter(),
-      new BilyonerAdapter(),
+      // BilyonerAdapter disabled: site returns 40319 login wall for all endpoints (including /kampanyalar, /api/campaigns)
+      // No public campaign pages exist, API requires authentication, mobile site redirects to main
+      // new BilyonerAdapter(),
       new BirebinAdapter(),
       new EkuriAdapter(),
       new HipodromAdapter(),

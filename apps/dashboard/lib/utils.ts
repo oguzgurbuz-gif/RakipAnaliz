@@ -32,26 +32,30 @@ export function formatDateRange(dateFrom: string | null, dateTo: string | null):
 export function getSentimentColor(sentiment: string): string {
   switch (sentiment) {
     case 'positive':
-      return 'text-green-600 bg-green-50'
+      return 'bg-emerald-100 text-emerald-800 border border-emerald-200'
     case 'negative':
-      return 'text-red-600 bg-red-50'
+      return 'bg-rose-100 text-rose-800 border border-rose-200'
     case 'neutral':
     default:
-      return 'text-gray-600 bg-gray-50'
+      return 'bg-slate-100 text-slate-700 border border-slate-200'
   }
 }
 
 export function getStatusColor(status: string): string {
   switch (status) {
     case 'active':
-      return 'text-green-600 bg-green-50 border-green-200'
+      return 'bg-gradient-to-r from-emerald-500 to-emerald-400 text-white shadow-sm shadow-emerald-200'
+    // Scraper schema uses 'expired'; legacy UI used 'ended' — accept both so
+    // the table renders the correct slate badge for ended campaigns.
+    case 'expired':
     case 'ended':
-      return 'text-gray-600 bg-gray-50 border-gray-200'
+      return 'bg-gradient-to-r from-slate-500 to-slate-400 text-white shadow-sm shadow-slate-200'
+    case 'hidden':
     case 'passive':
-      return 'text-yellow-600 bg-yellow-50 border-yellow-200'
+      return 'bg-gradient-to-r from-amber-500 to-amber-400 text-white shadow-sm shadow-amber-200'
     case 'changed':
-      return 'text-blue-600 bg-blue-50 border-blue-200'
+      return 'bg-gradient-to-r from-blue-500 to-blue-400 text-white shadow-sm shadow-blue-200'
     default:
-      return 'text-gray-600 bg-gray-50 border-gray-200'
+      return 'bg-slate-100 text-slate-600 border border-slate-200'
   }
 }

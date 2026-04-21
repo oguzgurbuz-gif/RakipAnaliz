@@ -5,7 +5,12 @@ import { getCorsHeaders } from '@/lib/response';
 
 const querySchema = z.object({
   page: z.coerce.number().int().positive().default(1),
-  pageSize: z.coerce.number().int().positive().max(100).default(20),
+  // Internal admin tool — calendar/reports/gallery views legitimately need to
+  // pull "all campaigns active in range" in a single request (e.g. limit:500
+  // from /calendar, limit:1000 from /reports/summary). Keep the cap modest but
+  // above those callers; without this the whole API silently returns
+  // success:false → withFallback() yields [] and pages render blank.
+  pageSize: z.coerce.number().int().positive().max(1000).default(20),
   siteId: z.string().optional(),
   status: z.string().optional(),
   category: z.string().optional(),
@@ -60,8 +65,9 @@ function buildDateClause(dateMode?: string, from?: string, to?: string): { claus
     return { clause: '', params: [] };
   }
 
-  const dateFrom = new Date(from);
-  const dateTo = new Date(to);
+  // Use string format directly to avoid timezone issues with Date objects
+  const dateFrom = from;
+  const dateTo = to;
 
   switch (dateMode) {
     case 'started_in_range':
@@ -174,12 +180,17 @@ export async function GET(request: NextRequest) {
       paramIndex++;
     }
 
-    whereClause += dateFilter.clause;
+    if (dateFilter.clause) {
+      whereClause += ' ' + dateFilter.clause;
+    }
 
-    const validSortColumns = ['created_at', 'updated_at', 'valid_from', 'valid_to', 'title', 'status', 'last_seen_at'];
+    const validSortColumns = ['created_at', 'updated_at', 'valid_from', 'valid_to', 'title', 'status', 'last_seen_at', 'bonus_amount', 'duration'];
     const sortColumn = sort && validSortColumns.includes(sort) ? sort : 'created_at';
     const sortDirection = sortColumn.startsWith('-') ? 'ASC' : 'DESC';
     const sortCol = sortColumn.startsWith('-') ? sortColumn.slice(1) : sortColumn;
+
+    const bonusAmountExpr = `JSON_UNQUOTE(JSON_EXTRACT(c.metadata, '$.ai_analysis.extractedTags.bonus_amount'))`;
+    const durationExpr = `DATEDIFF(COALESCE(c.valid_to, NOW()), COALESCE(c.valid_from, c.created_at))`;
 
     const sortSql: Record<string, string> = {
       created_at: 'c.created_at',
@@ -189,6 +200,8 @@ export async function GET(request: NextRequest) {
       title: 'c.title',
       status: 'c.status',
       last_seen_at: 'c.last_seen_at',
+      bonus_amount: `(${bonusAmountExpr} + 0)`,
+      duration: durationExpr,
     };
     const orderCol = sortSql[sortCol === 'first_seen_at' ? 'created_at' : sortCol] || 'c.created_at';
 
@@ -274,10 +287,11 @@ export async function GET(request: NextRequest) {
       { headers: getCorsHeaders() }
     );
   } catch (error) {
-    console.error('Campaigns API fallback:', error);
+    console.error('Campaigns API error:', error);
     return NextResponse.json(
       {
-        success: true,
+        success: false,
+        error: error instanceof Error ? error.message : 'Internal server error',
         data: [],
         meta: {
           page: 1,
@@ -285,9 +299,8 @@ export async function GET(request: NextRequest) {
           total: 0,
           totalPages: 0,
         },
-        fallback: true,
       },
-      { headers: getCorsHeaders() }
+      { status: 500, headers: getCorsHeaders() }
     );
   }
 }

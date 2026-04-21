@@ -15,6 +15,9 @@ import {
   ListChecks,
   AlertTriangle,
   Settings,
+  Globe,
+  ScrollText,
+  DollarSign,
 } from 'lucide-react'
 
 type NavItem = {
@@ -36,6 +39,9 @@ const adminNavItems: NavItem[] = [
   { href: '/admin/runs', label: 'Scrape İşlemleri', icon: ListChecks, isAdmin: true },
   { href: '/admin/quality', label: 'Veri Kalitesi', icon: AlertTriangle, isAdmin: true },
   { href: '/admin/jobs', label: 'İş Yönetimi', icon: Settings, isAdmin: true },
+  { href: '/admin/sites', label: 'Site Yönetimi', icon: Globe, isAdmin: true },
+  { href: '/admin/audit', label: 'Audit Log', icon: ScrollText, isAdmin: true },
+  { href: '/admin/cost', label: 'AI Maliyeti', icon: DollarSign, isAdmin: true },
 ]
 
 export function Sidebar() {

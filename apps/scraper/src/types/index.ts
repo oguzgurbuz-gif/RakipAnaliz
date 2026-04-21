@@ -142,9 +142,11 @@ export interface JobRecord {
 export type JobType =
   | 'scrape'
   | 'ai-analysis'
+  | 'ai-analysis-batch'
   | 'date-extraction'
   | 'weekly-report'
-  | 'status-recalc';
+  | 'status-recalc'
+  | 'momentum-recalc';
 
 export interface ScrapeRun {
   id: string;

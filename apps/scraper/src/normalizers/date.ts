@@ -13,6 +13,19 @@ const TURKISH_MONTHS: Record<string, number> = {
   ekim: 10,
   kasım: 11,
   aralık: 12,
+  // BE-6: Short Turkish month abbreviations (Oca, Şub, Mar, Nis, May, Haz, Tem, Ağu, Eyl, Eki, Kas, Ara)
+  'oca': 1,
+  'şub': 2,
+  'mar': 3,
+  'nis': 4,
+  'may': 5,
+  'haz': 6,
+  'tem': 7,
+  'ağu': 8,
+  'eyl': 9,
+  'eki': 10,
+  'kas': 11,
+  'ara': 12,
   january: 1,
   february: 2,
   march: 3,
@@ -27,6 +40,19 @@ const TURKISH_MONTHS: Record<string, number> = {
 };
 
 const DATE_PATTERNS = [
+  {
+    // BE-7: Date range with repeated year "20 Mart - 31 Mart 2026"
+    // First date has no year, second has year - we need to infer year from second date
+    regex: /^(\d{1,2})\s+(\w+)\s*[–-]\s*(\d{1,2})\s+(\w+)\s+(\d{4})$/,
+    parse: (m: RegExpMatchArray) => {
+      const day1 = parseInt(m[1], 10);
+      const month1 = TURKISH_MONTHS[m[2].toLowerCase()] ?? parseInt(m[2], 10);
+      const day2 = parseInt(m[3], 10);
+      const year = parseInt(m[5], 10);
+      // Return the start date - year is inferred from the second date
+      return { day: day1, month: month1, year };
+    },
+  },
   {
     regex: /^(\d{1,2})\.(\d{1,2})\.(\d{4})$/,
     parse: (m: RegExpMatchArray) => ({

@@ -1,27 +1,22 @@
-import { Page, ElementHandle } from 'puppeteer';
+import { Page } from 'puppeteer';
 import { BaseAdapter } from './base';
 import { RawCampaignCard, NormalizedCampaignInput } from '../types';
 import { buildFingerprint, buildRawFingerprint } from '../normalizers/fingerprint';
-import { extractNumericValue } from '../normalizers/text';
-import { parseDateText } from '../normalizers/date';
+import { extractNumericValue, isLikelyRealCampaignTitle } from '../normalizers/text';
 import { normalizeImageUrl } from '../normalizers/image';
 import { extractDatesFromCampaignText } from '../date-extraction/parser';
+import { logger } from '../utils/logger';
 
 export class MisliAdapter extends BaseAdapter {
   private static readonly SITE_CODE = 'misli';
   private static readonly BASE_URL = 'https://www.misli.com';
-  public readonly campaignsUrl = 'https://www.misli.com/kampanyalar';
+  // Misli's /kampanyalar typically renders "Güncel Kampanyalar 0" with no cards;
+  // archived campaigns under /kampanyalar/gecmis use the same DOM (campaignItem,
+  // campaignTitle, campaignDate, campaignBtn) and reliably contain entries.
+  public readonly campaignsUrl = 'https://www.misli.com/kampanyalar/gecmis';
 
   protected readonly selectors = {
-    campaignCard: [
-      '[class*="campaign"]',
-      '[class*="item"]',
-      '[class*="card"]',
-      '[class*="bonus"]',
-      '[class*="offer"]',
-      '[class*="promotion"]',
-      'article',
-    ].join(', '),
+    campaignCard: '.campaignItem',
     campaignTitle: [
       '[class*="title"]',
       '[class*="campaignTitle"]',
@@ -79,103 +74,64 @@ export class MisliAdapter extends BaseAdapter {
 
     await this.triggerLazyLoading(page);
 
-    const cardSelectors = [
-      '[class*="campaign"]',
-      '[class*="item"]',
-      '[class*="card"]',
-      '[class*="bonus"]',
-      '[class*="offer"]',
-      '[class*="promotion"]',
-      'article',
-    ];
+    // Misli's archive page uses the same widget as Hipodrom: each campaign is a
+    // .campaignItem with .campaignTitle, .campaignDate, .campaignBtn (link), .campaignPicture img.
+    // We deliberately avoid generic [class*="campaign"] selectors here because the page also
+    // contains menu items like "Geçmiş Kampanyalar 11" that would slip through.
+    const cardResults = await page.evaluate(() => {
+      const results: any[] = [];
+      const cardEls = document.querySelectorAll('.campaignItem');
 
-    let cardElements: ElementHandle<Element>[] = [];
-    for (const selector of cardSelectors) {
-      try {
-        cardElements = await page.$$(selector);
-        if (cardElements.length > 0) {
-          console.log(`Misli: Found ${cardElements.length} cards with selector: ${selector}`);
-          break;
-        }
-      } catch (e) {
-        continue;
-      }
-    }
+      cardEls.forEach((el, index) => {
+        const titleEl = el.querySelector('.campaignTitle a, .campaignTitle');
+        const title = titleEl?.textContent?.trim().replace(/\s+/g, ' ') ?? '';
+        if (!title || title.length < 4) return;
 
-    if (cardElements.length === 0) {
-      cardElements = await this.fallbackCardDiscovery(page, seenUrls);
-    }
+        const linkEl = el.querySelector('.campaignBtn, .campaignTitle a, .campaignPicture a');
+        const campaignUrl = linkEl?.getAttribute('href') ?? '';
+        if (!campaignUrl) return;
 
-    for (const cardEl of cardElements) {
-      try {
-        const rawId = await page.evaluate((el) => el.getAttribute('data-id') || el.getAttribute('id') || `misli-${Date.now()}`, cardEl);
+        const description = el.querySelector('.campaignDate')?.textContent?.trim() ?? null;
+        const imgEl = el.querySelector('.campaignPicture img');
+        const imageUrl = imgEl?.getAttribute('src') ?? imgEl?.getAttribute('data-src') ?? null;
+        const badge = el.querySelector('.campaignPicture')?.textContent?.trim() ?? null;
+        const rawId = el.getAttribute('data-id')
+          || el.getAttribute('id')
+          || campaignUrl.replace(/^.*\//, '')
+          || `misli-${index}`;
 
-        const title = await cardEl.$eval(this.selectors.campaignTitle, (el: Element) => el.textContent?.trim() ?? '').catch(() => '');
+        results.push({ rawId, title, description, campaignUrl, imageUrl, badge });
+      });
 
-        const description = await cardEl.$eval(this.selectors.campaignDescription, (el: Element) => el.textContent?.trim() ?? null).catch(() => null);
+      return results;
+    });
 
-        const bonusAmountText = await cardEl.$eval(this.selectors.bonusAmount, (el: Element) => el.textContent?.trim() ?? null).catch(() => null);
+    for (const data of cardResults) {
+      if (seenUrls.has(data.campaignUrl)) continue;
+      seenUrls.add(data.campaignUrl);
 
-        const bonusPercentageText = await cardEl.$eval(this.selectors.bonusPercentage, (el: Element) => el.textContent?.trim() ?? null).catch(() => null);
-
-        const campaignUrl = await cardEl.$eval(this.selectors.campaignUrl, (el: Element) => {
-          const href = el.getAttribute('href');
-          if (href && (href.includes('kampanya') || href.includes('bonus') || href.startsWith('/'))) {
-            return href;
-          }
-          return '';
-        }).catch(() => '');
-
-        if (campaignUrl && seenUrls.has(campaignUrl)) {
-          continue;
-        }
-        if (campaignUrl) {
-          seenUrls.add(campaignUrl);
-        }
-
-        const imageUrl = await cardEl.$eval(this.selectors.campaignImage, (el: Element) => el.getAttribute('src') ?? el.getAttribute('data-src') ?? null).catch(() => null);
-
-        const startDateText = await cardEl.$eval(this.selectors.startDate, (el: Element) => el.textContent?.trim() ?? null).catch(() => null);
-
-        const endDateText = await cardEl.$eval(this.selectors.endDate, (el: Element) => el.textContent?.trim() ?? null).catch(() => null);
-
-        const termsUrl = await cardEl.$eval(this.selectors.termsUrl, (el: Element) => el.getAttribute('href') ?? null).catch(() => null);
-
-        const category = await cardEl.$eval(this.selectors.category, (el: Element) => el.textContent?.trim() ?? null).catch(() => null);
-
-        const badge = await cardEl.$eval(this.selectors.badge, (el: Element) => el.textContent?.trim() ?? null).catch(() => null);
-
-        const isFeatured = await cardEl.$(this.selectors.featured).then((el: ElementHandle | null) => el !== null).catch(() => false);
-
-        const isExclusive = await cardEl.$(this.selectors.exclusive).then((el: ElementHandle | null) => el !== null).catch(() => false);
-
-        const card: RawCampaignCard = {
-          siteCode: this.siteCode,
-          rawId,
-          title,
-          description,
-          bonusAmount: bonusAmountText,
-          bonusPercentage: extractNumericValue(bonusPercentageText),
-          minDeposit: null,
-          maxBonus: null,
-          code: null,
-          url: this.buildCampaignUrl(campaignUrl),
-          imageUrl: normalizeImageUrl(this.baseUrl, imageUrl),
-          startDate: startDateText,
-          endDate: endDateText,
-          termsUrl,
-          category,
-          badge,
-          isFeatured,
-          isExclusive,
-          rawData: {},
-          scrapedAt: new Date(),
-        };
-
-        cards.push(card);
-      } catch (error) {
-        console.error(`Error extracting card: ${error}`);
-      }
+      cards.push({
+        siteCode: this.siteCode,
+        rawId: data.rawId,
+        title: data.title,
+        description: data.description,
+        bonusAmount: null,
+        bonusPercentage: null,
+        minDeposit: null,
+        maxBonus: null,
+        code: null,
+        url: this.buildCampaignUrl(data.campaignUrl),
+        imageUrl: normalizeImageUrl(this.baseUrl, data.imageUrl),
+        startDate: null,
+        endDate: null,
+        termsUrl: null,
+        category: null,
+        badge: data.badge,
+        isFeatured: false,
+        isExclusive: false,
+        rawData: {},
+        scrapedAt: new Date(),
+      });
     }
 
     const listingUrl = page.url();
@@ -199,6 +155,37 @@ export class MisliAdapter extends BaseAdapter {
 
         if (result?.termsUrl) {
           card.termsUrl = result.termsUrl;
+        }
+
+        // Extract dates from detail page body
+        if (result?.body) {
+          const dateMatch = result.body.match(/Başlama Tarihi:\s*(\d{2}[./]\d{2}[./]\d{4})\s*-\s*Bitiş Tarihi:\s*(\d{2}[./]\d{2}[./]\d{4})/i);
+          if (dateMatch) {
+            const startDateStr = dateMatch[1].replace(/\./g, '-');
+            const endDateStr = dateMatch[2].replace(/\./g, '-');
+            const parsedStart = new Date(startDateStr);
+            const parsedEnd = new Date(endDateStr);
+            if (!isNaN(parsedStart.getTime())) {
+              card.startDate = startDateStr;
+            }
+            if (!isNaN(parsedEnd.getTime())) {
+              card.endDate = endDateStr;
+            }
+          }
+
+          // Extract badge "GEÇMİŞKAMPANYA" from detail page
+          const badgeMatch = result.body.match(/GEÇMİŞKAMPANYA/i);
+          if (badgeMatch && !card.badge) {
+            card.badge = 'GEÇMİŞKAMPANYA';
+          }
+
+          // Extract image from detail page if not already set
+          if (!card.imageUrl) {
+            const imgMatch = result.body.match(/<img[^>]+src=["']([^"']+)["'][^>]*>/i);
+            if (imgMatch) {
+              card.imageUrl = imgMatch[1];
+            }
+          }
         }
       } catch (error) {
         console.error(`Error visiting detail page for card ${card.rawId}: ${error}`);
@@ -228,32 +215,13 @@ export class MisliAdapter extends BaseAdapter {
     }
   }
 
-  private async fallbackCardDiscovery(page: Page, seenUrls: Set<string>): Promise<any[]> {
-    const cards: any[] = [];
-    try {
-      const result = await page.evaluate(() => {
-        const links = Array.from(document.querySelectorAll('a[href*="kampanya"], a[href*="bonus"]'));
-        return links.map((link: Element) => {
-          const container = link.closest('[class*="item"], [class*="card"], [class*="campaign"], article, section');
-          return container || link;
-        }).filter((el: Element, idx: number, arr: Element[]) => arr.findIndex(e => e === el) === idx);
-      });
-      const campaignLinks = Array.isArray(result) ? result : [];
-
-      for (const cardData of campaignLinks) {
-        const href = cardData.querySelector?.('a')?.getAttribute('href') || cardData.getAttribute?.('href');
-        if (href && !seenUrls.has(href)) {
-          seenUrls.add(href);
-          cards.push(cardData);
-        }
-      }
-    } catch (e) {
-      console.error('Fallback card discovery failed:', e);
+  normalize(card: RawCampaignCard): NormalizedCampaignInput | null {
+    // Safety check: validate title quality
+    if (!isLikelyRealCampaignTitle(card.title)) {
+      logger.debug(`Skipping card with invalid title: "${card.title.substring(0, 50)}..."`, { siteCode: this.siteCode });
+      return null;
     }
-    return cards;
-  }
 
-  normalize(card: RawCampaignCard): NormalizedCampaignInput {
     const rawFingerprint = buildRawFingerprint({
       siteCode: card.siteCode,
       rawId: card.rawId,

@@ -9,10 +9,29 @@ export async function GET(request: NextRequest) {
     const completedScrapeRuns = await query<{ count: string }>(`SELECT COUNT(*) as count FROM scrape_runs WHERE status = 'completed'`)
 
     const scrapeRuns = await query(`
-      SELECT id, site_id, status, started_at, completed_at,
-             cards_found, new_campaigns, updated_campaigns, unchanged, errors
-      FROM scrape_runs
-      ORDER BY started_at DESC
+      SELECT
+        r.id,
+        r.site_id,
+        r.status,
+        r.started_at,
+        r.completed_at,
+        r.cards_found,
+        r.new_campaigns,
+        r.updated_campaigns,
+        r.unchanged,
+        r.errors,
+        r.run_type,
+        r.trigger_source,
+        r.total_sites,
+        r.completed_sites,
+        r.failed_sites,
+        r.inserted_count,
+        r.updated_count,
+        s.name AS site_name,
+        s.code AS site_code
+      FROM scrape_runs r
+      LEFT JOIN sites s ON s.id = r.site_id
+      ORDER BY r.started_at DESC
       LIMIT 50
     `)
 

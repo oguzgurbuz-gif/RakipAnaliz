@@ -2,7 +2,7 @@ import { Page } from 'puppeteer';
 import { BaseAdapter } from './base';
 import { RawCampaignCard, NormalizedCampaignInput } from '../types';
 import { buildFingerprint, buildRawFingerprint } from '../normalizers/fingerprint';
-import { extractNumericValue } from '../normalizers/text';
+import { extractNumericValue, isLikelyRealCampaignTitle } from '../normalizers/text';
 import { parseDateText } from '../normalizers/date';
 import { normalizeImageUrl } from '../normalizers/image';
 import { extractDatesFromCampaignText } from '../date-extraction/parser';
@@ -45,49 +45,73 @@ export class OleyAdapter extends BaseAdapter {
 
     await this.waitForSelector(page, this.selectors.campaignCard!, { timeout: 15000 });
 
-    const cardElements = await page.$$(this.selectors.campaignCard!);
+    const selectorStr = this.selectors.campaignCard!;
+    const cardData = await page.evaluate((selector) => {
+      const results: any[] = [];
+      const cardEls = document.querySelectorAll(selector);
+      cardEls.forEach((card, index) => {
+        if (card.textContent && card.textContent.trim().length < 30) return;
+        let title = '';
+        const titleEl = card.querySelector('h2.title');
+        if (titleEl?.textContent?.trim()) {
+          title = titleEl.textContent.trim();
+        } else {
+          const headings = Array.from(card.querySelectorAll('h1, h2, h3, h4'));
+          for (const h of headings) {
+            const text = h.textContent?.trim() ?? '';
+            if (text && text.length < 200) { title = text; break; }
+          }
+          if (!title) { const text = card.textContent?.trim() ?? ''; title = text.length < 300 ? text : ''; }
+        }
+        if (!title || title.length < 3) return;
 
-    for (const cardEl of cardElements) {
-      try {
-        const rawId = await page.evaluate((el) => el.getAttribute('data-id') || el.getAttribute('id') || `oley-${Date.now()}`, cardEl);
+        const rawId = card.getAttribute('data-id') || card.getAttribute('id') || `oley-${index}-${Date.now()}`;
 
-        const title = this.selectors.campaignTitle
-          ? await cardEl.$eval(this.selectors.campaignTitle!, (el) => el.textContent?.trim() ?? '').catch(() => '')
-          : '';
+        const descriptionEl = card.querySelector('p.mb-2');
+        const description = descriptionEl?.textContent?.trim() || null;
 
-        const description = await cardEl.$eval('p.mb-2', (el) => el.textContent?.trim() ?? null).catch(() => null);
+        const linkEl = card.querySelector('a');
+        let campaignUrl = '';
+        if (linkEl) {
+          campaignUrl = linkEl.getAttribute('href') || '';
+        }
 
-        const campaignUrl = this.selectors.campaignUrl
-          ? await cardEl.$eval(this.selectors.campaignUrl!, (el) => el.getAttribute('href') ?? '').catch(() => '')
-          : '';
+        const imgEl = card.querySelector('img');
+        const imageUrl = imgEl ? (imgEl.getAttribute('src') || imgEl.getAttribute('data-src') || null) : null;
 
-        const card: RawCampaignCard = {
-          siteCode: this.siteCode,
-          rawId,
-          title,
-          description: null,
-          bonusAmount: null,
-          bonusPercentage: null,
-          minDeposit: null,
-          maxBonus: null,
-          code: null,
-          url: this.buildCampaignUrl(campaignUrl),
-          imageUrl: null,
-          startDate: null,
-          endDate: null,
-          termsUrl: null,
-          category: null,
-          badge: null,
-          isFeatured: false,
-          isExclusive: false,
-          rawData: {},
-          scrapedAt: new Date(),
-        };
+        const rawIdFallback = card.id || `oley-${index}`;
+        const rawIdFinal = card.getAttribute('data-id') || rawIdFallback;
 
-        cards.push(card);
-      } catch (error) {
-        console.error(`Error extracting card: ${error}`);
-      }
+        results.push({ rawId: rawIdFinal, title, description, campaignUrl, imageUrl });
+      });
+      return results;
+    }, selectorStr);
+
+    for (const data of cardData) {
+      const card: RawCampaignCard = {
+        siteCode: this.siteCode,
+        rawId: data.rawId,
+        title: data.title,
+        description: data.description,
+        bonusAmount: null,
+        bonusPercentage: null,
+        minDeposit: null,
+        maxBonus: null,
+        code: null,
+        url: this.buildCampaignUrl(data.campaignUrl),
+        imageUrl: data.imageUrl,
+        startDate: null,
+        endDate: null,
+        termsUrl: null,
+        category: null,
+        badge: null,
+        isFeatured: false,
+        isExclusive: false,
+        rawData: {},
+        scrapedAt: new Date(),
+      };
+
+      cards.push(card);
     }
 
     const listingUrl = page.url();
@@ -98,10 +122,10 @@ export class OleyAdapter extends BaseAdapter {
           await page.goto(card.url, { waitUntil: 'networkidle0', timeout: 15000 });
           await new Promise(r => setTimeout(r, 500));
           
-          card.description = await page.evaluate(() => {
-            const nuxtEl = document.getElementById('__nuxt') || document.body;
-            return nuxtEl.innerText?.trim() || '';
-          });
+          card.description = await this.extractDetailBody(page);
+          if (card.description) {
+            card.description = this.cleanBodyText(card.description);
+          }
         } catch (err) {
           console.error(`Failed to scrape detail page for ${card.url}:`, err);
         }
@@ -115,7 +139,12 @@ export class OleyAdapter extends BaseAdapter {
     return cards;
   }
 
-  normalize(card: RawCampaignCard): NormalizedCampaignInput {
+  normalize(card: RawCampaignCard): NormalizedCampaignInput | null {
+    // Safety check: validate title quality
+    if (!isLikelyRealCampaignTitle(card.title)) {
+      return null;
+    }
+
     const rawFingerprint = buildRawFingerprint({
       siteCode: card.siteCode,
       rawId: card.rawId,

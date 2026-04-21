@@ -13,7 +13,7 @@ import {
 import { Badge } from '@/components/ui/badge'
 import { DataQualityBadge } from '@/components/ui/data-quality-badge'
 import { resolveCampaignDateDisplay } from '@/lib/campaign-dates'
-import { getCampaignQualitySignals, getCampaignTypeLabel, getDisplaySentimentLabel } from '@/lib/campaign-presentation'
+import { getCampaignBonusInfo, getCampaignQualitySignals, getCampaignTypeLabel, getDisplaySentimentLabel, getDisplayStatusLabel } from '@/lib/campaign-presentation'
 import { getSentimentColor, getStatusColor, cn } from '@/lib/utils'
 import { Star } from 'lucide-react'
 import type { Campaign } from '@/types'
@@ -22,20 +22,27 @@ interface CampaignTableProps {
   campaigns: Campaign[]
   isLoading?: boolean
   favorites?: string[]
+  selectedIds?: Set<string>
   onToggleFavorite?: (id: string, e: React.MouseEvent) => void
+  onToggleSelect?: (id: string) => void
+  onSelectAll?: () => void
 }
 
-export function CampaignTable({ campaigns, isLoading, favorites = [], onToggleFavorite }: CampaignTableProps) {
+export function CampaignTable({ campaigns, isLoading, favorites = [], selectedIds, onToggleFavorite, onToggleSelect, onSelectAll }: CampaignTableProps) {
   if (isLoading) {
     return (
       <div className="rounded-md border">
         <Table className="min-w-[1080px]">
           <TableHeader>
             <TableRow>
+              <TableHead className="w-10">
+                <input type="checkbox" className="rounded" disabled />
+              </TableHead>
               <TableHead></TableHead>
               <TableHead className="whitespace-nowrap">Başlık</TableHead>
               <TableHead className="whitespace-nowrap">Site</TableHead>
               <TableHead className="whitespace-nowrap">Tür</TableHead>
+              <TableHead className="whitespace-nowrap">Bonus</TableHead>
               <TableHead className="whitespace-nowrap">Duygu</TableHead>
               <TableHead className="whitespace-nowrap">Durum</TableHead>
               <TableHead className="whitespace-nowrap">Başlangıç</TableHead>
@@ -45,7 +52,7 @@ export function CampaignTable({ campaigns, isLoading, favorites = [], onToggleFa
           <TableBody>
             {Array.from({ length: 5 }).map((_, i) => (
               <TableRow key={i}>
-                {Array.from({ length: 8 }).map((_, j) => (
+                {Array.from({ length: 10 }).map((_, j) => (
                   <TableCell key={j}>
                     <div className="h-4 w-20 rounded bg-muted animate-pulse" />
                   </TableCell>
@@ -67,14 +74,24 @@ export function CampaignTable({ campaigns, isLoading, favorites = [], onToggleFa
   }
 
   return (
-    <div className="rounded-md border">
-      <Table className="min-w-[1080px]">
+    // FE-12: Table with responsive horizontal scroll
+    <div className="overflow-x-auto rounded-md border">
+      <Table className="min-w-[900px] w-full">
           <TableHeader>
             <TableRow>
+              <TableHead className="w-10">
+                <input
+                  type="checkbox"
+                  className="rounded"
+                  checked={selectedIds ? campaigns.length > 0 && selectedIds.size === campaigns.length : false}
+                  onChange={onSelectAll}
+                />
+              </TableHead>
               <TableHead></TableHead>
               <TableHead className="whitespace-nowrap">Başlık</TableHead>
               <TableHead className="whitespace-nowrap">Site</TableHead>
               <TableHead className="whitespace-nowrap">Tür</TableHead>
+              <TableHead className="whitespace-nowrap">Bonus</TableHead>
               <TableHead className="whitespace-nowrap">Duygu</TableHead>
               <TableHead className="whitespace-nowrap">Durum</TableHead>
               <TableHead className="whitespace-nowrap">Başlangıç</TableHead>
@@ -98,9 +115,21 @@ export function CampaignTable({ campaigns, isLoading, favorites = [], onToggleFa
               'end'
             )
             const qualitySignals = getCampaignQualitySignals(campaign)
+            const bonusInfo = getCampaignBonusInfo(campaign)
+            const bonusTitle = bonusInfo.confidence !== null
+              ? `AI güven: %${Math.round(bonusInfo.confidence * 100)}`
+              : 'AI güven bilgisi yok'
 
             return (
               <TableRow key={campaign.id}>
+                <TableCell className="w-10">
+                  <input
+                    type="checkbox"
+                    className="rounded"
+                    checked={selectedIds?.has(campaign.id) || false}
+                    onChange={() => onToggleSelect?.(campaign.id)}
+                  />
+                </TableCell>
                 <TableCell className="w-10">
                   <button
                     onClick={(e) => onToggleFavorite?.(campaign.id, e)}
@@ -138,6 +167,16 @@ export function CampaignTable({ campaigns, isLoading, favorites = [], onToggleFa
                 <TableCell className="whitespace-nowrap">
                   {getCampaignTypeLabel(campaign)}
                 </TableCell>
+                <TableCell
+                  className="whitespace-nowrap font-medium tabular-nums"
+                  title={bonusTitle}
+                >
+                  {bonusInfo.display ? (
+                    <span className="text-emerald-600 dark:text-emerald-400">{bonusInfo.display}</span>
+                  ) : (
+                    <span className="text-muted-foreground">-</span>
+                  )}
+                </TableCell>
                 <TableCell className="whitespace-nowrap">
                   <Badge className={sentimentClass}>
                     {campaign.sentiment || campaign.aiSentiment
@@ -147,7 +186,7 @@ export function CampaignTable({ campaigns, isLoading, favorites = [], onToggleFa
                 </TableCell>
                 <TableCell className="whitespace-nowrap">
                   <Badge className={cn('capitalize', statusClass)}>
-                    {campaign.status}
+                    {getDisplayStatusLabel(campaign.status)}
                   </Badge>
                 </TableCell>
                 <TableCell className="min-w-[160px] align-top">

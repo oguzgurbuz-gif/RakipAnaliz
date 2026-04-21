@@ -13,9 +13,217 @@ import { Button } from '@/components/ui/button'
 import { Badge } from '@/components/ui/badge'
 import { getCategoryLabel } from '@/lib/category-labels'
 import { useSSE } from '@/hooks/useSSE'
-import { Crown, Target, TrendingUp, Sparkles, BarChart3, ArrowUpRight, ArrowDownRight } from 'lucide-react'
+import { Crown, Target, TrendingUp, Sparkles, BarChart3, ArrowUpRight, ArrowDownRight, Activity, Users, Zap, Clock } from 'lucide-react'
 import Link from 'next/link'
 import { cn } from '@/lib/utils'
+import { AlertBanner } from '@/components/ui/alert-banner'
+import { DateRangePickerHeader } from '@/components/ui/date-range-picker-header'
+import { useDateRange } from '@/lib/date-range/context'
+
+const HOME_SCOPE = 'home'
+
+// FE-2: Site code to friendly name mapping
+const SITE_FRIENDLY_NAMES: Record<string, string> = {
+  bitalih: 'Bitalih',
+  nesine: 'Nesine',
+  sondzulyuk: 'Sondüzlük',
+  bilyoner: 'Bilyoner',
+  misli: 'Misli',
+  oley: 'Oley',
+  hipodrom: 'Hipodrom',
+  atyarisi: 'Atyarisi',
+  birebin: 'Birebin',
+  altiliganyan: 'Altiliganyan',
+  ekuri: 'Ekuri',
+  '4nala': '4nala',
+}
+
+// FE-9: Progress Bar Component with percentage explanations
+function ProgressBar({ value, max, label, color, explanation }: { value: number; max?: number; label: string; color?: 'green' | 'yellow' | 'red' | 'blue' | 'purple' | 'violet' | 'orange' | 'emerald'; explanation?: string }) {
+  const maxVal = max || 1
+  const percentage = Math.min(100, Math.round((value / maxVal) * 100))
+  const autoColor = percentage > 90 ? 'red' : percentage > 70 ? 'yellow' : 'green'
+  const barColor = color || autoColor
+  
+  const colorMap = {
+    green: 'bg-emerald-500',
+    emerald: 'bg-emerald-500',
+    yellow: 'bg-amber-500', 
+    red: 'bg-red-500',
+    blue: 'bg-blue-500',
+    purple: 'bg-violet-500',
+    violet: 'bg-violet-500',
+    orange: 'bg-orange-500',
+  }
+
+  // FE-9: Build tooltip text with explanation
+  const tooltipText = explanation || `${label}: ${percentage}%`
+
+  return (
+    <div className="space-y-1.5" title={tooltipText}>
+      <div className="flex justify-between text-xs">
+        <span className="text-muted-foreground">{label}</span>
+        <span className="font-semibold">{percentage}%</span>
+      </div>
+      <div className="h-2.5 bg-muted rounded-full overflow-hidden">
+        <div 
+          className={cn('h-full rounded-full transition-all duration-700 ease-out', colorMap[barColor])}
+          style={{ width: `${percentage}%` }}
+        />
+      </div>
+    </div>
+  )
+}
+
+// Large Stat Card with gradient
+function HeroStatCard({ 
+  title, 
+  value, 
+  subtitle, 
+  icon: Icon, 
+  trend,
+  trendValue,
+  color 
+}: { 
+  title: string
+  value: string | number
+  subtitle?: string
+  icon: React.ElementType
+  trend?: 'up' | 'down' | 'neutral'
+  trendValue?: string
+  color: 'green' | 'blue' | 'purple' | 'orange' | 'emerald'
+}) {
+  const colorConfig = {
+    green: { bg: 'bg-emerald-50 border-emerald-200', icon: 'bg-emerald-500', text: 'text-emerald-600' },
+    blue: { bg: 'bg-blue-50 border-blue-200', icon: 'bg-blue-500', text: 'text-blue-600' },
+    purple: { bg: 'bg-violet-50 border-violet-200', icon: 'bg-violet-500', text: 'text-violet-600' },
+    orange: { bg: 'bg-orange-50 border-orange-200', icon: 'bg-orange-500', text: 'text-orange-600' },
+    emerald: { bg: 'bg-emerald-50 border-emerald-200', icon: 'bg-emerald-500', text: 'text-emerald-600' },
+  }
+  
+  const config = colorConfig[color]
+
+  return (
+    <Card className={cn('border-2 transition-all hover:shadow-md', config.bg)}>
+      <CardContent className="p-6">
+        <div className="flex items-start justify-between">
+          <div className="space-y-2">
+            <p className="text-sm font-medium text-muted-foreground">{title}</p>
+            <p className="text-5xl font-bold tracking-tight">{value}</p>
+            {subtitle && <p className="text-xs text-muted-foreground">{subtitle}</p>}
+            {trend && trendValue && (
+              <div className={cn('flex items-center gap-1 text-xs font-semibold', trend === 'up' ? 'text-emerald-600' : trend === 'down' ? 'text-red-600' : 'text-gray-500')}>
+                {trend === 'up' ? <ArrowUpRight className="w-3 h-3" /> : trend === 'down' ? <ArrowDownRight className="w-3 h-3" /> : <Activity className="w-3 h-3" />}
+                {trendValue}
+              </div>
+            )}
+          </div>
+          <div className={cn('p-3 rounded-xl shadow-sm', config.icon)}>
+            <Icon className="w-6 h-6 text-white" />
+          </div>
+        </div>
+      </CardContent>
+    </Card>
+  )
+}
+
+// Quick Stats Row with gradient backgrounds
+function QuickStatsRow() {
+  return (
+    <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+      <div className="flex items-center gap-3 p-4 rounded-2xl bg-gradient-to-br from-emerald-50 to-emerald-100 border border-emerald-200 shadow-sm">
+        <div className="p-2 rounded-lg bg-emerald-500 text-white shadow-sm">
+          <Activity className="w-5 h-5" />
+        </div>
+        <div>
+          <p className="text-xs text-emerald-600 font-medium">Aktiflik Oranı</p>
+          <p className="text-2xl font-bold text-emerald-700">94%</p>
+        </div>
+      </div>
+      <div className="flex items-center gap-3 p-4 rounded-2xl bg-gradient-to-br from-blue-50 to-blue-100 border border-blue-200 shadow-sm">
+        <div className="p-2 rounded-lg bg-blue-500 text-white shadow-sm">
+          <Zap className="w-5 h-5" />
+        </div>
+        <div>
+          <p className="text-xs text-blue-600 font-medium">Ortalama CTR</p>
+          <p className="text-2xl font-bold text-blue-700">4.2%</p>
+        </div>
+      </div>
+      <div className="flex items-center gap-3 p-4 rounded-2xl bg-gradient-to-br from-violet-50 to-violet-100 border border-violet-200 shadow-sm">
+        <div className="p-2 rounded-lg bg-violet-500 text-white shadow-sm">
+          <Users className="w-5 h-5" />
+        </div>
+        <div>
+          <p className="text-xs text-violet-600 font-medium">Rakip Sayısı</p>
+          <p className="text-2xl font-bold text-violet-700">11</p>
+        </div>
+      </div>
+      <div className="flex items-center gap-3 p-4 rounded-2xl bg-gradient-to-br from-orange-50 to-orange-100 border border-orange-200 shadow-sm">
+        <div className="p-2 rounded-lg bg-orange-500 text-white shadow-sm">
+          <Clock className="w-5 h-5" />
+        </div>
+        <div>
+          <p className="text-xs text-orange-600 font-medium">Son Güncelleme</p>
+          <p className="text-2xl font-bold text-orange-700">2d</p>
+        </div>
+      </div>
+    </div>
+  )
+}
+
+// FE-8/FE-15: Comparison Bar Component with currency formatting and clickable functionality
+function ComparisonBar({ 
+  label, 
+  value, 
+  maxValue, 
+  isPrimary = false,
+  color = 'primary',
+  siteCode,
+  onClick
+}: { 
+  label: string
+  value: number
+  maxValue?: number
+  isPrimary?: boolean
+  color?: string
+  siteCode?: string
+  onClick?: () => void
+}) {
+  const maxVal = maxValue || 1
+  const width = maxVal > 0 ? (value / maxVal) * 100 : 0
+
+  // FE-8: Format currency values with ₺ symbol and thousand separators
+  const formatValue = (val: number): string => {
+    if (val >= 1000) {
+      return `₺${Math.round(val).toLocaleString('tr-TR')}`
+    }
+    return String(val)
+  }
+
+  return (
+    <div 
+      className={cn('flex items-center gap-3', onClick && 'cursor-pointer hover:bg-muted/30 rounded p-1 -mx-1 transition-colors')}
+      onClick={onClick}
+      title={siteCode ? `${SITE_FRIENDLY_NAMES[siteCode] || label} - Detaylar için tıklayın` : undefined}
+    >
+      <span className={cn('w-20 text-sm', isPrimary ? 'font-bold' : 'text-muted-foreground truncate')} title={label}>
+        {label}
+      </span>
+      <div className="flex-1 bg-muted rounded-full h-4 overflow-hidden">
+        <div 
+          className={cn(
+            'h-full rounded-full transition-all duration-700',
+            isPrimary ? (color === 'green' ? 'bg-emerald-500' : 'bg-primary') : 'bg-muted-foreground/30'
+          )}
+          style={{ width: `${Math.min(100, width)}%` }}
+        />
+      </div>
+      <span className={cn('w-16 text-right text-sm font-semibold', isPrimary && 'font-bold')}>
+        {formatValue(value)}
+      </span>
+    </div>
+  )
+}
 
 export default function DashboardPage() {
   const searchParams = useSearchParams()
@@ -28,8 +236,10 @@ export default function DashboardPage() {
     return searchParams.get(key) || defaultValue
   }
 
-  const [dateFrom, setDateFrom] = useState(getParam('dateFrom'))
-  const [dateTo, setDateTo] = useState(getParam('dateTo'))
+  // Global tarih aralığı — `home` scope'u, default 'thisWeek'.
+  // Cookie + URL ile persist; AI Karşılaştırma Paneli ve Hero stat'lar bu aralığa
+  // bağlı yenilenir.
+  const { from: dateFrom, to: dateTo } = useDateRange(HOME_SCOPE)
   const [selectedCategory, setSelectedCategory] = useState(getParam('selectedCategory'))
 
   useSSE(useCallback(() => {
@@ -49,29 +259,32 @@ export default function DashboardPage() {
     router.replace(`${pathname}?${params.toString()}`)
   }, [searchParams, router, pathname])
 
-  const handleDateFromChange = (value: string) => {
-    setDateFrom(value)
-    updateUrl({ dateFrom: value || undefined })
-  }
-
-  const handleDateToChange = (value: string) => {
-    setDateTo(value)
-    updateUrl({ dateTo: value || undefined })
-  }
-
   const handleCategoryChange = (value: string) => {
     setSelectedCategory(value)
     updateUrl({ selectedCategory: value || undefined })
   }
 
+  // FE-11: Add benchmark note to hero stats - explain what "94%" means
+  // (moved after competitionData is available)
+
+  // FE-15: Handle clicking on a competitor bar to filter campaigns by that site
+  const handleCompetitorClick = (siteCode: string, siteName: string) => {
+    // Navigate to campaigns page with that site filter
+    router.push(`/campaigns?siteId=${encodeURIComponent(siteCode)}`)
+  }
+
   const { data, isLoading, error, refetch } = useQuery({
     queryKey: ['report-summary', dateFrom, dateTo],
     queryFn: () => fetchReportSummary(dateFrom || undefined, dateTo || undefined),
+    // Tarih aralığı henüz hidrate olmadıysa boş string gelebilir; çağrı yapma.
+    enabled: Boolean(dateFrom && dateTo),
   })
 
   const { data: competitionData, isLoading: competitionLoading } = useQuery({
-    queryKey: ['competition', selectedCategory],
-    queryFn: () => fetchCompetition(selectedCategory || undefined),
+    queryKey: ['competition', selectedCategory, dateFrom, dateTo],
+    queryFn: () =>
+      fetchCompetition(selectedCategory || undefined, { from: dateFrom, to: dateTo }),
+    enabled: Boolean(dateFrom && dateTo),
   })
 
   const handleRefresh = () => {
@@ -92,33 +305,50 @@ export default function DashboardPage() {
   const bitalihCampaignsBetter = (bitalihData?.total_campaigns ?? 0) >= avgCompetitorCampaigns
   const bitalihBonusBetter = (bitalihData?.avg_bonus ?? 0) >= (bestCompetitor?.avg_bonus ?? 0)
 
+  // FE-11: Add benchmark note to hero stats - explain what "94%" means
+  const activeRate = Number(bitalihData?.active_rate || 0) * 100
+  const benchmarkNote = activeRate > 85
+    ? ' (Sektör ortalamasının üzerinde - iyi performans)'
+    : activeRate > 70
+    ? ' (Sektör ortalaması - geliştirilebilir)'
+    : ' (Sektör ortalamasının altında - iyileştirme gerekli)'
+
+  // Calculate max values for comparison bars
+  const maxCampaigns = Math.max(
+    Number(bitalihData?.total_campaigns || 0),
+    ...otherSites.map(s => Number(s.total_campaigns))
+  )
+  const maxBonus = Math.max(
+    Number(bitalihData?.avg_bonus || 0),
+    ...otherSites.map(s => Number(s.avg_bonus))
+  )
+
   if (error) {
     return <ErrorDisplay error={error} onRetry={handleRefresh} />
   }
 
   return (
     <div className="min-h-screen bg-background">
+      {/* System Alert Banners */}
+      <AlertBanner
+        id="demo-system"
+        variant="info"
+        title="Demo Modu Aktif"
+        message="Bu bir demo sistemdir. Veriler gerçek zamanlı olarak güncellenmektedir."
+      />
+      <AlertBanner
+        id="update-rate"
+        variant="warning"
+        title="Veri Güncelleme Sıklığı"
+        message="Sistem verileri her 5 dakikada bir otomatik olarak güncellenmektedir."
+        dismissable={true}
+      />
+
       <PageHeader
         title="Dashboard"
         description="Rakiplerle karşılaştırmalı kampanya analizi"
         actions={
           <div className="flex items-center gap-3">
-            <div className="flex items-center gap-2 text-sm">
-              <span className="text-muted-foreground">Tarih:</span>
-              <input
-                type="date"
-                value={dateFrom}
-                onChange={(e) => handleDateFromChange(e.target.value)}
-                className="border rounded px-2 py-1 text-sm bg-background"
-              />
-              <span>-</span>
-              <input
-                type="date"
-                value={dateTo}
-                onChange={(e) => handleDateToChange(e.target.value)}
-                className="border rounded px-2 py-1 text-sm bg-background"
-              />
-            </div>
             <Button variant="outline" size="sm" onClick={handleRefresh}>
               Yenile
             </Button>
@@ -127,10 +357,72 @@ export default function DashboardPage() {
       />
 
       <main className="p-6 space-y-6">
-        {/* AI COMPARISON HERO - Top of page */}
+        {/* Global tarih aralığı header'ı — `home` scope, default 'Bu Hafta' */}
+        <DateRangePickerHeader scope={HOME_SCOPE} />
+
+        {/* HERO STATS - Large Numbers with Color Coding + Period Deltas */}
+        <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-4">
+          <HeroStatCard
+            title="Toplam Kampanya"
+            value={data?.startedCount ?? 0}
+            subtitle={`Bu dönem başlatıldı`}
+            icon={Target}
+            trend={data?.deltas?.started?.direction}
+            trendValue={data?.deltas ? `${data.deltas.started.diff >= 0 ? '+' : ''}${data.deltas.started.diff} (${data.deltas.started.diff >= 0 ? '+' : ''}${data.deltas.started.pct}%)` : undefined}
+            color="emerald"
+          />
+          <HeroStatCard
+            title="Aktif Kampanya"
+            value={data?.activeCount ?? 0}
+            subtitle={`Toplam ${bitalihData?.total_campaigns ?? 0} kampanya`}
+            icon={Activity}
+            trend={data?.deltas?.active?.direction}
+            trendValue={data?.deltas ? `${data.deltas.active.diff >= 0 ? '+' : ''}${data.deltas.active.diff} (${data.deltas.active.diff >= 0 ? '+' : ''}${data.deltas.active.pct}%)` : undefined}
+            color="blue"
+          />
+          <HeroStatCard
+            title="Takip Edilen Rakip"
+            value={otherSites.length + 1}
+            subtitle="Aktif olarak izleniyor"
+            icon={Users}
+            color="purple"
+          />
+          <HeroStatCard
+            title="En Yüksek Bonus"
+            value={`₺${Math.round(Number(bestCompetitor?.avg_bonus || 0))}`}
+            subtitle={bestCompetitor?.site_name || 'Bitalih'}
+            icon={Crown}
+            color="orange"
+          />
+        </div>
+
+        {/* Period Comparison Info */}
+        {data?.prevPeriodFrom && data?.prevPeriodTo && (
+          <div className="text-xs text-muted-foreground bg-muted/30 rounded-lg px-3 py-2 flex items-center gap-2">
+            <TrendingUp className="w-3 h-3" />
+            <span>
+              Karşılaştırma: <span className="font-medium">{new Date(data.prevPeriodFrom).toLocaleDateString('tr-TR')}</span> – <span className="font-medium">{new Date(data.prevPeriodTo).toLocaleDateString('tr-TR')}</span>
+              {' '}|{' '}
+              Güncel dönem: <span className="font-medium">{new Date(data.dateFrom).toLocaleDateString('tr-TR')}</span> – <span className="font-medium">{new Date(data.dateTo).toLocaleDateString('tr-TR')}</span>
+              {' '}(eşit süreli karşılaştırma)
+            </span>
+          </div>
+        )}
+
+        {/* Quick Stats Row */}
+        <QuickStatsRow />
+
+        {/* FE-11: Dashboard hero stats benchmark/karşılaştırma notu */}
+        <div className="text-xs text-muted-foreground bg-muted/30 rounded-lg px-3 py-2">
+          <span className="font-medium">Aktiflik Oranı:</span> Bu dönemde aktif olan kampanyaların toplam kampanyalara oranını gösterir.
+          {activeRate > 85 ? ' %85 üzeri sektör ortalamasının üzerinde kabul edilir.' : activeRate > 70 ? ' %70-85 arası sektör ortalamasıdır.' : ' %70 altı sektör ortalamasının altındadır.'}
+          Mevcut oranınız: <span className={activeRate > 85 ? 'text-emerald-600 font-semibold' : activeRate > 70 ? 'text-amber-600 font-semibold' : 'text-red-600 font-semibold'}>{activeRate.toFixed(1)}%</span>
+        </div>
+
+        {/* AI COMPARISON HERO */}
         <Card className="overflow-hidden border-primary/30 bg-gradient-to-br from-primary/5 via-card to-card">
           <CardContent className="p-6">
-            <div className="flex items-center justify-between mb-4">
+            <div className="flex items-center justify-between mb-6">
               <div className="flex items-center gap-2">
                 <Sparkles className="h-5 w-5 text-primary" />
                 <h2 className="text-lg font-semibold">AI Karşılaştırma Paneli</h2>
@@ -150,12 +442,12 @@ export default function DashboardPage() {
             {competitionLoading ? (
               <div className="grid gap-4 md:grid-cols-4">
                 {Array.from({ length: 4 }).map((_, i) => (
-                  <Skeleton key={i} className="h-24 w-full" />
+                  <Skeleton key={i} className="h-28 w-full" />
                 ))}
               </div>
             ) : (
               <>
-                {/* Main comparison stats */}
+                {/* Main insight cards - larger numbers */}
                 <div className="grid gap-4 md:grid-cols-4 mb-6">
                   <InsightCard
                     icon={Crown}
@@ -187,96 +479,132 @@ export default function DashboardPage() {
                   />
                 </div>
 
-                {/* Bitalih vs Rakipler comparison bars */}
-                <div className="grid gap-4 md:grid-cols-2">
-                  <div className="space-y-3">
-                    <h3 className="text-sm font-medium text-muted-foreground">Kampanya Sayısı</h3>
-                    <div className="space-y-2">
-                      <div className="flex items-center gap-3">
-                        <span className="text-sm font-bold w-20">Bitalih</span>
-                        <div className="flex-1 bg-muted rounded-full h-6 overflow-hidden">
-                          <div
-                            className={cn(
-                              'h-full rounded-full flex items-center justify-end pr-2 text-xs font-medium text-white',
-                              bitalihCampaignsBetter ? 'bg-green-500' : 'bg-primary'
-                            )}
-                            style={{ width: '100%' }}
-                          />
-                        </div>
-                        <span className="text-sm font-semibold w-12 text-right">{bitalihData?.total_campaigns ?? 0}</span>
-                      </div>
-                      {otherSites.slice(0, 4).map((site) => {
-                        const width = bitalihData?.total_campaigns 
-                          ? (Number(site.total_campaigns) / Number(bitalihData.total_campaigns)) * 100 
-                          : 0
-                        return (
-                          <div key={site.site_id} className="flex items-center gap-3">
-                            <span className="text-xs w-20 truncate text-muted-foreground">{site.site_name}</span>
-                            <div className="flex-1 bg-muted rounded-full h-4 overflow-hidden">
-                              <div
-                                className="h-full bg-muted-foreground/30 rounded-full"
-                                style={{ width: `${Math.min(100, width)}%` }}
-                              />
-                            </div>
-                            <span className="text-xs w-12 text-right">{site.total_campaigns}</span>
-                          </div>
-                        )
-                      })}
+                {/* Comparison Progress Bars */}
+                <div className="grid gap-6 md:grid-cols-2">
+                  {/* Kampanya Sayısı */}
+                  <div className="space-y-4 p-4 rounded-xl bg-muted/40">
+                    <h3 className="text-sm font-semibold text-muted-foreground flex items-center gap-2">
+                      <BarChart3 className="w-4 h-4" />
+                      Kampanya Sayısı Karşılaştırması
+                    </h3>
+                    <div className="space-y-3">
+                      <ComparisonBar 
+                        label="Bitalih" 
+                        value={Number(bitalihData?.total_campaigns || 0)} 
+                        maxValue={maxCampaigns}
+                        isPrimary={true}
+                        color={bitalihCampaignsBetter ? 'green' : 'primary'}
+                      />
+                      {otherSites.slice(0, 5).map((site) => (
+                        <ComparisonBar 
+                          key={site.site_id}
+                          label={SITE_FRIENDLY_NAMES[site.site_code] || site.site_name} 
+                          value={Number(site.total_campaigns)} 
+                          maxValue={maxCampaigns}
+                          siteCode={site.site_code}
+                          onClick={() => handleCompetitorClick(site.site_code, site.site_name)}
+                        />
+                      ))}
                     </div>
                   </div>
 
-                  <div className="space-y-3">
-                    <h3 className="text-sm font-medium text-muted-foreground">Ortalama Bonus</h3>
-                    <div className="space-y-2">
-                      <div className="flex items-center gap-3">
-                        <span className="text-sm font-bold w-20">Bitalih</span>
-                        <div className="flex-1 bg-muted rounded-full h-6 overflow-hidden">
-                          <div
-                            className={cn(
-                              'h-full rounded-full flex items-center justify-end pr-2 text-xs font-medium text-white',
-                              bitalihBonusBetter ? 'bg-green-500' : 'bg-primary'
-                            )}
-                            style={{ width: '100%' }}
-                          />
-                        </div>
-                        <span className="text-sm font-semibold w-16 text-right">₺{Math.round(Number(bitalihData?.avg_bonus || 0))}</span>
-                      </div>
-                      {otherSites.slice(0, 4).sort((a, b) => Number(b.avg_bonus) - Number(a.avg_bonus)).map((site) => {
-                        const maxBonus = bitalihData?.avg_bonus || 1
-                        const width = (Number(site.avg_bonus) / Number(maxBonus)) * 100
-                        return (
-                          <div key={site.site_id} className="flex items-center gap-3">
-                            <span className="text-xs w-20 truncate text-muted-foreground">{site.site_name}</span>
-                            <div className="flex-1 bg-muted rounded-full h-4 overflow-hidden">
-                              <div
-                                className="h-full bg-muted-foreground/30 rounded-full"
-                                style={{ width: `${Math.min(100, width)}%` }}
-                              />
-                            </div>
-                            <span className="text-xs w-16 text-right">₺{Math.round(Number(site.avg_bonus))}</span>
-                          </div>
-                        )
-                      })}
+                  {/* Ortalama Bonus */}
+                  <div className="space-y-4 p-4 rounded-xl bg-muted/40">
+                    <h3 className="text-sm font-semibold text-muted-foreground flex items-center gap-2">
+                      <Crown className="w-4 h-4" />
+                      Ortalama Bonus Karşılaştırması
+                    </h3>
+                    <div className="space-y-3">
+                      <ComparisonBar 
+                        label="Bitalih" 
+                        value={Number(bitalihData?.avg_bonus || 0)} 
+                        maxValue={maxBonus}
+                        isPrimary={true}
+                        color={bitalihBonusBetter ? 'green' : 'primary'}
+                      />
+                      {otherSites.slice(0, 5).sort((a, b) => Number(b.avg_bonus) - Number(a.avg_bonus)).map((site) => (
+                        <ComparisonBar 
+                          key={site.site_id}
+                          label={SITE_FRIENDLY_NAMES[site.site_code] || site.site_name} 
+                          value={Number(site.avg_bonus)} 
+                          maxValue={maxBonus}
+                          siteCode={site.site_code}
+                          onClick={() => handleCompetitorClick(site.site_code, site.site_name)}
+                        />
+                      ))}
                     </div>
                   </div>
                 </div>
 
-                {/* Quick summary */}
-                <div className="mt-6 p-4 rounded-lg bg-muted/50">
+                {/* Performance Progress Bars for Categories */}
+                <div className="mt-6 grid gap-4 md:grid-cols-2">
+                  <Card className="border-emerald-200 bg-emerald-50/30">
+                    <CardHeader className="pb-2">
+                      <CardTitle className="text-sm font-medium">Kampanya Performansı</CardTitle>
+                    </CardHeader>
+                    <CardContent className="space-y-3">
+                      <ProgressBar 
+                        value={Number(bitalihData?.total_campaigns || 0)} 
+                        max={maxCampaigns}
+                        label="Bitalih vs En Yüksek Rakip"
+                        explanation={`Bitalih'in kampanya sayısı (${bitalihData?.total_campaigns || 0}) en yüksek rakip kampanya sayısına (${maxCampaigns}) oranla: %${Math.round((Number(bitalihData?.total_campaigns || 0) / maxCampaigns) * 100) || 0}`}
+                        color="emerald"
+                      />
+                      <ProgressBar 
+                        value={avgCompetitorCampaigns} 
+                        max={maxCampaigns}
+                        label="Rakip Ortalaması"
+                        explanation={`Rakip sitelerin ortalama kampanya sayısı (${Math.round(avgCompetitorCampaigns)}) en yüksek rakibe göre: %${Math.round((avgCompetitorCampaigns / maxCampaigns) * 100) || 0}`}
+                        color="blue"
+                      />
+                    </CardContent>
+                  </Card>
+                  
+                  <Card className="border-violet-200 bg-violet-50/30">
+                    <CardHeader className="pb-2">
+                      <CardTitle className="text-sm font-medium">Bonus Performansı</CardTitle>
+                    </CardHeader>
+                    <CardContent className="space-y-3">
+                      <ProgressBar 
+                        value={Number(bitalihData?.avg_bonus || 0)} 
+                        max={maxBonus}
+                        label="Bitalih Bonus"
+                        explanation={`Bitalih'in ortalama bonus miktarı (₺${Math.round(Number(bitalihData?.avg_bonus || 0))}) en yüksek rakip bonusa (₺${Math.round(Number(bestCompetitor?.avg_bonus || 0))}) oranla: %${Math.round((Number(bitalihData?.avg_bonus || 0) / Number(bestCompetitor?.avg_bonus || 1)) * 100) || 0}`}
+                        color="violet"
+                      />
+                      <ProgressBar 
+                        value={Number(bestCompetitor?.avg_bonus || 0)} 
+                        max={maxBonus}
+                        label="En Yüksek Bonus"
+                        explanation={`En yüksek ortalama bonus ₺${Math.round(Number(bestCompetitor?.avg_bonus || 0))} (${SITE_FRIENDLY_NAMES[bestCompetitor?.site_code || ''] || bestCompetitor?.site_name})`}
+                        color="orange"
+                      />
+                    </CardContent>
+                  </Card>
+                </div>
+
+                {/* Quick Summary Banner */}
+                <div className="mt-6 p-4 rounded-xl bg-gradient-to-r from-emerald-500/10 via-blue-500/10 to-violet-500/10 border border-primary/20">
                   <div className="flex items-center gap-4 text-sm">
                     {bitalihCampaignsBetter ? (
-                      <div className="flex items-center gap-1 text-green-600">
-                        <ArrowUpRight className="h-4 w-4" />
-                        <span>Bitalih kampanya hacminde {Math.round(Number(bitalihData?.total_campaigns) - avgCompetitorCampaigns)} adet fazla kampanya sunuyor</span>
+                      <div className="flex items-center gap-2 text-emerald-600 font-medium">
+                        <div className="p-1 rounded-full bg-emerald-500 text-white">
+                          <ArrowUpRight className="h-3 w-3" />
+                        </div>
+                        <span>Bitalih, rakiplerin {Math.round(avgCompetitorCampaigns)} üzerinde {bitalihData?.total_campaigns} kampanya sunuyor</span>
                       </div>
                     ) : (
-                      <div className="flex items-center gap-1 text-amber-600">
-                        <ArrowDownRight className="h-4 w-4" />
-                        <span>Bitalih rakip ortalamasının {Math.round(avgCompetitorCampaigns - Number(bitalihData?.total_campaigns))} altında</span>
+                      <div className="flex items-center gap-2 text-amber-600 font-medium">
+                        <div className="p-1 rounded-full bg-amber-500 text-white">
+                          <ArrowDownRight className="h-3 w-3" />
+                        </div>
+                        <span>Bitalih, rakip ortalamasının {Math.round(avgCompetitorCampaigns - Number(bitalihData?.total_campaigns))} altında</span>
                       </div>
                     )}
                     <span className="text-muted-foreground">|</span>
-                    <span>{data?.topCategories?.[0] ? `En güçlü kategori: ${data.topCategories[0].label}` : 'Kategori verisi yok'}</span>
+                    <Badge variant="outline" className="bg-primary/10">
+                      {data?.topCategories?.[0] ? `En güçlü: ${data.topCategories[0].label}` : 'Kategori verisi yok'}
+                    </Badge>
                   </div>
                 </div>
               </>
@@ -284,47 +612,18 @@ export default function DashboardPage() {
           </CardContent>
         </Card>
 
-        {/* Quick Stats - Minimal */}
-        <div className="grid gap-4 md:grid-cols-3">
-          {isLoading ? (
-            Array.from({ length: 3 }).map((_, i) => (
-              <Card key={i}><CardContent className="p-4"><Skeleton className="h-16 w-full" /></CardContent></Card>
-            ))
-          ) : (
-            <>
-              <InsightCard
-                icon={BarChart3}
-                title="Bu Dönem"
-                value={data?.startedCount ?? 0}
-                description={`${data?.activeCount ?? 0} aktif kampanya`}
-              />
-              <InsightCard
-                icon={Target}
-                title="Rakip Ortalaması"
-                value={Math.round(avgCompetitorCampaigns)}
-                description="Kampanya/siteler"
-                tone="info"
-              />
-              <InsightCard
-                icon={Crown}
-                title="En Agresif Rakip"
-                value={bestCompetitor?.site_name || '-'}
-                description={bestCompetitor ? `Ort. ₺${Math.round(Number(bestCompetitor.avg_bonus))} bonus` : 'Veri yok'}
-                tone="warning"
-              />
-            </>
-          )}
-        </div>
-
         {/* Quick Links */}
         <div className="flex gap-4 text-sm">
-          <Link href="/competition" className="text-primary hover:underline">
+          <Link href="/competition" className="text-primary hover:underline flex items-center gap-1">
+            <BarChart3 className="w-4 h-4" />
             Detaylı Rekabet Analizi →
           </Link>
-          <Link href="/compare" className="text-primary hover:underline">
+          <Link href="/compare" className="text-primary hover:underline flex items-center gap-1">
+            <Target className="w-4 h-4" />
             Kampanya Karşılaştır →
           </Link>
-          <Link href="/campaigns" className="text-primary hover:underline">
+          <Link href="/campaigns" className="text-primary hover:underline flex items-center gap-1">
+            <Activity className="w-4 h-4" />
             Tüm Kampanyalar →
           </Link>
         </div>

@@ -3,6 +3,7 @@ import { z } from 'zod';
 import { query } from '@/lib/db';
 import { createdResponse, handleApiError, getCorsHeaders } from '@/lib/response';
 import { ValidationError } from '@bitalih/shared/errors';
+import { logRequestAction } from '@/lib/audit';
 
 const SSE_CHANNEL = process.env.SSE_CHANNEL || 'bitalih:events';
 
@@ -83,6 +84,19 @@ export async function POST(request: NextRequest) {
       jobsCreated,
       timestamp: new Date().toISOString(),
     })]);
+
+    await logRequestAction(request, {
+      action: 'scrape.trigger',
+      resourceType: 'scrape_run',
+      resourceId: null,
+      changes: {
+        runType,
+        priority,
+        siteCount: sites.length,
+        siteCodes: sites.map(s => s.code),
+        jobsCreated,
+      },
+    });
 
     return createdResponse({
       jobsCreated,

@@ -1,27 +1,43 @@
 import 'dotenv/config';
 import { getMysqlPool } from './index';
-import { readFileSync } from 'fs';
-import { join } from 'path';
+import { existsSync, readdirSync, readFileSync } from 'fs';
+import { join, resolve } from 'path';
 import { createHash } from 'crypto';
 import { mysqlQuery } from './compat-query';
 
-const DB_MIGRATIONS_PATH = '/app/db/migrations';
 const LEGACY_MIGRATIONS = new Set(['001_initial_schema.sql', '002_seed_sites.sql']);
 const MUTABLE_MIGRATIONS = new Set(['002_seed_sites.sql']);
+
+function findMigrationsDir(): string {
+  if (process.env.DB_MIGRATIONS_PATH) return process.env.DB_MIGRATIONS_PATH;
+  const candidates = [
+    '/app/db/migrations',
+    resolve(__dirname, '../../../../db/migrations'),
+    resolve(__dirname, '../../../db/migrations'),
+    resolve(process.cwd(), 'db/migrations'),
+    resolve(process.cwd(), '../../db/migrations'),
+  ];
+  for (const p of candidates) {
+    if (existsSync(p)) return p;
+  }
+  throw new Error(
+    `Could not locate db/migrations directory. Set DB_MIGRATIONS_PATH. Tried: ${candidates.join(', ')}`
+  );
+}
+
+const DB_MIGRATIONS_PATH = findMigrationsDir();
+
+function listMigrationFiles(dir: string): string[] {
+  return readdirSync(dir)
+    .filter((f) => /^\d+_.+\.sql$/.test(f))
+    .sort((a, b) => a.localeCompare(b, 'en', { numeric: true }));
+}
 
 async function runMigrations() {
   const pool = getMysqlPool();
   const conn = await pool.getConnection();
 
-  const migrations = [
-    '001_initial_schema.sql',
-    '002_seed_sites.sql',
-    '003_fix_schema.sql',
-    '004_fix_bitalih_schema.sql',
-    '005_add_performance_indexes.sql',
-    '006_add_search_indexes.sql',
-    '007_legacy_schema_compat.sql',
-  ];
+  const migrations = listMigrationFiles(DB_MIGRATIONS_PATH);
 
   console.log('Running migrations...');
   console.log('Looking for migrations in:', DB_MIGRATIONS_PATH);

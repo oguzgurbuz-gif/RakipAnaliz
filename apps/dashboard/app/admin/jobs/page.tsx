@@ -35,6 +35,8 @@ type ScrapeRunRow = {
   updated_count: number
   started_at: string
   completed_at: string | null
+  site_name: string | null
+  site_code: string | null
 }
 
 type AdminJobsData = {
@@ -292,6 +294,7 @@ export default function AdminJobsPage() {
                   <TableHeader>
                     <TableRow>
                       <TableHead>ID</TableHead>
+                      <TableHead>Site</TableHead>
                       <TableHead>Tür</TableHead>
                       <TableHead>Kaynak</TableHead>
                       <TableHead>Durum</TableHead>
@@ -307,6 +310,18 @@ export default function AdminJobsPage() {
                     {data?.scrapeRuns?.map((run) => (
                       <TableRow key={run.id}>
                         <TableCell className="font-mono text-xs">{run.id.slice(0, 8)}...</TableCell>
+                        <TableCell className="text-sm">
+                          {run.site_name ? (
+                            <span>
+                              {run.site_name}
+                              {run.site_code && (
+                                <span className="ml-1 text-xs text-muted-foreground">({run.site_code})</span>
+                              )}
+                            </span>
+                          ) : (
+                            <span className="text-muted-foreground">-</span>
+                          )}
+                        </TableCell>
                         <TableCell>{run.run_type}</TableCell>
                         <TableCell>{run.trigger_source}</TableCell>
                         <TableCell>
@@ -326,7 +341,7 @@ export default function AdminJobsPage() {
                     ))}
                     {(!data?.scrapeRuns || data.scrapeRuns.length === 0) && (
                       <TableRow>
-                        <TableCell colSpan={10} className="text-center py-8 text-muted-foreground">
+                        <TableCell colSpan={11} className="text-center py-8 text-muted-foreground">
                           Henüz scrape run yok
                         </TableCell>
                       </TableRow>
@@ -364,12 +379,13 @@ export default function AdminJobsPage() {
                       <TableHead>Başlayan</TableHead>
                       <TableHead>Tamamlanan</TableHead>
                       <TableHead>Hata</TableHead>
+                      <TableHead className="text-right">Aksiyon</TableHead>
                     </TableRow>
                   </TableHeader>
                   <TableBody>
                     {data?.jobs?.map((job) => (
                       <TableRow key={job.id}>
-                        <TableCell className="font-mono text-xs">{job.id.slice(0, 8)}...</TableCell>
+                        <TableCell className="font-mono text-xs">{String(job.id).slice(0, 8)}...</TableCell>
                         <TableCell className="font-medium">{job.type}</TableCell>
                         <TableCell>
                           <Badge className={getJobStatusColor(job.status)}>
@@ -392,11 +408,26 @@ export default function AdminJobsPage() {
                         <TableCell className="max-w-[200px] truncate text-xs text-red-600">
                           {job.error || '-'}
                         </TableCell>
+                        <TableCell className="text-right">
+                          {job.status === 'failed' ? (
+                            <button
+                              type="button"
+                              disabled={isSubmitting}
+                              onClick={() => runAction(`/api/admin/jobs/${job.id}/retry`, {})}
+                              className="inline-flex items-center gap-1 rounded-md border border-border bg-background px-2 py-1 text-xs hover:bg-muted disabled:opacity-50"
+                            >
+                              <RefreshCw className="h-3 w-3" />
+                              Yeniden Dene
+                            </button>
+                          ) : (
+                            <span className="text-xs text-muted-foreground">-</span>
+                          )}
+                        </TableCell>
                       </TableRow>
                     ))}
                     {(!data?.jobs || data.jobs.length === 0) && (
                       <TableRow>
-                        <TableCell colSpan={9} className="text-center py-8 text-muted-foreground">
+                        <TableCell colSpan={10} className="text-center py-8 text-muted-foreground">
                           Henüz iş yok
                         </TableCell>
                       </TableRow>
