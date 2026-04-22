@@ -1,8 +1,12 @@
 'use client'
 
+import { useQuery } from '@tanstack/react-query'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
-import { ArrowUp, ArrowDown, Minus, TrendingUp, Calendar, Globe, Megaphone } from 'lucide-react'
+import { ArrowUp, ArrowDown, Minus, TrendingUp, Calendar, Globe, Megaphone, AlertTriangle } from 'lucide-react'
 import type { WeeklyReport } from '@/types'
+import { fetchWowDeltas } from '@/lib/api'
+import { SampleBadge } from '@/components/ui/sample-badge'
+import { getSampleConfidence } from '@/lib/sample-size'
 
 interface WowComparisonProps {
   reports: WeeklyReport[]
@@ -36,7 +40,23 @@ function calcChange(current: number, previous: number): ChangeResult {
 }
 
 export function WowComparison({ reports }: WowComparisonProps) {
-  if (!reports || reports.length < 2) {
+  const hasEnoughReports = Boolean(reports && reports.length >= 2)
+  const current = hasEnoughReports ? reports[0] : null
+  const previous = hasEnoughReports ? reports[1] : null
+
+  // Hooks must be called unconditionally — call useQuery before any early return.
+  const { data: wowData } = useQuery({
+    queryKey: ['wow-deltas', current?.weekStart, current?.weekEnd],
+    queryFn: () =>
+      fetchWowDeltas({
+        from: current!.weekStart,
+        to: current!.weekEnd,
+        limit: 5,
+      }),
+    enabled: Boolean(current?.weekStart && current?.weekEnd),
+  })
+
+  if (!hasEnoughReports || !current || !previous) {
     return (
       <Card>
         <CardHeader className="pb-3">
@@ -54,23 +74,23 @@ export function WowComparison({ reports }: WowComparisonProps) {
     )
   }
 
-  const current = reports[0]
-  const previous = reports[1]
-
   // Get comparison metrics from report data
   const campaignCountChange = calcChange(current.campaignCount, previous.campaignCount)
   const siteCountChange = calcChange(current.siteCoverageCount, previous.siteCoverageCount)
   const activeChange = calcChange(current.activeOverlapCount, previous.activeOverlapCount)
 
-  // Estimate avg bonus from active campaigns ratio (proxy since we don't have exact bonus data in weekly report)
-  const avgBonusCurrent = current.campaignCount > 0 ? (current.activeOverlapCount / current.campaignCount) * 100 : 0
-  const avgBonusPrevious = previous.campaignCount > 0 ? (previous.activeOverlapCount / previous.campaignCount) * 100 : 0
-  const avgBonusChange = calcChange(avgBonusCurrent, avgBonusPrevious)
+  const topChanges = (wowData?.topChanges ?? []).map((entry) => ({
+    siteName: entry.siteName,
+    siteCode: entry.siteCode,
+    diff: entry.diff,
+    current: entry.current,
+    previous: entry.previous,
+  }))
 
-  // Top 3 changes based on topSites delta (mock for now - would need per-site delta data)
-  const topChanges = [
-    { siteName: '---', diff: 0 }, // Placeholder - real implementation would calculate from per-site deltas
-  ]
+  // Wave 1 #1.3 — Yetersiz örneklem rozet eşiği (mevcut + önceki dönem birlikte).
+  const totalCampaignsObserved = current.campaignCount + previous.campaignCount
+  const sampleConfidence = getSampleConfidence(totalCampaignsObserved)
+  const sampleInsufficient = sampleConfidence === 'low' || totalCampaignsObserved < 10
 
   const renderArrow = (direction: 'up' | 'down' | 'neutral') => {
     if (direction === 'up') return <ArrowUp className="h-4 w-4 text-green-500" />
@@ -90,12 +110,26 @@ export function WowComparison({ reports }: WowComparisonProps) {
         <CardTitle className="flex items-center gap-2 text-base">
           <TrendingUp className="h-4 w-4 text-primary" />
           Hafta-Hafta Karşılaştırma
+          <SampleBadge n={totalCampaignsObserved} compact />
         </CardTitle>
         <p className="text-xs text-muted-foreground">
           Bu Hafta ({current.weekNumber}) vs Geçen Hafta ({previous.weekNumber})
         </p>
       </CardHeader>
       <CardContent className="space-y-4">
+        {/* Wave 1 #1.3 — n<10 ise satıra yetersiz veri overlay */}
+        {sampleInsufficient && (
+          <div className="rounded-lg border border-orange-200 bg-orange-50 px-3 py-2 flex items-start gap-2">
+            <AlertTriangle className="h-4 w-4 text-orange-600 shrink-0 mt-0.5" />
+            <div className="text-xs">
+              <p className="font-medium text-orange-800">Yetersiz veri</p>
+              <p className="text-orange-700/80">
+                Bu karşılaştırma sadece {totalCampaignsObserved} kampanyaya dayanıyor; trend
+                yorumu yapmadan önce daha fazla gözlem birikmesini bekleyin.
+              </p>
+            </div>
+          </div>
+        )}
         {/* Metrics grid */}
         <div className="grid gap-3 md:grid-cols-3">
           {/* Campaign Count */}
@@ -153,19 +187,39 @@ export function WowComparison({ reports }: WowComparisonProps) {
           </div>
         </div>
 
-        {/* Top changes - would need per-site delta data */}
-        {topChanges.length > 0 && topChanges[0].diff !== 0 && (
+        {/* Wave 1 #1.2 — Per-site delta gerçek API'den gelir */}
+        {topChanges.length > 0 ? (
           <div className="rounded-lg border border-border/70 bg-muted/30 p-3">
-            <h4 className="text-xs font-medium text-muted-foreground mb-2">En Çok Artış</h4>
-            <ul className="space-y-1">
-              {topChanges.slice(0, 3).map((item, i) => (
-                <li key={i} className="flex items-center gap-2 text-sm">
-                  <ArrowUp className="h-3 w-3 text-green-500" />
-                  <span>{item.siteName}</span>
-                  <span className="text-green-500">+{item.diff} kampanya</span>
-                </li>
-              ))}
+            <h4 className="text-xs font-medium text-muted-foreground mb-2">
+              Site Bazında En Büyük Değişimler
+            </h4>
+            <ul className="space-y-1.5">
+              {topChanges.slice(0, 5).map((item) => {
+                const dir: 'up' | 'down' | 'neutral' =
+                  item.diff > 0 ? 'up' : item.diff < 0 ? 'down' : 'neutral'
+                const Icon = dir === 'up' ? ArrowUp : dir === 'down' ? ArrowDown : Minus
+                const color =
+                  dir === 'up' ? 'text-green-600' : dir === 'down' ? 'text-red-600' : 'text-muted-foreground'
+                return (
+                  <li key={item.siteCode} className="flex items-center gap-2 text-sm">
+                    <Icon className={`h-3 w-3 ${color}`} />
+                    <span className="font-medium flex-1">{item.siteName}</span>
+                    <SampleBadge n={item.current + item.previous} compact />
+                    <span className={`${color} text-xs tabular-nums`}>
+                      {item.diff > 0 ? '+' : ''}
+                      {item.diff} kampanya
+                    </span>
+                    <span className="text-xs text-muted-foreground tabular-nums">
+                      ({item.previous} → {item.current})
+                    </span>
+                  </li>
+                )
+              })}
             </ul>
+          </div>
+        ) : (
+          <div className="rounded-lg border border-dashed border-border/70 bg-muted/20 p-3 text-xs text-muted-foreground text-center">
+            Site bazında delta hesaplanamadı (henüz yeterli veri yok).
           </div>
         )}
       </CardContent>

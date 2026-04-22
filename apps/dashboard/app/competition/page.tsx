@@ -13,6 +13,9 @@ import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@
 import { DateRangePickerHeader } from '@/components/ui/date-range-picker-header'
 import { Crown, Target, TrendingUp, ChevronDown, ChevronUp, Calendar } from 'lucide-react'
 import { MomentumBadge } from '@/components/competition/competition-grid'
+import { StanceBadge, formatStanceTooltip } from '@/components/ui/stance-badge'
+import { SampleBadge } from '@/components/ui/sample-badge'
+import { BonusChips } from '@/components/ui/bonus-chips'
 import { RadarChartComponent } from '@/components/competition/radar-chart'
 import { GapAnalysis } from '@/components/competition/gap-analysis'
 import { ShareOfVoice } from '@/components/competition/share-of-voice'
@@ -180,6 +183,7 @@ export default function CompetitionPage() {
                     <TableHead className="text-right">Aktif %</TableHead>
                     <TableHead className="text-right">Ort. Bonus</TableHead>
                     <TableHead>Momentum</TableHead>
+                    <TableHead>Tutum</TableHead>
                   </TableRow>
                 </TableHeader>
                 <TableBody>
@@ -205,6 +209,18 @@ export default function CompetitionPage() {
                         <MomentumBadge
                           direction={site.momentum_direction}
                           score={site.momentum_score}
+                        />
+                      </TableCell>
+                      <TableCell>
+                        <StanceBadge
+                          stance={site.stance}
+                          velocityDelta={site.stance_velocity_delta}
+                          tooltip={formatStanceTooltip({
+                            stance: site.stance,
+                            velocityDelta: site.stance_velocity_delta,
+                            stanceScore: site.stance_score,
+                            updatedAt: site.stance_updated_at,
+                          })}
                         />
                       </TableCell>
                     </TableRow>
@@ -286,7 +302,7 @@ export default function CompetitionPage() {
                               {cell ? (
                                 <div
                                   className={cn(
-                                    'inline-flex min-w-[50px] flex-col items-center rounded-lg px-2 py-1',
+                                    'inline-flex min-w-[50px] flex-col items-center gap-1 rounded-lg px-2 py-1',
                                     cell.is_winner && 'ring-1 ring-yellow-300'
                                   )}
                                   style={{ backgroundColor: `rgba(37, 99, 235, ${0.12 + intensity * 0.25})` }}
@@ -294,6 +310,8 @@ export default function CompetitionPage() {
                                   <span className={cn('text-lg font-bold', cell.campaign_count === 0 && 'text-muted-foreground')}>
                                     {cell.campaign_count}
                                   </span>
+                                  {/* Wave 1 #1.3 — düşük örneklemli hücreye rozet */}
+                                  <SampleBadge n={cell.campaign_count} compact />
                                 </div>
                               ) : (
                                 <span className="text-muted-foreground">-</span>
@@ -357,6 +375,27 @@ export default function CompetitionPage() {
                             <div className="text-muted-foreground">%</div>
                             <div className="font-semibold">{deal.bonus_percentage ? `%${deal.bonus_percentage}` : '-'}</div>
                           </div>
+                        </div>
+                        {/* BestDeal API'sı min_deposit/turnover'ı (henüz)
+                            return etmiyor; var olan alanları synthetic
+                            ai_analysis.extractedTags şeklinde shim'leyip
+                            BonusChips'e geçiyoruz. min_deposit/turnover
+                            yoksa chip render edilmez. */}
+                        <div className="pt-1">
+                          <BonusChips
+                            campaign={{
+                              metadata: {
+                                ai_analysis: {
+                                  extractedTags: {
+                                    bonus_amount: deal.bonus_amount,
+                                    bonus_percentage: deal.bonus_percentage,
+                                  },
+                                },
+                              },
+                            }}
+                            compact
+                            showEffective
+                          />
                         </div>
                         {(startStr || endStr) && (
                           <div className="text-xs text-muted-foreground pt-1 border-t border-border/40">

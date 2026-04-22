@@ -19,76 +19,23 @@ import { CampaignTable } from '@/components/campaign/campaign-table'
 import { StatusBadge } from '@/components/campaign/status-badge'
 import { VersionDiff } from '@/components/campaign/version-diff'
 import { CompetitorView } from '@/components/campaign/competitor-view'
+import { BonusChips } from '@/components/ui/bonus-chips'
 import {
   fetchCampaign,
   addCampaignNote,
   updateCampaign,
 } from '@/lib/api'
 import { extractBodyDateRange, getDateSourceLabel } from '@/lib/campaign-dates'
-import { getCampaignQualitySignals, getCampaignTypeLabel, getDisplaySentimentLabel } from '@/lib/campaign-presentation'
+import { getCampaignQualitySignals, getCampaignTypeLabel } from '@/lib/campaign-presentation'
+import { IntentBadge } from '@/components/ui/intent-badge'
 import type { Campaign, CampaignVersion } from '@/types'
-import { formatDate, formatDateTime, formatDateRange, getSentimentColor } from '@/lib/utils'
+import { formatDate, formatDateTime, formatDateRange } from '@/lib/utils'
 import { ArrowLeft, Calendar, AlertTriangle, CheckCircle, MessageSquare, Plus, Pencil, X, Save, Flag, Shapes, TimerReset, Users, GitCompare } from 'lucide-react'
 import { useState, useEffect } from 'react'
 
-// camp-05: Mock rival campaigns for parallel view
-const MOCK_RIVAL_CAMPAIGNS = [
-  {
-    id: 'rival-1',
-    siteName: 'Betboo',
-    siteCode: 'betboo',
-    title: '%200 Hoş Geldin Bonusu',
-    bonusPercentage: 200,
-    validFrom: '2026-01-01',
-    validTo: '2026-12-31',
-    status: 'active',
-    sentiment: 'positive',
-  },
-  {
-    id: 'rival-2',
-    siteName: 'Tipobet',
-    siteCode: 'tipobet',
-    title: '1000 TL İlk Yatırım Bonusu',
-    bonusAmount: 1000,
-    validFrom: '2026-01-15',
-    validTo: '2026-06-30',
-    status: 'active',
-    sentiment: 'positive',
-  },
-  {
-    id: 'rival-3',
-    siteName: 'Youwin',
-    siteCode: 'youwin',
-    title: '%150 Casino Bonusu',
-    bonusPercentage: 150,
-    validFrom: '2026-02-01',
-    validTo: '2026-08-31',
-    status: 'active',
-    sentiment: 'neutral',
-  },
-  {
-    id: 'rival-4',
-    siteName: 'Superbetin',
-    siteCode: 'superbetin',
-    title: '500 TL Freebet',
-    bonusAmount: 500,
-    validFrom: '2026-03-01',
-    validTo: '2026-05-31',
-    status: 'active',
-    sentiment: 'positive',
-  },
-  {
-    id: 'rival-5',
-    siteName: 'Tempobet',
-    siteCode: 'tempobet',
-    title: '%100 Spor Bonusu',
-    bonusPercentage: 100,
-    validFrom: '2026-01-01',
-    validTo: '2026-04-30',
-    status: 'active',
-    sentiment: 'negative',
-  },
-]
+// Wave 1 #1.1 — MOCK_RIVAL_CAMPAIGNS kaldırıldı (Betboo, Tipobet, Youwin,
+// Superbetin, Tempobet izlenmiyor). Yerine gerçek `campaign_similarities`
+// tablosundan dönen `campaign.similarCampaigns` kullanılıyor.
 
 const extractedTagLabels: Record<string, string> = {
   min_deposit: 'Min Yatirim',
@@ -243,7 +190,14 @@ export default function CampaignDetailPage({ params }: { params: { id: string } 
   const aiRiskFlags = normalizeStringArray(
     aiAnalysis.riskFlags ?? aiAnalysis.risk_flags ?? campaign?.latestAI?.riskFlags
   )
-  const aiSentiment = formatDetailValue(aiAnalysis.sentiment) ?? campaign?.latestAI?.sentiment ?? null
+  // Migration 018 — competitive_intent replaces sentiment in the UI. We
+  // accept either snake_case (raw metadata) or camelCase (API field) and
+  // fall back to null so the badge collapses to "Belirsiz".
+  const aiCompetitiveIntent =
+    formatDetailValue(aiAnalysis.competitive_intent) ??
+    formatDetailValue(aiAnalysis.competitiveIntent) ??
+    campaign?.competitiveIntent ??
+    null
   const aiCampaignType = formatDetailValue(aiAnalysis.campaign_type ?? aiAnalysis.campaignType)
   const aiTypeReasoning = formatDetailValue(aiAnalysis.type_reasoning ?? aiAnalysis.typeReasoning)
   const requiredActions = normalizeStringArray(conditionFields.required_actions)
@@ -345,14 +299,15 @@ export default function CampaignDetailPage({ params }: { params: { id: string } 
                         <span className="text-muted-foreground">{campaign.site.name}</span>
                       )}
                       <StatusBadge status={campaign.status} />
-                      {aiSentiment && (
-                        <Badge className={getSentimentColor(aiSentiment || 'neutral')}>
-                          {getDisplaySentimentLabel(aiSentiment)}
-                        </Badge>
-                      )}
+                      <IntentBadge value={aiCompetitiveIntent} />
                       {qualitySignals.map((signal) => (
                         <DataQualityBadge key={signal.code} signal={signal} />
                       ))}
+                    </div>
+                    {/* Bonus chip cluster — bonus_amount, %, min deposit,
+                        turnover ve hesaplanan effective bonus tek bakışta. */}
+                    <div className="mt-3">
+                      <BonusChips campaign={campaign} showEffective />
                     </div>
                   </div>
                   <p className="max-w-3xl text-sm text-muted-foreground">
@@ -720,16 +675,51 @@ export default function CampaignDetailPage({ params }: { params: { id: string } 
               </Tabs.Content>
 
               <Tabs.Content value="rivals">
-                <CompetitorView
-                  rivalCampaigns={MOCK_RIVAL_CAMPAIGNS}
-                  yourCampaign={{
-                    title: campaign.title,
-                    bonusAmount: (campaign.metadata as any)?.ai_analysis?.extractedTags?.bonus_amount as number || undefined,
-                    bonusPercentage: (campaign.metadata as any)?.ai_analysis?.extractedTags?.bonus_percentage as number || undefined,
-                    siteName: campaign.site?.name || 'Bu Site',
-                    status: campaign.status,
-                  }}
-                />
+                {(() => {
+                  // Wave 1 #1.1 — gerçek similar campaigns'ı RivalCampaign şekline çevir.
+                  const realRivals = (campaign.similarCampaigns ?? []).map((s) => {
+                    const meta = (s as unknown as { metadata?: Record<string, unknown> })?.metadata
+                    const ai = (meta && typeof meta === 'object' ? (meta as any).ai_analysis : null) || null
+                    const tags = (ai && typeof ai === 'object' ? ai.extractedTags : null) || null
+                    return {
+                      id: s.id,
+                      siteName: s.site.name,
+                      siteCode: s.site.code,
+                      title: s.title,
+                      bonusAmount: (tags && typeof tags === 'object' ? Number(tags.bonus_amount) : undefined) || undefined,
+                      bonusPercentage: (tags && typeof tags === 'object' ? Number(tags.bonus_percentage) : undefined) || undefined,
+                      validFrom: s.validFrom,
+                      validTo: s.validTo,
+                      status: s.status,
+                      sentiment: (ai && typeof ai === 'object' ? (ai.sentiment as string | null) : null) ?? null,
+                    }
+                  })
+                  if (realRivals.length === 0) {
+                    return (
+                      <Card>
+                        <CardContent className="py-8 text-center text-muted-foreground">
+                          <Users className="h-12 w-12 mx-auto mb-4 opacity-20" />
+                          <p>Henüz benzer kampanya tespit edilmedi.</p>
+                          <p className="text-sm mt-1">
+                            Similarity job çalışıp eşleşme bulduğunda burada listelenecek.
+                          </p>
+                        </CardContent>
+                      </Card>
+                    )
+                  }
+                  return (
+                    <CompetitorView
+                      rivalCampaigns={realRivals}
+                      yourCampaign={{
+                        title: campaign.title,
+                        bonusAmount: (campaign.metadata as any)?.ai_analysis?.extractedTags?.bonus_amount as number || undefined,
+                        bonusPercentage: (campaign.metadata as any)?.ai_analysis?.extractedTags?.bonus_percentage as number || undefined,
+                        siteName: campaign.site?.name || 'Bu Site',
+                        status: campaign.status,
+                      }}
+                    />
+                  )
+                })()}
               </Tabs.Content>
 
               <Tabs.Content value="changes">

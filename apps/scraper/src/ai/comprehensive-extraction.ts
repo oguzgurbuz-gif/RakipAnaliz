@@ -1,5 +1,6 @@
 import { logger } from '../utils/logger';
 import shdecnClient, { ShdecnClient } from './client';
+import { ensureCostBudget } from './cost-guard';
 
 type DeepSeekModel = string;
 import { 
@@ -149,6 +150,8 @@ async function extractWithRetry(options: {
   });
 
   try {
+    // Wave 1 #1.6 — cost circuit breaker
+    await ensureCostBudget();
     const client = shdecnClient();
     const response = await client.chat(prompt.messages, {
       temperature: 0.1,

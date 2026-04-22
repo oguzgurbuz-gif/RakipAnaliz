@@ -74,7 +74,8 @@ export const CONTENT_ANALYSIS_USER_PROMPT_TEMPLATE = `Analyze this campaign. Res
 Output format:
 {
   "category": "hoş-geldin-bonusu|ek-kazanç|yüksek-oran|freebet|spesifik-bahis|sadakat|turnuva|spor-bonus|casino-bonus|slot-bonus|diğer",
-  "sentiment": "positive|neutral|negative",
+  "competitive_intent": "acquisition|retention|brand|clearance|unknown",
+  "competitive_intent_confidence": 0.0-1.0,
   "summary": "2-3 kelimelik özet",
   "key_points": ["nokta1", "nokta2"],
   "min_deposit": number or null,
@@ -85,6 +86,15 @@ Output format:
   "bonus_amount": number or null,
   "bonus_percentage": number or null
 }
+
+Bu rakip kampanyanın AMACI nedir? Şu kategorilere ata:
+- acquisition: yeni müşteri çekme (hoşgeldin, ilk depozit, üye ol bonusu, freebet için yeni üye)
+- retention: mevcut müşteriyi tutma (cashback, sadakat, weekly reload, VIP bonusu, geri dönüş bonusu)
+- brand: marka inşası (sponsorluk, çekiliş, etkinlik, görünürlük, takım/oyuncu işbirliği)
+- clearance: envanter/sezon sonu (özel gün, bayram, sezon kapanış, yıldönümü)
+- unknown: hiçbiri net değilse
+
+Belirsizsen confidence değerini düşür (0.0-1.0).
 
 Category examples:
 - hoş-geldin-bonusu: "Hoş geldin bonusu 500 TL", "Yeni üyelere %100 bonus"
@@ -236,8 +246,19 @@ export const SENTIMENT_LABELS = [
   'negative',
 ] as const;
 
+// Competitive intent taxonomy (replaces sentiment for growth analytics).
+// See migration 018_competitive_intent.sql.
+export const COMPETITIVE_INTENT_CODES = [
+  'acquisition',
+  'retention',
+  'brand',
+  'clearance',
+  'unknown',
+] as const;
+
 export type CategoryCode = typeof CATEGORY_CODES[number];
 export type SentimentLabel = typeof SENTIMENT_LABELS[number];
+export type CompetitiveIntent = typeof COMPETITIVE_INTENT_CODES[number];
 
 export interface ComprehensiveExtractionResult {
   valid_from: string | null;
@@ -389,7 +410,8 @@ Her kampanya için şu formatta JSON objesi oluştur:
 {
   "campaign_id": "orijinal_id",
   "category": "kampanya_tipi_kodu",
-  "sentiment": "positive|neutral|negative",
+  "competitive_intent": "acquisition|retention|brand|clearance|unknown",
+  "competitive_intent_confidence": 0.0-1.0,
   "summary": "2-3 kelimelik özet",
   "key_points": ["nokta1", "nokta2"],
   "min_deposit": number or null,
@@ -400,6 +422,13 @@ Her kampanya için şu formatta JSON objesi oluştur:
   "bonus_amount": number or null,
   "bonus_percentage": number or null
 }
+
+competitive_intent — kampanyanın amacı:
+- acquisition: yeni müşteri çekme (hoşgeldin, ilk depozit, üye ol, freebet için yeni üye)
+- retention: mevcut müşteriyi tutma (cashback, sadakat, weekly reload, VIP, geri dönüş bonusu)
+- brand: marka inşası (sponsorluk, çekiliş, etkinlik, görünürlük, işbirliği)
+- clearance: envanter/sezon sonu (özel gün, bayram, sezon kapanış, yıldönümü)
+- unknown: net değilse
 
 Kampanya tipleri:
 - hoş-geldin-bonusu: Yeni üyelere özel bonus

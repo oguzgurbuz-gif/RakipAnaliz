@@ -1,7 +1,7 @@
 'use client'
 
 import * as React from 'react'
-import { useQuery } from '@tanstack/react-query'
+import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import {
   Bar,
   BarChart,
@@ -21,9 +21,15 @@ import { SectionHeader } from '@/components/ui/section-header'
 import { EmptyState } from '@/components/ui/empty-state'
 import { DateRangePickerHeader } from '@/components/ui/date-range-picker-header'
 import { useDateRange } from '@/lib/date-range/context'
-import { Loader2, RefreshCw, DollarSign, Activity, Database } from 'lucide-react'
+import { Loader2, RefreshCw, DollarSign, Activity, Database, AlertTriangle, ShieldCheck } from 'lucide-react'
 import { cn } from '@/lib/utils'
-import { fetchAdminCost, type AiCostDashboardData } from '@/lib/api'
+import {
+  fetchAdminCost,
+  fetchAiCostLimits,
+  updateAiCostLimits,
+  type AiCostDashboardData,
+  type AiCostLimits,
+} from '@/lib/api'
 
 function formatUsd(usd: number): string {
   if (usd === 0) return '$0.00'
@@ -75,9 +81,58 @@ export default function AdminCostPage() {
     refetchInterval: 60000,
   })
 
+  // Wave 1 #1.6 — Limit konfigürasyonu + breach hesabı.
+  const queryClient = useQueryClient()
+  const { data: limits, isLoading: limitsLoading } = useQuery<AiCostLimits>({
+    queryKey: ['ai-cost-limits'],
+    queryFn: fetchAiCostLimits,
+  })
+
   const cost = data
   const hasData = !!cost && cost.daily.length > 0
   const lastMonthSelected = isLastMonthSelected(from, to)
+
+  // Bugünkü ve bu ayki harcamayı dashboard datasından kaba hesapla.
+  const today = new Date()
+  const todayKey = today.toISOString().slice(0, 10)
+  const monthKey = todayKey.slice(0, 7) // YYYY-MM
+  const todayUsd = cost?.daily.find((d) => d.day === todayKey)?.usd ?? 0
+  const monthUsd = (cost?.daily ?? [])
+    .filter((d) => d.day.startsWith(monthKey))
+    .reduce((acc, d) => acc + d.usd, 0)
+  const dailyBreached = !!limits && limits.dailyLimitUsd > 0 && todayUsd >= limits.dailyLimitUsd
+  const monthlyBreached = !!limits && limits.monthlyLimitUsd > 0 && monthUsd >= limits.monthlyLimitUsd
+  const breached = dailyBreached || monthlyBreached
+
+  // Limit form state
+  const [draftDaily, setDraftDaily] = React.useState<string>('')
+  const [draftMonthly, setDraftMonthly] = React.useState<string>('')
+  const [draftPause, setDraftPause] = React.useState<boolean>(true)
+  const [saveError, setSaveError] = React.useState<string | null>(null)
+
+  React.useEffect(() => {
+    if (limits) {
+      setDraftDaily(String(limits.dailyLimitUsd))
+      setDraftMonthly(String(limits.monthlyLimitUsd))
+      setDraftPause(limits.pauseOnBreach)
+    }
+  }, [limits])
+
+  const saveMutation = useMutation({
+    mutationFn: () =>
+      updateAiCostLimits({
+        daily_limit_usd: Number(draftDaily),
+        monthly_limit_usd: Number(draftMonthly),
+        pause_on_breach: draftPause,
+      }),
+    onSuccess: (next) => {
+      queryClient.setQueryData(['ai-cost-limits'], next)
+      setSaveError(null)
+    },
+    onError: (err) => {
+      setSaveError(err instanceof Error ? err.message : 'Kaydetme başarısız')
+    },
+  })
 
   return (
     <div className="min-h-screen bg-background">
@@ -113,6 +168,113 @@ export default function AdminCostPage() {
       />
 
       <main className="space-y-6 p-6">
+        {/* Wave 1 #1.6 — breach banner (kırmızı) */}
+        {breached && (
+          <div className="rounded-lg border border-red-300 bg-red-50 px-4 py-3 flex items-start gap-3">
+            <AlertTriangle className="h-5 w-5 text-red-600 shrink-0 mt-0.5" />
+            <div className="text-sm">
+              <p className="font-semibold text-red-800">AI maliyet limiti aşıldı</p>
+              <p className="text-red-700/90 mt-0.5">
+                {dailyBreached && (
+                  <>
+                    Günlük: <span className="font-mono">{formatUsd(todayUsd)}</span> /{' '}
+                    <span className="font-mono">{formatUsd(limits!.dailyLimitUsd)}</span>.{' '}
+                  </>
+                )}
+                {monthlyBreached && (
+                  <>
+                    Aylık: <span className="font-mono">{formatUsd(monthUsd)}</span> /{' '}
+                    <span className="font-mono">{formatUsd(limits!.monthlyLimitUsd)}</span>.{' '}
+                  </>
+                )}
+                {limits?.pauseOnBreach
+                  ? 'Yeni AI çağrıları otomatik olarak duraklatıldı.'
+                  : 'Otomatik duraklatma kapalı; AI çağrıları devam ediyor.'}
+              </p>
+            </div>
+          </div>
+        )}
+
+        {/* Wave 1 #1.6 — Limit Yönetimi kartı */}
+        <Card>
+          <CardHeader>
+            <SectionHeader
+              title="Limit Yönetimi"
+              description="DeepSeek AI çağrıları için günlük/aylık USD eşiği ve aşım davranışı."
+            />
+          </CardHeader>
+          <CardContent>
+            {limitsLoading ? (
+              <div className="flex items-center gap-2 text-sm text-muted-foreground">
+                <Loader2 className="h-4 w-4 animate-spin" />
+                Yükleniyor…
+              </div>
+            ) : (
+              <form
+                onSubmit={(e) => {
+                  e.preventDefault()
+                  saveMutation.mutate()
+                }}
+                className="grid gap-4 md:grid-cols-4 items-end"
+              >
+                <label className="space-y-1">
+                  <span className="text-xs text-muted-foreground">Günlük limit (USD)</span>
+                  <input
+                    type="number"
+                    step="0.01"
+                    min="0"
+                    value={draftDaily}
+                    onChange={(e) => setDraftDaily(e.target.value)}
+                    className="w-full rounded-md border border-border bg-background px-3 py-2 text-sm"
+                  />
+                </label>
+                <label className="space-y-1">
+                  <span className="text-xs text-muted-foreground">Aylık limit (USD)</span>
+                  <input
+                    type="number"
+                    step="0.01"
+                    min="0"
+                    value={draftMonthly}
+                    onChange={(e) => setDraftMonthly(e.target.value)}
+                    className="w-full rounded-md border border-border bg-background px-3 py-2 text-sm"
+                  />
+                </label>
+                <label className="flex items-center gap-2 text-sm">
+                  <input
+                    type="checkbox"
+                    checked={draftPause}
+                    onChange={(e) => setDraftPause(e.target.checked)}
+                  />
+                  <span>Aşılırsa duraklat</span>
+                </label>
+                <div className="flex items-center gap-2">
+                  <button
+                    type="submit"
+                    disabled={saveMutation.isPending}
+                    className="inline-flex items-center gap-2 rounded-lg bg-primary px-3 py-2 text-sm font-medium text-primary-foreground hover:bg-primary/90 disabled:opacity-50"
+                  >
+                    {saveMutation.isPending ? <Loader2 className="h-4 w-4 animate-spin" /> : <ShieldCheck className="h-4 w-4" />}
+                    Kaydet
+                  </button>
+                  {limits?.migrationPending && (
+                    <span className="text-xs text-amber-600">
+                      Migration #016 henüz uygulanmadı; kaydetme deneyimi başarısız olabilir.
+                    </span>
+                  )}
+                </div>
+                {saveError && (
+                  <p className="md:col-span-4 text-xs text-red-600">{saveError}</p>
+                )}
+                {limits?.updatedAt && !saveError && (
+                  <p className="md:col-span-4 text-[11px] text-muted-foreground">
+                    Son güncelleme: {new Date(limits.updatedAt).toLocaleString('tr-TR')}
+                  </p>
+                )}
+              </form>
+            )}
+          </CardContent>
+        </Card>
+
         {/* Global tarih aralığı + sayfa-spesifik hızlı erişim chip'leri.
             "Bu Ay" = thisMonth preset; "Geçen Ay" custom range setRange ile. */}
         <div className="flex flex-wrap items-end gap-2">

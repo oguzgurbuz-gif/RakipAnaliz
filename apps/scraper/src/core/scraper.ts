@@ -8,6 +8,7 @@ import { findExistingCampaign, getLatestCampaignVersion, insertCampaign, insertC
 import { publishScrapeEvent } from '../publish/sse';
 import { shouldTriggerAiExtraction, triggerAiDateExtraction } from '../date-extraction/ai-fallback';
 import { getInvalidCampaignReason } from '../normalizers/text';
+import { processCampaignDiff, emitNewCampaignAlert } from '../jobs/alert-generator';
 
 export class ScrapeManager {
   private browser: Browser | null = null;
@@ -369,14 +370,26 @@ export class ScrapeManager {
     const dedupResult = processDedupLogic(normalized, existingCampaign, existingVersion);
 
     switch (dedupResult.action) {
-      case 'create':
-        await insertCampaign(normalized);
+      case 'create': {
+        const newCampaignId = await insertCampaign(normalized);
+        // Smart Change Alert (migration 017): brand-new campaigns trigger a
+        // medium-severity new_campaign alert so users see fresh competitor
+        // launches immediately. Failures must not break scraping.
+        try {
+          await emitNewCampaignAlert(newCampaignId, normalized);
+        } catch (err) {
+          logger.warn('emitNewCampaignAlert failed in create path', {
+            campaignId: newCampaignId,
+            error: err instanceof Error ? err.message : String(err),
+          });
+        }
         break;
+      }
 
       case 'update':
         if (dedupResult.campaign && dedupResult.diff) {
           const db = getDb();
-          await insertCampaignVersion(
+          const versionId = await insertCampaignVersion(
             db,
             dedupResult.campaign.id,
             normalized,
@@ -384,6 +397,20 @@ export class ScrapeManager {
             dedupResult.changeType
           );
           await updateCampaign(dedupResult.campaign.id, normalized);
+          // Smart Change Alert (migration 017): inspect the just-written diff
+          // for bonus / category changes. Best-effort — don't fail the scrape.
+          try {
+            await processCampaignDiff(
+              dedupResult.campaign.id,
+              versionId,
+              dedupResult.diff
+            );
+          } catch (err) {
+            logger.warn('processCampaignDiff failed in update path', {
+              campaignId: dedupResult.campaign.id,
+              error: err instanceof Error ? err.message : String(err),
+            });
+          }
         }
         break;
 

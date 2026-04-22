@@ -286,6 +286,9 @@ export default function CampaignsPage() {
       'min_deposit',
       'max_bonus',
       'free_bet_amount',
+      // Slice B: çevrim ve net bonus sütunları (BonusChips ile aynı kaynak).
+      'turnover',
+      'effective_bonus',
       'summary',
       'ai_confidence',
     ]
@@ -296,6 +299,16 @@ export default function CampaignsPage() {
       const summaryFromAi = typeof aiAnalysis.summary === 'string' ? aiAnalysis.summary : ''
       const summaryRaw = c.aiSummary || summaryFromAi || ''
       const summary = summaryRaw.replace(/\s+/g, ' ').slice(0, 200)
+      // Turnover'ı "10x" formatlı yaz, multiplier null ise boş string.
+      const turnoverCsv =
+        bonus.turnoverMultiplier !== null
+          ? Number.isInteger(bonus.turnoverMultiplier)
+            ? `${bonus.turnoverMultiplier}x`
+            : `${bonus.turnoverMultiplier}x`
+          : ''
+      // Effective bonus: yuvarlanmış sayı (Excel sayı olarak yorumlasın).
+      const effectiveCsv =
+        bonus.effectiveBonus !== null ? Math.round(bonus.effectiveBonus) : ''
       lines.push([
         escapeCsv(c.title || ''),
         escapeCsv(c.site?.name || ''),
@@ -308,6 +321,8 @@ export default function CampaignsPage() {
         escapeCsv(bonus.minDeposit),
         escapeCsv(bonus.maxBonus),
         escapeCsv(bonus.freeBetAmount),
+        escapeCsv(turnoverCsv),
+        escapeCsv(effectiveCsv),
         escapeCsv(summary),
         escapeCsv(bonus.confidence),
       ].join(','))

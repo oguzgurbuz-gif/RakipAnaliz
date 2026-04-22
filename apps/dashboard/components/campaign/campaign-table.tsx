@@ -10,11 +10,13 @@ import {
   TableHeader,
   TableRow,
 } from '@/components/ui/table'
-import { Badge } from '@/components/ui/badge'
 import { DataQualityBadge } from '@/components/ui/data-quality-badge'
+import { BonusChips } from '@/components/ui/bonus-chips'
+import { IntentBadge } from '@/components/ui/intent-badge'
 import { resolveCampaignDateDisplay } from '@/lib/campaign-dates'
-import { getCampaignBonusInfo, getCampaignQualitySignals, getCampaignTypeLabel, getDisplaySentimentLabel, getDisplayStatusLabel } from '@/lib/campaign-presentation'
-import { getSentimentColor, getStatusColor, cn } from '@/lib/utils'
+import { getCampaignBonusInfo, getCampaignQualitySignals, getCampaignTypeLabel, formatTurnover } from '@/lib/campaign-presentation'
+import { cn } from '@/lib/utils'
+import { StatusBadge } from '@/components/campaign/status-badge'
 import { Star } from 'lucide-react'
 import type { Campaign } from '@/types'
 
@@ -32,7 +34,7 @@ export function CampaignTable({ campaigns, isLoading, favorites = [], selectedId
   if (isLoading) {
     return (
       <div className="rounded-md border">
-        <Table className="min-w-[1080px]">
+        <Table className="min-w-[1180px]">
           <TableHeader>
             <TableRow>
               <TableHead className="w-10">
@@ -43,7 +45,8 @@ export function CampaignTable({ campaigns, isLoading, favorites = [], selectedId
               <TableHead className="whitespace-nowrap">Site</TableHead>
               <TableHead className="whitespace-nowrap">Tür</TableHead>
               <TableHead className="whitespace-nowrap">Bonus</TableHead>
-              <TableHead className="whitespace-nowrap">Duygu</TableHead>
+              <TableHead className="whitespace-nowrap">Çevrim</TableHead>
+              <TableHead className="whitespace-nowrap">Amaç</TableHead>
               <TableHead className="whitespace-nowrap">Durum</TableHead>
               <TableHead className="whitespace-nowrap">Başlangıç</TableHead>
               <TableHead className="whitespace-nowrap">Bitiş</TableHead>
@@ -52,7 +55,7 @@ export function CampaignTable({ campaigns, isLoading, favorites = [], selectedId
           <TableBody>
             {Array.from({ length: 5 }).map((_, i) => (
               <TableRow key={i}>
-                {Array.from({ length: 10 }).map((_, j) => (
+                {Array.from({ length: 11 }).map((_, j) => (
                   <TableCell key={j}>
                     <div className="h-4 w-20 rounded bg-muted animate-pulse" />
                   </TableCell>
@@ -76,7 +79,7 @@ export function CampaignTable({ campaigns, isLoading, favorites = [], selectedId
   return (
     // FE-12: Table with responsive horizontal scroll
     <div className="overflow-x-auto rounded-md border">
-      <Table className="min-w-[900px] w-full">
+      <Table className="min-w-[1100px] w-full">
           <TableHeader>
             <TableRow>
               <TableHead className="w-10">
@@ -92,7 +95,8 @@ export function CampaignTable({ campaigns, isLoading, favorites = [], selectedId
               <TableHead className="whitespace-nowrap">Site</TableHead>
               <TableHead className="whitespace-nowrap">Tür</TableHead>
               <TableHead className="whitespace-nowrap">Bonus</TableHead>
-              <TableHead className="whitespace-nowrap">Duygu</TableHead>
+              <TableHead className="whitespace-nowrap">Çevrim</TableHead>
+              <TableHead className="whitespace-nowrap">Amaç</TableHead>
               <TableHead className="whitespace-nowrap">Durum</TableHead>
               <TableHead className="whitespace-nowrap">Başlangıç</TableHead>
               <TableHead className="whitespace-nowrap">Bitiş</TableHead>
@@ -100,8 +104,6 @@ export function CampaignTable({ campaigns, isLoading, favorites = [], selectedId
           </TableHeader>
           <TableBody>
           {campaigns.map((campaign) => {
-            const sentimentClass = getSentimentColor(campaign.sentiment || campaign.aiSentiment || 'neutral')
-            const statusClass = getStatusColor(campaign.status)
             const startDate = resolveCampaignDateDisplay(
               campaign.validFrom,
               campaign.validFromSource,
@@ -171,23 +173,35 @@ export function CampaignTable({ campaigns, isLoading, favorites = [], selectedId
                   className="whitespace-nowrap font-medium tabular-nums"
                   title={bonusTitle}
                 >
-                  {bonusInfo.display ? (
-                    <span className="text-emerald-600 dark:text-emerald-400">{bonusInfo.display}</span>
-                  ) : (
-                    <span className="text-muted-foreground">-</span>
-                  )}
+                  <BonusChips campaign={campaign} compact showEffective />
                 </TableCell>
                 <TableCell className="whitespace-nowrap">
-                  <Badge className={sentimentClass}>
-                    {campaign.sentiment || campaign.aiSentiment
-                      ? getDisplaySentimentLabel(campaign.sentiment || campaign.aiSentiment)
-                      : '-'}
-                  </Badge>
+                  {(() => {
+                    const turnover = formatTurnover(bonusInfo.turnoverMultiplier)
+                    if (!turnover) return <span className="text-muted-foreground text-xs">—</span>
+                    const high =
+                      bonusInfo.turnoverMultiplier !== null &&
+                      bonusInfo.turnoverMultiplier >= 20
+                    return (
+                      <span
+                        title={high ? 'Yüksek çevrim şartı' : 'Çevrim şartı'}
+                        className={cn(
+                          'inline-flex items-center rounded px-1.5 py-0.5 text-[11px] font-semibold leading-none border whitespace-nowrap',
+                          high
+                            ? 'bg-red-50 text-red-700 border-red-200 dark:bg-red-950/40 dark:text-red-300 dark:border-red-900'
+                            : 'bg-orange-50 text-orange-700 border-orange-200 dark:bg-orange-950/40 dark:text-orange-300 dark:border-orange-900'
+                        )}
+                      >
+                        {turnover}
+                      </span>
+                    )
+                  })()}
                 </TableCell>
                 <TableCell className="whitespace-nowrap">
-                  <Badge className={cn('capitalize', statusClass)}>
-                    {getDisplayStatusLabel(campaign.status)}
-                  </Badge>
+                  <IntentBadge value={campaign.competitiveIntent} />
+                </TableCell>
+                <TableCell className="whitespace-nowrap">
+                  <StatusBadge status={campaign.status} />
                 </TableCell>
                 <TableCell className="min-w-[160px] align-top">
                   <div className="leading-tight">

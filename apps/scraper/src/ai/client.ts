@@ -166,6 +166,16 @@ export async function callDeepSeek(
   messages: ShdecnMessage[],
   options?: ShdecnChatOptions
 ): Promise<ShdecnResponse> {
+  // Wave 1 #1.6 — Cost circuit breaker. Limit aşıldıysa CostLimitExceededError
+  // fırlatılır; çağıran (ai-analysis-batch, content-analysis vb.) bunu yakalayıp
+  // skip etmeli ki Promise.all batch'i çökmesin.
+  const { ensureCostBudget } = await import('./cost-guard');
+  try {
+    await ensureCostBudget();
+  } catch (err) {
+    // Re-throw — çağıran mesaja göre log + skip yapacak.
+    throw err;
+  }
   const client = getShdecnClient();
   return client.chat(messages, options);
 }

@@ -133,6 +133,7 @@ export const SCOPE_DEFAULT_PRESET: Record<string, Exclude<DateRangePresetKey, 'c
   reports: 'thisWeek',
   'admin-audit': 'today',
   'admin-cost': 'last30d',
+  'insights-bonus': 'last30d',
 }
 
 export function getScopeDefaultPreset(scope: string): Exclude<DateRangePresetKey, 'custom'> {

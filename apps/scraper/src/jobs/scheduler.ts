@@ -9,6 +9,8 @@ import { processDateExtractionJob } from './date-extraction';
 import { processWeeklyReportJob } from './weekly-report';
 import { processStatusRecalcJob } from './status-recalc';
 import { processMomentumRecalcJob } from './momentum-recalc';
+import { startCompetitiveIntentReprocess } from './reprocess-competitive-intent';
+import { processSimilarityCalcJob } from './similarity-calc';
 import { EventEmitter } from 'events';
 
 // BE-13: Graceful Shutdown event emitter for coordination
@@ -385,6 +387,41 @@ export class JobScheduler {
 
       case 'scrape':
         return await processScrapeJob(payload);
+
+      case 'similarity-recalc': {
+        // Migration 022 — admin-triggered full recompute of
+        // campaign_similarities. The work is synchronous and lightweight
+        // (~1s for ~65 campaigns) so we just await it inside the job slot.
+        const result = await processSimilarityCalcJob(payload);
+        return {
+          campaignsConsidered: result.campaignsConsidered,
+          pairsEvaluated: result.pairsEvaluated,
+          pairsPersisted: result.pairsPersisted,
+          averageScore: Number(result.averageScore.toFixed(4)),
+          durationMs: result.durationMs,
+        };
+      }
+
+      case 'competitive-intent-reprocess': {
+        // Migration 018. The job kicks off a background runner; the job row
+        // itself completes as soon as the run is registered. Progress lives
+        // in `competitive_intent_reprocess_runs` and is shown in admin UI.
+        const triggeredBy = typeof payload.triggeredBy === 'string'
+          ? payload.triggeredBy
+          : 'scheduler';
+        const campaignIds = Array.isArray(payload.campaignIds)
+          ? (payload.campaignIds as unknown[]).filter((id): id is string => typeof id === 'string')
+          : undefined;
+        const result = await startCompetitiveIntentReprocess({
+          triggeredBy,
+          campaignIds,
+        });
+        return {
+          runId: result.runId,
+          totalCampaigns: result.totalCampaigns,
+          alreadyRunning: result.alreadyRunning,
+        };
+      }
 
       default:
         throw new Error(`Unknown job type: ${job.type}`);

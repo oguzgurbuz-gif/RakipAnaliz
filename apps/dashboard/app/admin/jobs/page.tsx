@@ -7,7 +7,7 @@ import { Badge } from '@/components/ui/badge'
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table'
 import { PageHeader } from '@/components/ui/page-header'
 import { SectionHeader } from '@/components/ui/section-header'
-import { RefreshCw, Loader2, Play, Bot, ActivitySquare } from 'lucide-react'
+import { RefreshCw, Loader2, Play, Bot, ActivitySquare, Target, Network } from 'lucide-react'
 
 type JobRow = {
   id: string
@@ -79,6 +79,85 @@ export default function AdminJobsPage() {
     },
     staleTime: 60_000,
   })
+
+  // Migration 018 — competitive_intent reprocess status. Polled every 5s
+  // while a run is active so the operator can watch progress.
+  type ReprocessRun = {
+    id: string
+    status: 'pending' | 'running' | 'completed' | 'failed'
+    totalCampaigns: number
+    processedCount: number
+    succeededCount: number
+    failedCount: number
+    distribution: {
+      acquisition: number
+      retention: number
+      brand: number
+      clearance: number
+      unknown: number
+    }
+    triggeredBy: string | null
+    errorMessage: string | null
+    startedAt: string | null
+    completedAt: string | null
+  }
+  type ReprocessStatus = {
+    success: boolean
+    data: { latestRun: ReprocessRun | null; migrationPending: boolean }
+  }
+  const { data: reprocessStatus, refetch: refetchReprocess } = useQuery<ReprocessStatus>({
+    queryKey: ['competitive-intent-reprocess-status'],
+    queryFn: async () => {
+      const res = await fetch('/api/admin/reprocess/competitive-intent')
+      if (!res.ok) throw new Error('Failed to fetch reprocess status')
+      return res.json()
+    },
+    refetchInterval: (query) => {
+      const status = query.state.data?.data?.latestRun?.status
+      return status === 'pending' || status === 'running' ? 5000 : 30000
+    },
+  })
+  const latestReprocess = reprocessStatus?.data?.latestRun ?? null
+
+  // Migration 022 — campaign_similarities recalc status. The job itself is
+  // single-shot (no progress rows), so we just surface the last row from
+  // `jobs` plus a tiny summary (total pairs + average score).
+  type SimilarityRun = {
+    id: string
+    status: 'pending' | 'processing' | 'completed' | 'failed'
+    result: {
+      campaignsConsidered?: number
+      pairsEvaluated?: number
+      pairsPersisted?: number
+      averageScore?: number
+      durationMs?: number
+    } | null
+    error: string | null
+    scheduledAt: string | null
+    startedAt: string | null
+    completedAt: string | null
+  }
+  type SimilarityStatus = {
+    success: boolean
+    data: {
+      latestRun: SimilarityRun | null
+      summary: { totalPairs: number; averageScore: number | null }
+    }
+  }
+  const { data: similarityStatus, refetch: refetchSimilarity } = useQuery<SimilarityStatus>({
+    queryKey: ['similarity-recalc-status'],
+    queryFn: async () => {
+      const res = await fetch('/api/admin/reprocess/similarity')
+      if (!res.ok) throw new Error('Failed to fetch similarity status')
+      return res.json()
+    },
+    refetchInterval: (query) => {
+      const status = query.state.data?.data?.latestRun?.status
+      return status === 'pending' || status === 'processing' ? 5000 : 30000
+    },
+  })
+  const latestSimilarity = similarityStatus?.data?.latestRun ?? null
+  const similaritySummary = similarityStatus?.data?.summary ?? null
 
   const parseCampaignIds = () =>
     campaignIdsInput
@@ -269,10 +348,162 @@ export default function AdminJobsPage() {
                 <ActivitySquare className="h-4 w-4" />
                 Status Yeniden Hesapla
               </button>
+
+              {/* Migration 018 — competitive_intent reprocess. Background; the
+                  button enqueues a single job that processes all campaigns. */}
+              <button
+                disabled={
+                  isSubmitting ||
+                  latestReprocess?.status === 'pending' ||
+                  latestReprocess?.status === 'running'
+                }
+                onClick={async () => {
+                  await runAction('/api/admin/reprocess/competitive-intent', {})
+                  await refetchReprocess()
+                }}
+                className="inline-flex items-center gap-2 rounded-lg border border-border bg-background px-3 py-2 text-sm hover:bg-muted disabled:opacity-50"
+              >
+                <Target className="h-4 w-4" />
+                {latestReprocess?.status === 'running' ||
+                latestReprocess?.status === 'pending'
+                  ? `Competitive Intent: ${latestReprocess.processedCount}/${latestReprocess.totalCampaigns}`
+                  : 'Competitive Intent Re-process'}
+              </button>
+
+              {/* Migration 022 — campaign_similarities full recompute. Pure
+                  TF-IDF + category + bonus + tag math; no AI calls, so the
+                  cost guard is unaffected. Runs to completion in ~1s on the
+                  current corpus. */}
+              <button
+                disabled={
+                  isSubmitting ||
+                  latestSimilarity?.status === 'pending' ||
+                  latestSimilarity?.status === 'processing'
+                }
+                onClick={async () => {
+                  await runAction('/api/admin/reprocess/similarity', {})
+                  await refetchSimilarity()
+                }}
+                className="inline-flex items-center gap-2 rounded-lg border border-border bg-background px-3 py-2 text-sm hover:bg-muted disabled:opacity-50"
+              >
+                <Network className="h-4 w-4" />
+                {latestSimilarity?.status === 'processing' ||
+                latestSimilarity?.status === 'pending'
+                  ? 'Similarity hesaplaniyor...'
+                  : 'Re-calculate Similarity'}
+              </button>
             </div>
 
             {actionMessage && <p className="text-sm text-green-600">{actionMessage}</p>}
             {actionError && <p className="text-sm text-red-600">{actionError}</p>}
+
+            {/* Latest competitive_intent reprocess summary panel. Renders
+                whenever there has ever been a run; hides itself if migration
+                table is missing or no run has occurred yet. */}
+            {latestReprocess && (
+              <div className="rounded-lg border border-border bg-muted/30 p-3 text-sm">
+                <div className="flex flex-wrap items-center gap-3">
+                  <span className="font-medium">Son competitive_intent run:</span>
+                  <Badge className={getJobStatusColor(latestReprocess.status)}>
+                    {latestReprocess.status}
+                  </Badge>
+                  <span className="text-muted-foreground">
+                    {latestReprocess.processedCount}/{latestReprocess.totalCampaigns}{' '}
+                    işlendi
+                  </span>
+                  {latestReprocess.completedAt && (
+                    <span className="text-xs text-muted-foreground">
+                      Bitti: {new Date(latestReprocess.completedAt).toLocaleString('tr-TR')}
+                    </span>
+                  )}
+                </div>
+                <div className="mt-2 flex flex-wrap gap-2 text-xs">
+                  <span className="rounded bg-blue-100 px-2 py-0.5 text-blue-800">
+                    Yeni Müşteri: {latestReprocess.distribution.acquisition}
+                  </span>
+                  <span className="rounded bg-emerald-100 px-2 py-0.5 text-emerald-800">
+                    Mevcut Müşteri: {latestReprocess.distribution.retention}
+                  </span>
+                  <span className="rounded bg-purple-100 px-2 py-0.5 text-purple-800">
+                    Marka: {latestReprocess.distribution.brand}
+                  </span>
+                  <span className="rounded bg-orange-100 px-2 py-0.5 text-orange-800">
+                    Sezon Sonu: {latestReprocess.distribution.clearance}
+                  </span>
+                  <span className="rounded bg-slate-100 px-2 py-0.5 text-slate-700">
+                    Belirsiz: {latestReprocess.distribution.unknown}
+                  </span>
+                  {latestReprocess.failedCount > 0 && (
+                    <span className="rounded bg-red-100 px-2 py-0.5 text-red-800">
+                      Başarısız: {latestReprocess.failedCount}
+                    </span>
+                  )}
+                </div>
+                {latestReprocess.errorMessage && (
+                  <p className="mt-2 text-xs text-red-600">
+                    Hata: {latestReprocess.errorMessage}
+                  </p>
+                )}
+              </div>
+            )}
+
+            {/* Migration 022 — similarity-recalc job summary. Always show the
+                aggregate counts (so operators can see "47 pairs, avg 0.34"
+                even on cold boot); job-level status is layered on top. */}
+            {(latestSimilarity || similaritySummary) && (
+              <div className="rounded-lg border border-border bg-muted/30 p-3 text-sm">
+                <div className="flex flex-wrap items-center gap-3">
+                  <span className="font-medium">Son similarity run:</span>
+                  {latestSimilarity ? (
+                    <Badge className={getJobStatusColor(latestSimilarity.status)}>
+                      {latestSimilarity.status}
+                    </Badge>
+                  ) : (
+                    <Badge className="bg-gray-100 text-gray-800">henuz calismadi</Badge>
+                  )}
+                  {similaritySummary && (
+                    <span className="text-muted-foreground">
+                      Toplam {similaritySummary.totalPairs} benzerlik cifti
+                      {similaritySummary.averageScore !== null && (
+                        <> · ort. skor {(similaritySummary.averageScore * 100).toFixed(1)}%</>
+                      )}
+                    </span>
+                  )}
+                  {latestSimilarity?.completedAt && (
+                    <span className="text-xs text-muted-foreground">
+                      Bitti: {new Date(latestSimilarity.completedAt).toLocaleString('tr-TR')}
+                    </span>
+                  )}
+                </div>
+                {latestSimilarity?.result && (
+                  <div className="mt-2 flex flex-wrap gap-2 text-xs">
+                    {typeof latestSimilarity.result.campaignsConsidered === 'number' && (
+                      <span className="rounded bg-blue-100 px-2 py-0.5 text-blue-800">
+                        Kampanya: {latestSimilarity.result.campaignsConsidered}
+                      </span>
+                    )}
+                    {typeof latestSimilarity.result.pairsEvaluated === 'number' && (
+                      <span className="rounded bg-emerald-100 px-2 py-0.5 text-emerald-800">
+                        Ciftler: {latestSimilarity.result.pairsEvaluated}
+                      </span>
+                    )}
+                    {typeof latestSimilarity.result.pairsPersisted === 'number' && (
+                      <span className="rounded bg-purple-100 px-2 py-0.5 text-purple-800">
+                        Yazildi: {latestSimilarity.result.pairsPersisted}
+                      </span>
+                    )}
+                    {typeof latestSimilarity.result.durationMs === 'number' && (
+                      <span className="rounded bg-slate-100 px-2 py-0.5 text-slate-700">
+                        Sure: {latestSimilarity.result.durationMs}ms
+                      </span>
+                    )}
+                  </div>
+                )}
+                {latestSimilarity?.error && (
+                  <p className="mt-2 text-xs text-red-600">Hata: {latestSimilarity.error}</p>
+                )}
+              </div>
+            )}
           </CardContent>
         </Card>
 

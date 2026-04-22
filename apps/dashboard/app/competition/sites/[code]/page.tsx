@@ -18,7 +18,10 @@ import { Badge } from '@/components/ui/badge'
 import { PageHeader } from '@/components/ui/page-header'
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table'
 import { DateRangePickerHeader } from '@/components/ui/date-range-picker-header'
+import { BonusChips } from '@/components/ui/bonus-chips'
+import { formatEffectiveBonus } from '@/lib/campaign-presentation'
 import { MomentumBadge, MomentumStaleBadge } from '@/components/competition/competition-grid'
+import { StanceBadge, formatStanceTooltip } from '@/components/ui/stance-badge'
 import { getCategoryLabel } from '@/lib/category-labels'
 import { cn } from '@/lib/utils'
 import { fetchSiteProfile } from '@/lib/api'
@@ -138,6 +141,17 @@ export default function SiteProfilePage({ params }: { params: { code: string } }
           <div className="flex flex-wrap items-center gap-2 pt-2">
             <MomentumBadge direction={site.momentum_direction} score={site.momentum_score} />
             <MomentumStaleBadge updatedAt={site.momentum_updated_at} />
+            <StanceBadge
+              stance={site.stance}
+              velocityDelta={site.stance_velocity_delta}
+              tooltip={formatStanceTooltip({
+                stance: site.stance,
+                velocityDelta: site.stance_velocity_delta,
+                stanceScore: site.stance_score,
+                last7dCount: site.momentum_last_7_days,
+                updatedAt: site.stance_updated_at,
+              })}
+            />
             <Badge variant="outline" className="text-xs">
               Son scrape: {formatDateTime(site.last_scraped_at)}
             </Badge>
@@ -418,8 +432,8 @@ export default function SiteProfilePage({ params }: { params: { code: string } }
                   <TableRow>
                     <TableHead>Kampanya</TableHead>
                     <TableHead>Kategori</TableHead>
-                    <TableHead className="text-right">Bonus</TableHead>
-                    <TableHead className="text-right">%</TableHead>
+                    <TableHead>Bonus</TableHead>
+                    <TableHead className="text-right">Net</TableHead>
                     <TableHead>Aktif Olduğu Dönem</TableHead>
                     <TableHead>Durum</TableHead>
                   </TableRow>
@@ -454,15 +468,50 @@ export default function SiteProfilePage({ params }: { params: { code: string } }
                             <span className="text-xs text-muted-foreground">—</span>
                           )}
                         </TableCell>
-                        <TableCell className="text-right font-mono tabular-nums">
-                          {c.bonus_amount !== null && c.bonus_amount > 0
-                            ? `₺${Math.round(c.bonus_amount).toLocaleString('tr-TR')}`
-                            : '—'}
+                        <TableCell>
+                          {/* BonusChips için synthetic ai_analysis shape; API
+                              alanlarını ham metadata'ya çevirip geçiriyoruz. */}
+                          <BonusChips
+                            campaign={{
+                              metadata: {
+                                ai_analysis: {
+                                  extractedTags: {
+                                    bonus_amount: c.bonus_amount,
+                                    bonus_percentage: c.bonus_percentage,
+                                    min_deposit: c.min_deposit ?? null,
+                                    max_bonus: c.max_bonus ?? null,
+                                    turnover: c.turnover ?? null,
+                                  },
+                                },
+                              },
+                            }}
+                            compact
+                            showEffective={false}
+                          />
                         </TableCell>
-                        <TableCell className="text-right tabular-nums">
-                          {c.bonus_percentage !== null && c.bonus_percentage > 0
-                            ? `%${c.bonus_percentage}`
-                            : '—'}
+                        <TableCell className="text-right font-mono tabular-nums">
+                          {(() => {
+                            // turnover string -> parse multiplier (BonusChips de
+                            // aynı parser'ı kullanır).
+                            const m = c.turnover
+                              ? Number((c.turnover.match(/(\d+(?:\.\d+)?)/) || [])[1])
+                              : null
+                            const mult = m && Number.isFinite(m) && m > 0 ? m : null
+                            const label = formatEffectiveBonus(c.bonus_amount, mult)
+                            if (!label) return <span className="text-muted-foreground">—</span>
+                            return (
+                              <span
+                                className="inline-flex items-center rounded px-1.5 py-0.5 text-xs font-semibold border bg-emerald-50 text-emerald-700 border-emerald-200 dark:bg-emerald-950/40 dark:text-emerald-300 dark:border-emerald-900"
+                                title={
+                                  mult
+                                    ? `Çevrim sonrası tahmin (${mult}x)`
+                                    : 'Çevrim verisi yok, raw bonus gösteriliyor'
+                                }
+                              >
+                                {label}
+                              </span>
+                            )
+                          })()}
                         </TableCell>
                         <TableCell className="text-xs" title={rawHint}>
                           <div className="flex flex-col gap-0.5">

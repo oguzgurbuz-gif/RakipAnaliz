@@ -109,7 +109,7 @@ export async function GET(request: NextRequest) {
     `, [dateFrom, dateTo]);
 
     const topSites = await query<{ site_name: string; count: string }>(`
-      SELECT 
+      SELECT
         s.name as site_name,
         COUNT(*) as count
       FROM campaigns c
@@ -120,6 +120,32 @@ export async function GET(request: NextRequest) {
       ORDER BY count DESC
       LIMIT 5
     `, [dateFrom, dateTo]);
+
+    // Wave 1 #1.1 — Quick stats için iki gerçek metrik:
+    //   * activeCompetitors: izlenmekte olan (is_active=true) site sayısı.
+    //   * lastUpdatedAt: campaigns.last_seen_at MAX değeri — "Son güncelleme"
+    //     kartının gerçek karşılığı. Veri yoksa null döneriz, UI fallback gösterir.
+    let activeCompetitors = 0;
+    let lastUpdatedAt: string | null = null;
+    try {
+      const sitesCountRow = await query<{ count: string | number }>(
+        `SELECT COUNT(*) AS count FROM sites WHERE is_active = TRUE`
+      );
+      activeCompetitors = parseInt(String(sitesCountRow[0]?.count ?? '0'), 10) || 0;
+    } catch (sitesError) {
+      console.warn('Sites count fallback:', sitesError);
+    }
+    try {
+      const lastSeenRow = await query<{ last_seen: string | Date | null }>(
+        `SELECT MAX(last_seen_at) AS last_seen FROM campaigns`
+      );
+      const raw = lastSeenRow[0]?.last_seen;
+      if (raw) {
+        lastUpdatedAt = raw instanceof Date ? raw.toISOString() : new Date(raw).toISOString();
+      }
+    } catch (lastSeenError) {
+      console.warn('last_seen_at fallback:', lastSeenError);
+    }
 
     const counts = statusCounts[0] || {
       started_count: '0',
@@ -187,6 +213,9 @@ export async function GET(request: NextRequest) {
         siteName: s.site_name,
         count: parseInt(s.count, 10),
       })),
+      // Wave 1 #1.1: Quick Stats Row için gerçek backed metrikler.
+      activeCompetitors,
+      lastUpdatedAt,
     };
 
     return successResponse(result);
@@ -210,6 +239,8 @@ export async function GET(request: NextRequest) {
       prevPeriodTo: new Date(0).toISOString(),
       topCategories: [],
       topSites: [],
+      activeCompetitors: 0,
+      lastUpdatedAt: null,
       fallback: true,
     });
   }

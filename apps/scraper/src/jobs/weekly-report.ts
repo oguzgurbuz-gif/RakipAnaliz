@@ -2,6 +2,7 @@ import { logger } from '../utils/logger';
 import { getDb } from '../db';
 import * as queries from '../db/queries';
 import { callDeepSeek } from '../ai/client';
+import { createNotification } from './notifications';
 
 export interface WeeklyReportPayload {
   weekStartDate: string;
@@ -149,6 +150,25 @@ async function storeWeeklyReport(report: WeeklyReport): Promise<string> {
     generatedAt: report.generatedAt,
   });
   logger.debug('Weekly report stored successfully', { reportId: id });
+
+  // Wave 4 — notify dashboard inbox that a new weekly report is ready. Uses
+  // (period.start, period.end) as the dedup key so re-running a week (e.g.
+  // catch-up) doesn't spam additional notifications.
+  await createNotification({
+    type: 'weekly_report_ready',
+    severity: 'low',
+    title: `Haftalık rapor hazır (${report.period.start} → ${report.period.end})`,
+    message: `Toplam ${report.summary.totalCampaigns} kampanya, ${report.summary.newCampaigns} yeni, ${report.summary.expiredCampaigns} biten.`,
+    payload: {
+      period: report.period,
+      summary: report.summary,
+    },
+    sourceTable: 'weekly_reports',
+    sourceId: `${report.period.start}_${report.period.end}`,
+    linkUrl: `/reports/weekly/${id}`,
+    dedupeBySource: true,
+  });
+
   return id;
 }
 

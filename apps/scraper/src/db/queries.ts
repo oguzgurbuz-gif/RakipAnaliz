@@ -336,8 +336,12 @@ export async function insertAiAnalysis(
     modelName?: string;
     promptVersion?: string;
     status?: string;
+    /** Legacy. Migration 018 introduces competitive_intent; new pipeline writes leave this null. */
     sentimentLabel?: string | null;
     sentimentScore?: number | null;
+    /** Migration 018 — growth-actionable taxonomy. */
+    competitiveIntent?: string | null;
+    competitiveIntentConfidence?: number | null;
     categoryCode?: string | null;
     categoryConfidence?: number | null;
     summaryText?: string | null;
@@ -363,18 +367,22 @@ export async function insertAiAnalysis(
     confidence?: number;
   }
 ): Promise<string> {
+  // Column count = 34, value count = 34 (32 fields + NOW()).
+  // competitive_intent + competitive_intent_confidence inserted between
+  // sentiment_score and category_code to mirror the table layout post #018.
   await db.query(
     `INSERT INTO campaign_ai_analyses (
       campaign_id, campaign_version_id, analysis_type, model_provider, model_name,
-      prompt_version, status, sentiment_label, sentiment_score, category_code,
-      category_confidence, summary_text, key_points, risk_flags, recommendation_text,
+      prompt_version, status, sentiment_label, sentiment_score,
+      competitive_intent, competitive_intent_confidence,
+      category_code, category_confidence, summary_text, key_points, risk_flags, recommendation_text,
       extracted_valid_from, extracted_valid_to, extracted_date_confidence,
       min_deposit, max_bonus, bonus_amount, bonus_percentage, free_bet_amount,
       cashback_percent, turnover, extracted_details, raw_request, raw_response,
       tokens_input, tokens_output, duration_ms, confidence, created_at
     ) VALUES (
       $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20, $21,
-      $22, $23, $24, $25, $26, $27, $28, $29, $30, $31, $32, NOW()
+      $22, $23, $24, $25, $26, $27, $28, $29, $30, $31, $32, $33, $34, NOW()
     )`,
     [
       data.campaignId,
@@ -386,6 +394,8 @@ export async function insertAiAnalysis(
       data.status ?? 'completed',
       data.sentimentLabel ?? null,
       data.sentimentScore ?? null,
+      data.competitiveIntent ?? 'unknown',
+      data.competitiveIntentConfidence ?? null,
       data.categoryCode ?? null,
       data.categoryConfidence ?? null,
       data.summaryText ?? null,

@@ -11,7 +11,8 @@ import { Input } from '@/components/ui/input'
 import { PageHeader } from '@/components/ui/page-header'
 import { resolveCampaignDateDisplay } from '@/lib/campaign-dates'
 import { getCampaignTypeLabel, getCampaignQualitySignals, getDisplaySentimentLabel, getDisplayStatusLabel } from '@/lib/campaign-presentation'
-import { formatDate, getSentimentColor, getStatusColor, cn } from '@/lib/utils'
+import { formatDate, getSentimentColor, cn } from '@/lib/utils'
+import { StatusBadge } from '@/components/campaign/status-badge'
 import { Search, Star, X, Download, AlertTriangle, Calendar, Tag, ThumbsUp, ThumbsDown, Minus, TrendingUp, Info, CheckCircle } from 'lucide-react'
 import { jsPDF } from 'jspdf'
 
@@ -353,7 +354,7 @@ function CompareClient() {
                           {getDisplaySentimentLabel((campaign.sentiment || campaign.aiSentiment) as string)}
                         </Badge>
                       )}
-                      <Badge className={cn(getStatusColor(campaign.status))}>{getDisplayStatusLabel(campaign.status)}</Badge>
+                      <StatusBadge status={campaign.status} />
                       {qualitySignals.slice(0, 1).map((signal) => (
                         <Badge key={signal.code} variant={signal.variant === 'warning' ? 'warning' : 'info'}>
                           {signal.label}

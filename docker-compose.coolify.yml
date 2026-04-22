@@ -35,6 +35,10 @@ services:
       DATABASE_URL: mysql://root:${MYSQL_ROOT_PASSWORD:-postgres}@db:3306/${MYSQL_DATABASE:-campaigns}
       NEXT_PUBLIC_API_URL: ${NEXT_PUBLIC_API_URL:-}
       ADMIN_API_KEY: ${ADMIN_API_KEY:-your-admin-api-key-here}
+      # Insights / Weekly Brief — DeepSeek (server-side only)
+      DEEPSEEK_API_URL: ${DEEPSEEK_API_URL:-https://api.deepseek.com/v1/chat/completions}
+      DEEPSEEK_API_KEY: ${DEEPSEEK_API_KEY}
+      DEEPSEEK_MODEL: ${DEEPSEEK_MODEL:-deepseek-chat}
     ports:
       - "3002:3000"
     networks:

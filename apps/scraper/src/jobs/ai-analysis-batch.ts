@@ -2,7 +2,7 @@ import { logger } from '../utils/logger';
 import { getDb } from '../db';
 import { BatchAnalysisCampaign, buildBatchAnalysisPrompt } from '../ai/prompts';
 import { callDeepSeek } from '../ai/client';
-import { safeJsonParse } from '../ai/schema';
+import { normalizeCompetitiveIntent, safeJsonParse } from '../ai/schema';
 import * as queries from '../db/queries';
 
 export interface AiAnalysisBatchPayload {
@@ -13,7 +13,11 @@ export interface AiAnalysisBatchPayload {
 export interface BatchAnalysisResult {
   campaign_id: string;
   category: string;
-  sentiment: 'positive' | 'neutral' | 'negative';
+  /** Legacy. New AI calls return competitive_intent; kept optional for backward compat. */
+  sentiment?: 'positive' | 'neutral' | 'negative';
+  /** Migration 018 — growth-actionable taxonomy. */
+  competitive_intent?: 'acquisition' | 'retention' | 'brand' | 'clearance' | 'unknown';
+  competitive_intent_confidence?: number | null;
   summary: string;
   key_points: string[];
   min_deposit: number | null;
@@ -191,13 +195,21 @@ async function updateCampaignsWithResults(
     try {
       // Map category to standard codes
       const categoryCode = mapCategoryToCode(result.category);
+      const competitiveIntent = normalizeCompetitiveIntent(result.competitive_intent);
+      const competitiveIntentConfidence =
+        typeof result.competitive_intent_confidence === 'number'
+          ? result.competitive_intent_confidence
+          : null;
 
-      // Store AI analysis result
+      // Store AI analysis result. Note: sentimentLabel intentionally null —
+      // migration 018 deprecates sentiment in favor of competitive_intent.
       await queries.insertAiAnalysis(db, {
         campaignId,
         analysisType: 'batch_analysis',
-        sentimentLabel: result.sentiment,
-        sentimentScore: result.sentiment === 'positive' ? 1 : result.sentiment === 'negative' ? -1 : 0,
+        sentimentLabel: null,
+        sentimentScore: null,
+        competitiveIntent,
+        competitiveIntentConfidence,
         categoryCode: categoryCode,
         categoryConfidence: result.confidence,
         summaryText: result.summary,

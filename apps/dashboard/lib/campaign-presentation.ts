@@ -31,10 +31,18 @@ export type CampaignBonusInfo = {
   minDeposit: number | null
   maxBonus: number | null
   freeBetAmount: number | null
+  /** Çevrim çarpanı (örn 10 = 10x). AI bazen "10x", bazen "10 kez" döndürür;
+   *  parse edilerek number'a normalize edilir. */
+  turnoverMultiplier: number | null
   /** AI confidence for the campaign type / extracted tags (0-1). */
   confidence: number | null
   /** Pre-formatted display string e.g. "₺1.000", "%50", "₺1.000 (%50)" or null when no signal. */
   display: string | null
+  /** Çevrim sonrası tahmini net bonus (TL). Hesaplama:
+   *  - amount + turnover varsa: amount / turnover
+   *  - amount var, turnover yok: amount (raw)
+   *  - amount yok: null */
+  effectiveBonus: number | null
 }
 
 const GENERIC_TITLES = new Set(['kampanyalar', 'güncel kampanyalar'])
@@ -96,6 +104,67 @@ function formatPercentage(value: number): string {
   return `%${value.toLocaleString('tr-TR', { maximumFractionDigits: 2 })}`
 }
 
+/**
+ * AI bazen turnover'ı "10x", "10 kez", "10X çevrim", "x10", veya sayı olarak
+ * döndürür. Hepsini multiplier number'a normalize eder. Geçersizse null.
+ */
+function parseTurnoverMultiplier(value: unknown): number | null {
+  if (value === null || value === undefined || value === '') return null
+  if (typeof value === 'number') return Number.isFinite(value) && value > 0 ? value : null
+  if (typeof value !== 'string') return null
+  const cleaned = value.trim().toLowerCase().replace(',', '.')
+  if (!cleaned) return null
+  // İlk geçen sayıyı yakala — "10x", "x10", "10 kez", "10x çevrim" hepsi tek
+  // sayı barındırır. Yoksa null.
+  const match = cleaned.match(/(\d+(?:\.\d+)?)/)
+  if (!match) return null
+  const parsed = Number(match[1])
+  return Number.isFinite(parsed) && parsed > 0 ? parsed : null
+}
+
+/**
+ * "10x" formatlı çevrim etiketi. Multiplier integer değilse "x" sonrası
+ * virgül-ayrılmış. null girdi → null.
+ */
+export function formatTurnover(value: unknown): string | null {
+  const mult = parseTurnoverMultiplier(value)
+  if (mult === null) return null
+  if (Number.isInteger(mult)) return `${mult}x`
+  return `${mult.toLocaleString('tr-TR', { maximumFractionDigits: 2 })}x`
+}
+
+/** "Min ₺200" şeklinde formatla. null/0 → null. */
+export function formatMinDeposit(value: unknown): string | null {
+  const num = toFiniteNumber(value)
+  if (num === null || num <= 0) return null
+  return `Min ${formatCurrency(num)}`
+}
+
+/**
+ * Effective bonus = bonus_amount / turnover (varsa). Çevrim yoksa raw bonus
+ * döner. Bonus yoksa null.
+ */
+export function computeEffectiveBonus(
+  amount: number | null,
+  turnoverMultiplier: number | null
+): number | null {
+  if (amount === null || amount <= 0) return null
+  if (turnoverMultiplier === null || turnoverMultiplier <= 0) return amount
+  return amount / turnoverMultiplier
+}
+
+/** "Net ₺150" formatlı effective bonus etiketi. null girdi → null. */
+export function formatEffectiveBonus(
+  amount: number | null,
+  turnoverMultiplier: number | null
+): string | null {
+  const effective = computeEffectiveBonus(amount, turnoverMultiplier)
+  if (effective === null) return null
+  // Yuvarla — "Net ₺150" daha okunaklı ve "Net ₺149,50" gibi gürültülü değil.
+  const rounded = Math.round(effective)
+  return `Net ${formatCurrency(rounded)}`
+}
+
 export function getCampaignBonusInfo(campaign: CampaignLike): CampaignBonusInfo {
   const aiAnalysis = (campaign.metadata?.ai_analysis ?? {}) as Record<string, unknown>
   const tags = (aiAnalysis.extractedTags ?? {}) as Record<string, unknown>
@@ -109,6 +178,11 @@ export function getCampaignBonusInfo(campaign: CampaignLike): CampaignBonusInfo 
     toFiniteNumber(tags.max_bonus) ?? toFiniteNumber(conditions.max_bonus)
   const freeBetAmount =
     toFiniteNumber(tags.free_bet_amount) ?? toFiniteNumber(tags.freebet_amount)
+  // Turnover hem extractedTags.turnover hem conditions.turnover yolunda
+  // olabilir. AI prompt iki yere de yazıyor.
+  const turnoverMultiplier =
+    parseTurnoverMultiplier(tags.turnover) ??
+    parseTurnoverMultiplier(conditions.turnover)
 
   const confidence =
     toFiniteNumber(aiAnalysis.type_confidence) ??
@@ -126,14 +200,18 @@ export function getCampaignBonusInfo(campaign: CampaignLike): CampaignBonusInfo 
     display = `${formatCurrency(freeBetAmount)} freebet`
   }
 
+  const effectiveBonus = computeEffectiveBonus(amount, turnoverMultiplier)
+
   return {
     amount,
     percentage,
     minDeposit,
     maxBonus,
     freeBetAmount,
+    turnoverMultiplier,
     confidence,
     display,
+    effectiveBonus,
   }
 }
 

@@ -16,6 +16,8 @@ interface TrendData {
   categoryByDate: Record<string, Record<string, number>>
   categoryDistribution: { category: string; count: number }[]
   sentimentDistribution: { sentiment: string; count: number }[]
+  /** Migration 018 — additive. Charts can opt-in to render the new taxonomy. */
+  intentDistribution?: { intent: string; count: number }[]
   topSites: { siteName: string; campaignCount: number }[]
   valueScoresBySite: { siteName: string; avgValueScore: number }[]
   topCategoriesThisWeek: { category: string; count: number }[]
@@ -33,6 +35,8 @@ const EMPTY_REPORT_SUMMARY: ReportSummary = {
   changedCount: 0,
   topCategories: [],
   topSites: [],
+  activeCompetitors: 0,
+  lastUpdatedAt: null,
 }
 
 const EMPTY_TREND_DATA: TrendData = {
@@ -40,6 +44,7 @@ const EMPTY_TREND_DATA: TrendData = {
   categoryByDate: {},
   categoryDistribution: [],
   sentimentDistribution: [],
+  intentDistribution: [],
   topSites: [],
   valueScoresBySite: [],
   topCategoriesThisWeek: [],
@@ -135,7 +140,12 @@ export async function fetchCampaigns(
     params.append('campaign_type', filters.campaign_type)
   }
   if (filters.sentiment !== undefined && filters.sentiment !== '') {
+    // Backward-compat. Backend still accepts ?sentiment= for legacy callers.
     params.append('sentiment', filters.sentiment)
+  }
+  if (filters.intent !== undefined && filters.intent !== '') {
+    // Migration 018 — preferred filter for the new growth UI.
+    params.append('intent', filters.intent)
   }
   if (filters.dateMode !== undefined) {
     params.append('dateMode', filters.dateMode)
@@ -297,6 +307,13 @@ export interface CompetitionData {
     active_rate: number
     momentum_score: number
     momentum_direction: 'up' | 'down' | 'stable'
+    momentum_updated_at?: string | Date | null
+    // Migration 020 — Atak/Defans (additive). API her zaman 'unknown' fallback'i
+    // ile döner; eski clientlar opsiyonel olarak okur.
+    stance?: 'aggressive' | 'neutral' | 'defensive' | 'unknown'
+    stance_velocity_delta?: number
+    stance_score?: number | null
+    stance_updated_at?: string | Date | null
   }[]
   comparisonTable: {
     category: string
@@ -558,6 +575,12 @@ export interface SiteProfileSite {
   momentum_last_7_days: number
   momentum_prev_7_days: number
   momentum_updated_at: string | Date | null
+  // Migration 020 — Atak/Defans (additive). Site profile header'ında
+  // StanceBadge tarafından tüketilir.
+  stance?: 'aggressive' | 'neutral' | 'defensive' | 'unknown'
+  stance_velocity_delta?: number
+  stance_score?: number | null
+  stance_updated_at?: string | Date | null
   total_campaigns: number
   active_campaigns: number
   avg_bonus: number
@@ -589,6 +612,12 @@ export interface SiteProfileActiveCampaign {
   category: string | null
   bonus_amount: number | null
   bonus_percentage: number | null
+  // Slice B: BonusChips component'inin min deposit + turnover + effective
+  // bonus chip'lerini render edebilmesi için API artık bu alanları da
+  // döndürüyor. Eski clientlar opsiyonel kabul etmeli (geriye uyumlu).
+  min_deposit?: number | null
+  max_bonus?: number | null
+  turnover?: string | null
   status: string
   // Ham DB tarihleri — landing page'deki orijinal "geçerlilik" yazısıdır.
   // Çoğu zaman geçmişe atıfta bulunur (kampanya tekrar yayınlandı), bu yüzden
@@ -747,6 +776,375 @@ export async function downloadWeeklyReportsCsv(
   return response.blob()
 }
 
+// ---------------------------------------------------------------------------
+// Wave 1 #1.6 — AI cost limits (circuit breaker yönetimi)
+// ---------------------------------------------------------------------------
+
+export interface AiCostLimits {
+  dailyLimitUsd: number
+  monthlyLimitUsd: number
+  pauseOnBreach: boolean
+  updatedAt: string | null
+  migrationPending?: boolean
+}
+
+const DEFAULT_AI_COST_LIMITS: AiCostLimits = {
+  dailyLimitUsd: 5,
+  monthlyLimitUsd: 100,
+  pauseOnBreach: true,
+  updatedAt: null,
+  migrationPending: true,
+}
+
+export async function fetchAiCostLimits(): Promise<AiCostLimits> {
+  return withFallback(DEFAULT_AI_COST_LIMITS, () =>
+    fetchApi<AiCostLimits>('/api/admin/cost/limits')
+  )
+}
+
+export async function updateAiCostLimits(input: {
+  daily_limit_usd: number
+  monthly_limit_usd: number
+  pause_on_breach: boolean
+}): Promise<AiCostLimits> {
+  return fetchApi<AiCostLimits>('/api/admin/cost/limits', {
+    method: 'PUT',
+    body: JSON.stringify(input),
+  })
+}
+
+// ---------------------------------------------------------------------------
+// Wave 1 #1.2 — WoW per-site delta. Component bunu render eder.
+// ---------------------------------------------------------------------------
+
+export interface WowDeltaEntry {
+  siteId: string
+  siteName: string
+  siteCode: string
+  current: number
+  previous: number
+  diff: number
+}
+
+export interface WowDeltasResponse {
+  from: string
+  to: string
+  prevFrom: string
+  prevTo: string
+  topChanges: WowDeltaEntry[]
+}
+
+const EMPTY_WOW_DELTAS: WowDeltasResponse = {
+  from: '',
+  to: '',
+  prevFrom: '',
+  prevTo: '',
+  topChanges: [],
+}
+
+export async function fetchWowDeltas(
+  filters: { from?: string; to?: string; limit?: number } = {}
+): Promise<WowDeltasResponse> {
+  return withFallback(EMPTY_WOW_DELTAS, async () => {
+    const search = new URLSearchParams()
+    if (filters.from) search.set('from', filters.from)
+    if (filters.to) search.set('to', filters.to)
+    if (filters.limit) search.set('limit', String(filters.limit))
+    const qs = search.toString()
+    return fetchApi<WowDeltasResponse>(`/api/reports/wow-deltas${qs ? `?${qs}` : ''}`)
+  })
+}
+
+// ---------------------------------------------------------------------------
+// Insights — weekly brief + bonus index
+// ---------------------------------------------------------------------------
+
+export interface WeeklyBrief {
+  topChange: string
+  risk: string
+  action: string
+  generatedAt: string
+  dateFrom: string
+  dateTo: string
+  aiAvailable: boolean
+  meta?: {
+    newCampaignsCount: number
+    inflationCount: number
+    versionDiffCount: number
+    aiReason?: string
+  }
+}
+
+const EMPTY_WEEKLY_BRIEF: WeeklyBrief = {
+  topChange: 'Hafta özeti henüz hazır değil.',
+  risk: 'Risk sinyali yok.',
+  action: 'AI özeti birazdan oluşacak.',
+  generatedAt: '',
+  dateFrom: '',
+  dateTo: '',
+  aiAvailable: false,
+}
+
+export async function fetchWeeklyBrief(force: boolean = false): Promise<WeeklyBrief> {
+  return withFallback(EMPTY_WEEKLY_BRIEF, () =>
+    fetchApi<WeeklyBrief>(`/api/insights/weekly-brief${force ? '?force=1' : ''}`)
+  )
+}
+
+export interface BonusIndexCategoryRow {
+  category: string
+  median: number
+  p90: number
+  sampleSize: number
+  outlierCount: number
+  sparkline: { week: string; median: number }[]
+}
+
+export interface BonusIndexOutlier {
+  campaignId: string
+  title: string
+  siteName: string
+  siteCode: string
+  category: string
+  bonusAmount: number
+}
+
+export interface BonusIndexData {
+  dateFrom: string
+  dateTo: string
+  categoryFilter: string | null
+  kpi: {
+    todayMedian: number
+    todayP90: number
+    outlierCount: number
+    sampleSize: number
+  }
+  perCategory: BonusIndexCategoryRow[]
+  weeklyAll: ({ week: string } & Record<string, number | string>)[]
+  categories: string[]
+  topOutliers: BonusIndexOutlier[]
+}
+
+const EMPTY_BONUS_INDEX: BonusIndexData = {
+  dateFrom: '',
+  dateTo: '',
+  categoryFilter: null,
+  kpi: { todayMedian: 0, todayP90: 0, outlierCount: 0, sampleSize: 0 },
+  perCategory: [],
+  weeklyAll: [],
+  categories: [],
+  topOutliers: [],
+}
+
+export async function fetchBonusIndex(
+  filters: { from?: string; to?: string; category?: string } = {}
+): Promise<BonusIndexData> {
+  return withFallback(EMPTY_BONUS_INDEX, async () => {
+    const params = new URLSearchParams()
+    if (filters.from) params.append('from', filters.from)
+    if (filters.to) params.append('to', filters.to)
+    if (filters.category) params.append('category', filters.category)
+    const qs = params.toString()
+    return fetchApi<BonusIndexData>(`/api/insights/bonus-index${qs ? `?${qs}` : ''}`)
+  })
+}
+
+// ---------------------------------------------------------------------------
+// Win/Loss Tracker — Bitalih'in haftalık sıralama değişimi
+// ---------------------------------------------------------------------------
+
+export type WinLossMetric =
+  | 'campaign_count'
+  | 'avg_bonus'
+  | 'category_diversity'
+  | 'momentum'
+
+export interface WinLossMetricSnapshot {
+  rank: number
+  value: number
+  total: number
+}
+
+export interface WinLossEntry {
+  siteId: string
+  siteCode: string
+  siteName: string
+  metric: WinLossMetric
+  oldRank: number
+  newRank: number
+  byHowMuch: number
+}
+
+export interface WinLossBigMover {
+  siteId: string
+  siteCode: string
+  siteName: string
+  metric: WinLossMetric
+  oldRank: number
+  newRank: number
+  delta: number
+}
+
+export interface WinLossData {
+  dateFrom: string
+  dateTo: string
+  prevDateFrom: string
+  prevDateTo: string
+  hasData: boolean
+  bitalihPosition: {
+    current: Partial<Record<WinLossMetric, WinLossMetricSnapshot>>
+    previous: Partial<Record<WinLossMetric, WinLossMetricSnapshot>>
+  }
+  wins: WinLossEntry[]
+  losses: WinLossEntry[]
+  bigMovers: WinLossBigMover[]
+}
+
+const EMPTY_WIN_LOSS: WinLossData = {
+  dateFrom: '',
+  dateTo: '',
+  prevDateFrom: '',
+  prevDateTo: '',
+  hasData: false,
+  bitalihPosition: { current: {}, previous: {} },
+  wins: [],
+  losses: [],
+  bigMovers: [],
+}
+
+export async function fetchWinLoss(
+  filters: { from?: string; to?: string } = {}
+): Promise<WinLossData> {
+  return withFallback(EMPTY_WIN_LOSS, async () => {
+    const params = new URLSearchParams()
+    if (filters.from) params.append('from', filters.from)
+    if (filters.to) params.append('to', filters.to)
+    const qs = params.toString()
+    return fetchApi<WinLossData>(`/api/insights/win-loss${qs ? `?${qs}` : ''}`)
+  })
+}
+
+// ---------------------------------------------------------------------------
+// Wave 4 — Notification Center (migration 023)
+// ---------------------------------------------------------------------------
+
+export type NotificationType =
+  | 'smart_alert'
+  | 'momentum_shift'
+  | 'new_competitor'
+  | 'campaign_end'
+  | 'weekly_report_ready'
+  | 'system'
+  | string
+
+export type NotificationSeverity =
+  | 'low'
+  | 'medium'
+  | 'high'
+  | 'critical'
+  | string
+
+export interface NotificationItem {
+  id: string
+  notificationType: NotificationType
+  severity: NotificationSeverity
+  title: string
+  message: string | null
+  payload: Record<string, unknown> | null
+  readAt: string | null
+  archivedAt: string | null
+  sourceTable: string | null
+  sourceId: string | null
+  linkUrl: string | null
+  createdAt: string
+}
+
+export interface NotificationsListResponse {
+  items: NotificationItem[]
+  migrationPending: boolean
+  meta: {
+    page: number
+    pageSize: number
+    total: number
+    totalPages: number
+  }
+}
+
+export interface NotificationFilters {
+  unread?: boolean
+  includeArchived?: boolean
+  severity?: NotificationSeverity
+  type?: NotificationType
+  from?: string
+  to?: string
+  page?: number
+  pageSize?: number
+}
+
+const EMPTY_NOTIFICATIONS: NotificationsListResponse = {
+  items: [],
+  migrationPending: false,
+  meta: { page: 1, pageSize: 20, total: 0, totalPages: 0 },
+}
+
+export async function fetchNotifications(
+  filters: NotificationFilters = {}
+): Promise<NotificationsListResponse> {
+  return withFallback(EMPTY_NOTIFICATIONS, async () => {
+    const search = new URLSearchParams()
+    if (filters.unread) search.set('unread', '1')
+    if (filters.includeArchived) search.set('includeArchived', '1')
+    if (filters.severity) search.set('severity', filters.severity)
+    if (filters.type) search.set('type', filters.type)
+    if (filters.from) search.set('from', filters.from)
+    if (filters.to) search.set('to', filters.to)
+    if (filters.page) search.set('page', String(filters.page))
+    if (filters.pageSize) search.set('pageSize', String(filters.pageSize))
+    const qs = search.toString()
+    const response = await fetchApi<{
+      meta: NotificationsListResponse['meta']
+      data: { items: NotificationItem[]; migrationPending: boolean }
+    }>(`/api/notifications${qs ? `?${qs}` : ''}`)
+    return {
+      items: response.data.items,
+      migrationPending: response.data.migrationPending,
+      meta: response.meta,
+    }
+  })
+}
+
+export async function fetchNotificationsUnreadCount(): Promise<{
+  count: number
+  migrationPending: boolean
+}> {
+  return withFallback({ count: 0, migrationPending: false }, () =>
+    fetchApi<{ count: number; migrationPending: boolean }>(
+      '/api/notifications/unread-count'
+    )
+  )
+}
+
+export async function markNotificationsRead(input: {
+  id?: string | number
+  ids?: Array<string | number>
+  all?: boolean
+}): Promise<{ affected: number }> {
+  return fetchApi<{ affected: number }>('/api/notifications/mark-read', {
+    method: 'POST',
+    body: JSON.stringify(input),
+  })
+}
+
+export async function archiveNotifications(input: {
+  id?: string | number
+  ids?: Array<string | number>
+}): Promise<{ affected: number }> {
+  return fetchApi<{ affected: number }>('/api/notifications/archive', {
+    method: 'POST',
+    body: JSON.stringify(input),
+  })
+}
+
 // --- Calendar overlaps (cross-site collisions on shared start day + category)
 export interface CalendarOverlap {
   date: string
@@ -768,4 +1166,137 @@ export async function fetchCalendarOverlaps(
       `/api/calendar/overlaps${queryString ? `?${queryString}` : ''}`
     )
   })
+}
+
+// ---------------------------------------------------------------------------
+// Press Calendar (migration 019) — TR press/event seed + YoY karşılaştırma
+// ---------------------------------------------------------------------------
+
+export type PressEventType =
+  | 'religious'
+  | 'sports'
+  | 'national'
+  | 'commercial'
+  | 'other'
+
+export interface PressEvent {
+  id: number
+  name: string
+  event_type: PressEventType
+  start_date: string
+  end_date: string
+  description: string | null
+  country: string
+  impact_score: number
+}
+
+export async function fetchPressEvents(
+  filters: { from?: string; to?: string; type?: PressEventType } = {}
+): Promise<PressEvent[]> {
+  return withFallback<PressEvent[]>([], async () => {
+    const params = new URLSearchParams()
+    if (filters.from) params.append('from', filters.from)
+    if (filters.to) params.append('to', filters.to)
+    if (filters.type) params.append('type', filters.type)
+    const qs = params.toString()
+    return fetchApi<PressEvent[]>(
+      `/api/calendar/press-events${qs ? `?${qs}` : ''}`
+    )
+  })
+}
+
+export interface PressEventTopCategory {
+  category: string
+  count: number
+}
+
+export interface PressEventTopBonus {
+  campaign_id: string
+  title: string
+  site_code: string | null
+  site_name: string | null
+  bonus_amount: number | null
+  category: string | null
+}
+
+export interface PressEventYoYWindow {
+  from: string
+  to: string
+  campaignCount: number
+  topCategories: PressEventTopCategory[]
+  topBonuses: PressEventTopBonus[]
+}
+
+export interface PressEventYoY {
+  event: {
+    id: number
+    name: string
+    event_type: PressEventType
+    start_date: string
+    end_date: string
+  }
+  thisYear: PressEventYoYWindow
+  lastYear: PressEventYoYWindow
+}
+
+export async function fetchPressEventYoY(
+  id: number
+): Promise<PressEventYoY | null> {
+  return withFallback<PressEventYoY | null>(null, () =>
+    fetchApi<PressEventYoY>(`/api/calendar/press-events/${id}/yoy`)
+  )
+}
+
+// Admin (writes — middleware enforces auth via x-admin-key / admin_session).
+export interface PressEventInput {
+  name: string
+  event_type: PressEventType
+  start_date: string
+  end_date: string
+  description?: string | null
+  country?: string
+  impact_score?: number
+  metadata?: Record<string, unknown> | null
+}
+
+export async function fetchAdminPressEvents(
+  filters: { type?: PressEventType; year?: string } = {}
+): Promise<PressEvent[]> {
+  return withFallback<PressEvent[]>([], async () => {
+    const params = new URLSearchParams()
+    if (filters.type) params.append('type', filters.type)
+    if (filters.year) params.append('year', filters.year)
+    const qs = params.toString()
+    return fetchApi<PressEvent[]>(
+      `/api/admin/press-events${qs ? `?${qs}` : ''}`
+    )
+  })
+}
+
+export async function createPressEvent(
+  input: PressEventInput
+): Promise<PressEvent> {
+  return fetchApi<PressEvent>('/api/admin/press-events', {
+    method: 'POST',
+    body: JSON.stringify(input),
+  })
+}
+
+export async function updatePressEvent(
+  id: number,
+  patch: Partial<PressEventInput>
+): Promise<PressEvent> {
+  return fetchApi<PressEvent>(`/api/admin/press-events/${id}`, {
+    method: 'PUT',
+    body: JSON.stringify(patch),
+  })
+}
+
+export async function deletePressEvent(
+  id: number
+): Promise<{ id: number; deleted: boolean }> {
+  return fetchApi<{ id: number; deleted: boolean }>(
+    `/api/admin/press-events/${id}`,
+    { method: 'DELETE' }
+  )
 }

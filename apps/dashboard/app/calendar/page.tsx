@@ -9,7 +9,7 @@ import { Input } from '@/components/ui/input'
 import { Select } from '@/components/ui/select'
 import { PageHeader } from '@/components/ui/page-header'
 import { useSSE } from '@/lib/sse'
-import { fetchCampaigns } from '@/lib/api'
+import { fetchCampaigns, fetchPressEvents, type PressEvent } from '@/lib/api'
 import { getCategoryLabel } from '@/lib/category-labels'
 import { cn } from '@/lib/utils'
 import {
@@ -25,10 +25,19 @@ import { GanttStrip } from '@/components/calendar/gantt-strip'
 import { GanttChart } from '@/components/calendar/gantt-chart'
 import { OverlapBadge } from '@/components/calendar/overlap-detector'
 import { OverlapHeatmap } from '@/components/calendar/overlap-heatmap'
+import {
+  PressEventBadge,
+  PressEventDetailModal,
+  PressEventLegend,
+  getPressEventsForDay,
+} from '@/components/calendar/press-events-overlay'
 import { getSiteColor, getSiteColorEntries } from '@/lib/site-colors'
 import { buildCampaignsIcs, downloadIcs } from '@/lib/ics-export'
 import { DateRangePickerHeader } from '@/components/ui/date-range-picker-header'
 import { useDateRange } from '@/lib/date-range/context'
+import { Modal } from '@/components/ui/modal'
+import { Badge } from '@/components/ui/badge'
+import { BonusChips } from '@/components/ui/bonus-chips'
 
 type Campaign = {
   id: string
@@ -48,12 +57,14 @@ type CampaignResponse = {
   total: number
 }
 
+// Wave 1 #1.4 — Kanonik 4 state (StatusBadge / scraper schema ile uyumlu).
+// Legacy 'ended'/'passive' artık dropdown'da gösterilmez; backend bu değerlerle
+// satır kaydetmiyor.
 const STATUS_OPTIONS: Array<{ value: string; label: string }> = [
   { value: '', label: 'Tüm durumlar' },
   { value: 'active', label: 'Aktif' },
-  { value: 'ended', label: 'Bitmiş' },
-  { value: 'passive', label: 'Pasif' },
-  { value: 'changed', label: 'Değişmiş' },
+  { value: 'expired', label: 'Bitmiş' },
+  { value: 'hidden', label: 'Pasif' },
   { value: 'pending', label: 'Beklemede' },
 ]
 
@@ -158,6 +169,24 @@ export default function CalendarPage() {
   })
 
   const campaigns = data?.data || []
+
+  // Press / event overlay — Türkiye event seed (migration 019).
+  // Range'i biraz genişletiyoruz ki Gantt view de ileri/geri olayları görsün.
+  const { data: pressEvents = [] } = useQuery<PressEvent[]>({
+    queryKey: ['press-events-overlay', dateFrom, dateTo],
+    queryFn: () => fetchPressEvents({ from: dateFrom, to: dateTo }),
+  })
+  const [activePressEvent, setActivePressEvent] = useState<PressEvent | null>(null)
+
+  // Aylık view'da hücreye tıklandığında o günün tüm aktif kampanyalarını
+  // listeleyen modal. ISO YYYY-MM-DD formatında günü tutuyoruz; modal
+  // kapatılınca null'a çekiliyor (ESC + outside click → Modal component handle
+  // ediyor).
+  const [selectedDay, setSelectedDay] = useState<{
+    iso: string
+    label: string
+    campaigns: Campaign[]
+  } | null>(null)
 
   // Toggle selection — used by the ICS export action below.
   const toggleSelected = (id: string) => {
@@ -530,14 +559,55 @@ export default function CalendarPage() {
                       )
                     })
                     const overlapCount = day.campaigns.length
+                    // Press / event overlay — bu hücreye düşen TR event'leri.
+                    const dayPressEvents = day.isCurrentMonth
+                      ? getPressEventsForDay(pressEvents, year, month, day.date)
+                      : []
 
+                    const handleCellClick = () => {
+                      if (!day.isCurrentMonth) return
+                      if (day.campaigns.length === 0) return
+                      const iso = toIso(year, month, day.date)
+                      setSelectedDay({
+                        iso,
+                        label: new Date(year, month, day.date).toLocaleDateString('tr-TR', {
+                          weekday: 'long',
+                          year: 'numeric',
+                          month: 'long',
+                          day: 'numeric',
+                        }),
+                        campaigns: day.campaigns,
+                      })
+                    }
+                    const cellClickable =
+                      day.isCurrentMonth && day.campaigns.length > 0
                     return (
                       <div
                         key={idx}
                         className={cn(
                           'min-h-[100px] p-2 bg-card',
-                          !day.isCurrentMonth && 'bg-muted/30 opacity-50'
+                          !day.isCurrentMonth && 'bg-muted/30 opacity-50',
+                          cellClickable &&
+                            'cursor-pointer hover:bg-muted/40 transition-colors'
                         )}
+                        onClick={cellClickable ? handleCellClick : undefined}
+                        onKeyDown={
+                          cellClickable
+                            ? (e) => {
+                                if (e.key === 'Enter' || e.key === ' ') {
+                                  e.preventDefault()
+                                  handleCellClick()
+                                }
+                              }
+                            : undefined
+                        }
+                        role={cellClickable ? 'button' : undefined}
+                        tabIndex={cellClickable ? 0 : undefined}
+                        aria-label={
+                          cellClickable
+                            ? `${day.date}. gün — ${day.campaigns.length} kampanya, detayları gör`
+                            : undefined
+                        }
                       >
                         <div className="flex items-center justify-between mb-1">
                           <div
@@ -553,8 +623,35 @@ export default function CalendarPage() {
                           <OverlapBadge count={overlapCount} />
                         </div>
 
+                        {dayPressEvents.length > 0 && (
+                          <div
+                            className="mb-1 space-y-0.5"
+                            onClick={(e) => e.stopPropagation()}
+                          >
+                            {dayPressEvents.slice(0, 2).map((ev) => (
+                              <PressEventBadge
+                                key={ev.id}
+                                event={ev}
+                                onClick={() => setActivePressEvent(ev)}
+                              />
+                            ))}
+                            {dayPressEvents.length > 2 && (
+                              <button
+                                type="button"
+                                onClick={() => setActivePressEvent(dayPressEvents[2])}
+                                className="text-[10px] text-muted-foreground hover:text-foreground"
+                              >
+                                +{dayPressEvents.length - 2} event
+                              </button>
+                            )}
+                          </div>
+                        )}
+
                         {startingToday.length > 0 && (
-                          <div className="mb-1 space-y-0.5">
+                          <div
+                            className="mb-1 space-y-0.5"
+                            onClick={(e) => e.stopPropagation()}
+                          >
                             {startingToday.slice(0, 2).map((c) => {
                               const color = getSiteColor(c.site?.code)
                               return (
@@ -582,7 +679,10 @@ export default function CalendarPage() {
                         )}
 
                         {endingToday.length > 0 && (
-                          <div className="mb-1 space-y-0.5">
+                          <div
+                            className="mb-1 space-y-0.5"
+                            onClick={(e) => e.stopPropagation()}
+                          >
                             {endingToday.slice(0, 2).map((c) => {
                               const color = getSiteColor(c.site?.code)
                               return (
@@ -617,7 +717,10 @@ export default function CalendarPage() {
                           )
                           if (ongoing.length === 0) return null
                           return (
-                            <div className="space-y-0.5">
+                            <div
+                              className="space-y-0.5"
+                              onClick={(e) => e.stopPropagation()}
+                            >
                               {ongoing.slice(0, 3).map((c) => {
                                 const color = getSiteColor(c.site?.code)
                                 return (
@@ -711,6 +814,20 @@ export default function CalendarPage() {
           </CardContent>
         </Card>
 
+        {/* Press / Event takvim lejantı (migration 019) */}
+        <Card>
+          <CardHeader className="pb-2">
+            <CardTitle className="text-base">Press Calendar Lejantı</CardTitle>
+            <p className="text-xs text-muted-foreground">
+              Türkiye event&apos;leri (dini, spor, ulusal, ticari). Hücredeki
+              rozete tıklayın → geçen yıl rakipler ne yaptı görün.
+            </p>
+          </CardHeader>
+          <CardContent>
+            <PressEventLegend />
+          </CardContent>
+        </Card>
+
         {/* Cross-site overlap heatmap */}
         <Card>
           <CardHeader className="pb-2">
@@ -730,6 +847,117 @@ export default function CalendarPage() {
           </div>
         )}
       </main>
+
+      {/* Press event detay popover — YoY karşılaştırma içerir */}
+      <PressEventDetailModal
+        event={activePressEvent}
+        onClose={() => setActivePressEvent(null)}
+      />
+
+      {/* Aylık takvim cell click modal — o güne ait tüm aktif kampanyalar */}
+      <DayCampaignsModal
+        day={selectedDay}
+        onClose={() => setSelectedDay(null)}
+      />
     </div>
   )
+}
+
+interface DayCampaignsModalProps {
+  day: { iso: string; label: string; campaigns: Campaign[] } | null
+  onClose: () => void
+}
+
+/**
+ * Aylık görünümde bir hücreye tıklayınca açılan modal.
+ * O gün aktif olan tüm kampanyaları kart listesi şeklinde gösterir;
+ * her kart "Detayı Gör" linkiyle /campaigns/[id]'e yönlendirir.
+ *
+ * - ESC + outside click: shared `Modal` component üzerinden geliyor.
+ * - Mobile: max-w sınırı olsa bile padding korunur; içerik scroll'lanır.
+ */
+function DayCampaignsModal({ day, onClose }: DayCampaignsModalProps) {
+  const isOpen = day !== null
+
+  return (
+    <Modal
+      isOpen={isOpen}
+      onClose={onClose}
+      className="max-w-2xl max-h-[85vh] overflow-y-auto"
+    >
+      {day && (
+        <div className="space-y-4">
+          <header className="border-b pb-3">
+            <h2 className="text-lg font-semibold leading-tight">{day.label}</h2>
+            <p className="mt-1 text-xs text-muted-foreground">
+              Bu gün aktif {day.campaigns.length} kampanya
+            </p>
+          </header>
+
+          {day.campaigns.length === 0 ? (
+            <div className="text-sm text-muted-foreground py-4 text-center">
+              Bu güne ait aktif kampanya yok.
+            </div>
+          ) : (
+            <ul className="space-y-2">
+              {day.campaigns.map((c) => {
+                const color = getSiteColor(c.site?.code)
+                return (
+                  <li
+                    key={c.id}
+                    className="rounded-md border bg-card p-3"
+                    style={{ borderLeft: `4px solid ${color}` }}
+                  >
+                    <div className="flex items-start justify-between gap-3">
+                      <div className="min-w-0 flex-1">
+                        <h3 className="text-sm font-semibold leading-snug truncate">
+                          {c.title}
+                        </h3>
+                        <div className="mt-1.5 flex flex-wrap items-center gap-1.5">
+                          {c.site?.name && (
+                            <Badge variant="secondary" className="text-[10px]">
+                              {c.site.name}
+                            </Badge>
+                          )}
+                          {c.category && (
+                            <Badge variant="outline" className="text-[10px]">
+                              {getCategoryLabel(c.category)}
+                            </Badge>
+                          )}
+                        </div>
+                        <div className="mt-2">
+                          <BonusChips campaign={c} compact showEffective={false} />
+                        </div>
+                        <div className="mt-2 text-[11px] text-muted-foreground">
+                          {formatDateTr(c.validFrom)} → {formatDateTr(c.validTo)}
+                        </div>
+                      </div>
+                      <Link
+                        href={`/campaigns/${c.id}`}
+                        onClick={onClose}
+                        className="shrink-0 inline-flex items-center rounded-md border border-primary/40 px-3 py-1.5 text-xs font-medium text-primary hover:bg-primary/10 transition-colors"
+                      >
+                        Detayı Gör
+                      </Link>
+                    </div>
+                  </li>
+                )
+              })}
+            </ul>
+          )}
+        </div>
+      )}
+    </Modal>
+  )
+}
+
+function formatDateTr(value: string | null): string {
+  if (!value) return '—'
+  const d = new Date(value)
+  if (isNaN(d.getTime())) return '—'
+  return d.toLocaleDateString('tr-TR', {
+    day: 'numeric',
+    month: 'short',
+    year: 'numeric',
+  })
 }

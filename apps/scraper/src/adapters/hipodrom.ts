@@ -3,7 +3,6 @@ import { BaseAdapter } from './base';
 import { RawCampaignCard, NormalizedCampaignInput } from '../types';
 import { buildFingerprint, buildRawFingerprint } from '../normalizers/fingerprint';
 import { extractNumericValue, isLikelyRealCampaignTitle } from '../normalizers/text';
-import { parseDateText } from '../normalizers/date';
 import { normalizeImageUrl } from '../normalizers/image';
 import { extractDatesFromCampaignText } from '../date-extraction/parser';
 
@@ -11,6 +10,60 @@ export class HipodromAdapter extends BaseAdapter {
   private static readonly SITE_CODE = 'hipodrom';
   private static readonly BASE_URL = 'https://www.hipodrom.com';
   public readonly campaignsUrl = 'https://www.hipodrom.com/kampanyalar';
+
+  // Turkish month name → 0-indexed JS month. Used for the listing-card
+  // "Son Katılım Tarihi: 30 Nisan 2026" format. Lowercased lookup so we
+  // don't have to worry about casing variations from the site.
+  private static readonly TURKISH_MONTHS: Record<string, number> = {
+    ocak: 0,
+    şubat: 1,
+    mart: 2,
+    nisan: 3,
+    mayıs: 4,
+    haziran: 5,
+    temmuz: 6,
+    ağustos: 7,
+    eylül: 8,
+    ekim: 9,
+    kasım: 10,
+    aralık: 11,
+  };
+
+  /** Parse "DD.MM.YYYY" or "D.M.YY" → Date (UTC midnight). */
+  private static parseDottedDate(text: string): Date | null {
+    const parts = text.split('.');
+    if (parts.length !== 3) return null;
+    const day = parseInt(parts[0], 10);
+    const month = parseInt(parts[1], 10);
+    let year = parseInt(parts[2], 10);
+    if (Number.isNaN(day) || Number.isNaN(month) || Number.isNaN(year)) return null;
+    if (year < 100) year += 2000;
+    if (month < 1 || month > 12 || day < 1 || day > 31) return null;
+    const d = new Date(Date.UTC(year, month - 1, day));
+    return Number.isNaN(d.getTime()) ? null : d;
+  }
+
+  /** Parse "30", "Nisan", "2026" → Date (UTC midnight). */
+  private static parseTurkishLongDate(
+    dayStr: string,
+    monthStr: string,
+    yearStr: string
+  ): Date | null {
+    const day = parseInt(dayStr, 10);
+    const year = parseInt(yearStr, 10);
+    const monthIdx = HipodromAdapter.TURKISH_MONTHS[monthStr.toLowerCase()];
+    if (
+      Number.isNaN(day) ||
+      Number.isNaN(year) ||
+      monthIdx === undefined ||
+      day < 1 ||
+      day > 31
+    ) {
+      return null;
+    }
+    const d = new Date(Date.UTC(year, monthIdx, day));
+    return Number.isNaN(d.getTime()) ? null : d;
+  }
 
   protected readonly selectors = {
     campaignCard: '.campaignItem',
@@ -258,48 +311,80 @@ export class HipodromAdapter extends BaseAdapter {
       category: null,
     });
 
-    const dateResult = extractDatesFromCampaignText(card.title, card.description);
-    let startDate = dateResult.startDate;
-    let endDate = dateResult.endDate;
+    // Hipodrom-specific date extraction. We bypass the generic
+    // extractDatesFromCampaignText() pipeline for this adapter because the
+    // generic STANDALONE_DATE_RULES match "Başlama Tarihi: DD.MM.YYYY" alone
+    // and treat that single date as the END date — silently dropping the
+    // real Bitiş Tarihi and producing start==end (the bug we are fixing).
+    //
+    // Hipodrom exposes dates in two distinct shapes:
+    //   1. Listing card (.campaignDate):  "Son Katılım Tarihi: 30 Nisan 2026"
+    //   2. Detail page  (.cDetailConditions):
+    //        "Başlama Tarihi: 30.01.2026 09:15 - Bitiş Tarihi: 30.04.2026 23:55"
+    //
+    // Detail wins (it gives both start and end). Listing acts as a fallback
+    // for the end date when the detail page is not yet hydrated / missing.
+    let startDate: Date | null = null;
+    let endDate: Date | null = null;
 
-    // Fallback: Hipodrom-specific date extraction from "Başlama Tarihi:" and "Son Katılım Tarihi:" labels
-    // This must run regardless of what extractDatesFromCampaignText returned because
-    // the generic Kampanya rule (parser.ts) can match wrong dates from surrounding context
-    // like "Kampanya 20.03.2025-05.09.2025 saat 09:59" which refers to kazanç limits,
-    // not campaign validity dates.
     if (card.description) {
-      const startMatch = card.description.match(/ba[şs]lama\s*tarihi\s*:?\s*(\d{1,2}[.]\d{1,2}[.]\d{2,4})/i);
-      if (startMatch) {
-        const startStr = startMatch[1];
-        const parts = startStr.split('.');
-        let year = parseInt(parts[2], 10);
-        if (year < 100) year += 2000;
-        const d = new Date(year, parseInt(parts[1], 10) - 1, parseInt(parts[0], 10));
-        if (d && !isNaN(d.getTime())) {
-          startDate = d;
+      // 1) Detail page combined regex — guarantees two distinct captures.
+      const combined = card.description.match(
+        /ba[şs]lama\s*tarihi\s*:?\s*(\d{1,2}\.\d{1,2}\.\d{2,4})(?:\s+\d{1,2}[:.]\d{2})?\s*[-–]\s*biti[şs]\s*tarihi\s*:?\s*(\d{1,2}\.\d{1,2}\.\d{2,4})/i
+      );
+      if (combined) {
+        const start = HipodromAdapter.parseDottedDate(combined[1]);
+        const end = HipodromAdapter.parseDottedDate(combined[2]);
+        if (start) startDate = start;
+        if (end) endDate = end;
+      }
+
+      // 2) Detail page individual labels — fallback if combined regex misses
+      // (e.g. line break between Başlama/Bitiş or different separator).
+      if (!startDate) {
+        const startMatch = card.description.match(
+          /ba[şs]lama\s*tarihi\s*:?\s*(\d{1,2}\.\d{1,2}\.\d{2,4})/i
+        );
+        if (startMatch) {
+          const d = HipodromAdapter.parseDottedDate(startMatch[1]);
+          if (d) startDate = d;
         }
       }
-      // Hipodrom specific: "Son Katılım Tarihi: 30 Nisan 2026"
-      const endMatch = card.description.match(/son\s*kat[ıi]l[ıi]n\s*tarihi\s*:?\s*(\d{1,2}[.\s]\w+\s*\d{4})/i);
-      if (endMatch && !endDate) {
-        const endStr = endMatch[1];
-        const turkishMonths: Record<string, number> = {
-          'Ocak': 0, 'Şubat': 1, 'Mart': 2, 'Nisan': 3, 'Mayıs': 4, 'Haziran': 5,
-          'Temmuz': 6, 'Ağustos': 7, 'Eylül': 8, 'Ekim': 9, 'Kasım': 10, 'Aralık': 11
-        };
-        const monthMatch = endStr.match(/(\w+)/);
-        const dayMatch = endStr.match(/(\d{1,2})/);
-        const yearMatch = endStr.match(/(\d{4})/);
-        if (monthMatch && dayMatch && yearMatch) {
-          const month = turkishMonths[monthMatch[1]] ?? 0;
-          const day = parseInt(dayMatch[1], 10);
-          const year = parseInt(yearMatch[1], 10);
-          const d = new Date(year, month, day);
-          if (d && !isNaN(d.getTime())) {
-            endDate = d;
-          }
+      if (!endDate) {
+        const endMatch = card.description.match(
+          /biti[şs]\s*tarihi\s*:?\s*(\d{1,2}\.\d{1,2}\.\d{2,4})/i
+        );
+        if (endMatch) {
+          const d = HipodromAdapter.parseDottedDate(endMatch[1]);
+          if (d) endDate = d;
         }
       }
+
+      // 3) Listing-style fallback for end date: "Son Katılım Tarihi: 30 Nisan 2026"
+      // Note the previous version had a typo (kat[ıi]l[ıi]n instead of kat[ıi]l[ıi]m)
+      // which made this branch dead.
+      if (!endDate) {
+        const sonKatilim = card.description.match(
+          /son\s*kat[ıi]l[ıi]m\s*tarihi\s*:?\s*(\d{1,2})\s+([A-Za-zÇĞİıÖŞÜçğıöşü]+)\s+(\d{4})/i
+        );
+        if (sonKatilim) {
+          const d = HipodromAdapter.parseTurkishLongDate(
+            sonKatilim[1],
+            sonKatilim[2],
+            sonKatilim[3]
+          );
+          if (d) endDate = d;
+        }
+      }
+    }
+
+    // 4) As a last-ditch fallback only (i.e. nothing matched above), defer to
+    // the generic extractor. We deliberately do not let it overwrite anything
+    // we already found — it is known to mis-classify Hipodrom text.
+    if (!startDate && !endDate) {
+      const dateResult = extractDatesFromCampaignText(card.title, card.description);
+      startDate = dateResult.startDate;
+      endDate = dateResult.endDate;
     }
 
     return {

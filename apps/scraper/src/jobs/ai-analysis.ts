@@ -38,12 +38,18 @@ export interface ExtractedTags {
   cashback_percent?: number | null;
 }
 
+export type CompetitiveIntentCode = 'acquisition' | 'retention' | 'brand' | 'clearance' | 'unknown';
+
 export interface AiAnalysisResult {
   campaignId: string;
   analysis: {
     category: string | null;
     tags: string[];
+    /** Legacy sentiment field. Migration 018 deprecates this in favor of `competitiveIntent`. */
     sentiment: 'positive' | 'neutral' | 'negative';
+    /** Migration 018 — growth-actionable taxonomy. */
+    competitiveIntent: CompetitiveIntentCode;
+    competitiveIntentConfidence: number | null;
     keyBenefits: string[];
     targetAudience: string | null;
     expirationRisk: 'low' | 'medium' | 'high';
@@ -145,6 +151,19 @@ export async function processAiAnalysisJob(
 
   if (priority === 'high') {
     await triggerDateExtractionIfNeeded(campaignId, analysis);
+  }
+
+  // Migration 022 — refresh campaign_similarities now that this new
+  // campaign has category/bonus/extracted-tag features. Debounced so a
+  // burst of inserts coalesces into a single recompute (~1s for the
+  // current corpus).
+  try {
+    const { enqueueSimilarityRecalcDebounced } = await import('./similarity-calc');
+    await enqueueSimilarityRecalcDebounced(`ai-analysis:${campaignId}`);
+  } catch (error) {
+    logger.warn(`Failed to enqueue similarity recalc after AI analysis for ${campaignId}`, {
+      error: error instanceof Error ? error.message : String(error),
+    });
   }
 
   logger.info(`AI analysis completed for campaign ${campaignId}`, {
@@ -285,6 +304,8 @@ async function analyzeCampaign(
       category: 'genel',
       tags: [],
       sentiment: 'neutral',
+      competitiveIntent: 'unknown',
+      competitiveIntentConfidence: null,
       keyBenefits: [],
       targetAudience: null,
       expirationRisk,
@@ -312,7 +333,11 @@ async function analyzeCampaign(
   return {
     category: data.categoryCode,
     tags: data.keyPoints,
-    sentiment: data.sentimentLabel as 'positive' | 'neutral' | 'negative',
+    // Sentiment intentionally falls back to 'neutral'; new pipeline surfaces
+    // intent instead. Persisted via competitiveIntent field below.
+    sentiment: 'neutral',
+    competitiveIntent: data.competitiveIntent,
+    competitiveIntentConfidence: data.competitiveIntentConfidence,
     keyBenefits: data.keyPoints,
     targetAudience: null,
     expirationRisk,
@@ -597,6 +622,8 @@ async function storeAiAnalysis(
       category: analysis.category,
       tags: JSON.stringify(analysis.tags),
       sentiment: analysis.sentiment,
+      competitive_intent: analysis.competitiveIntent,
+      competitive_intent_confidence: analysis.competitiveIntentConfidence,
       targetAudience: analysis.targetAudience,
       valueScore: analysis.valueScore,
       keyPoints: analysis.keyBenefits,
