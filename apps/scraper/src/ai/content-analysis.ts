@@ -6,8 +6,10 @@ import {
 import {
   ContentAnalysisResult,
   isValidContentAnalysisResult,
+  normalizeCompetitiveIntent,
   safeJsonParse,
 } from './schema';
+import type { CompetitiveIntent } from './prompts';
 
 export interface ContentAnalysisContext {
   campaignId: string;
@@ -19,8 +21,12 @@ export interface ContentAnalysisContext {
 }
 
 export interface ContentAnalysisOutput {
+  /** Legacy. New analyses leave this as 'unknown'; prefer competitiveIntent. */
   sentimentLabel: string;
   sentimentScore: number;
+  /** Growth-actionable taxonomy (acquisition / retention / brand / clearance / unknown). */
+  competitiveIntent: CompetitiveIntent;
+  competitiveIntentConfidence: number | null;
   categoryCode: string;
   categoryConfidence: number;
   summary: string;
@@ -98,8 +104,16 @@ export async function analyzeContent(
 
     const durationMs = Date.now() - startTime;
 
-    const sentimentLabel = typeof parsed.sentiment === 'string' ? parsed.sentiment : 'neutral';
+    // Sentiment is no longer requested from the model. Existing legacy
+    // responses may still include it; we accept and pass through but the
+    // pipeline does not write it to DB anymore.
+    const sentimentLabel = typeof parsed.sentiment === 'string' ? parsed.sentiment : 'unknown';
     const sentimentScore = 0.5;
+    const competitiveIntent = normalizeCompetitiveIntent(parsed.competitive_intent);
+    const competitiveIntentConfidence =
+      typeof parsed.competitive_intent_confidence === 'number'
+        ? parsed.competitive_intent_confidence
+        : null;
     const categoryCode = typeof parsed.category === 'string' ? parsed.category : 'diğer';
     const categoryConfidence = 0.5;
 
@@ -108,6 +122,8 @@ export async function analyzeContent(
       data: {
         sentimentLabel,
         sentimentScore,
+        competitiveIntent,
+        competitiveIntentConfidence,
         categoryCode,
         categoryConfidence,
         summary: parsed.summary,

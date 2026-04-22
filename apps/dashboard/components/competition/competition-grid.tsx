@@ -4,6 +4,7 @@ import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { Badge } from '@/components/ui/badge'
 import { TrendingUp, TrendingDown, Minus, AlertTriangle } from 'lucide-react'
 import { cn } from '@/lib/utils'
+import { StanceBadge, formatStanceTooltip } from '@/components/ui/stance-badge'
 
 type MomentumDirection = 'up' | 'down' | 'stable'
 
@@ -34,6 +35,12 @@ interface SiteCardProps {
     momentum_score: number
     momentum_direction: MomentumDirection
     momentum_updated_at?: string | Date | null
+    // Migration 020 — Atak/Defans (additive). API her zaman 'unknown' fallback'i
+    // ile döner; eski tüketiciler opsiyonel olarak okur.
+    stance?: 'aggressive' | 'neutral' | 'defensive' | 'unknown'
+    stance_velocity_delta?: number
+    stance_score?: number | null
+    stance_updated_at?: string | Date | null
   }
   rank?: number
 }
@@ -126,12 +133,24 @@ export function SiteCard({ site, rank }: SiteCardProps) {
               <p className="text-xs text-muted-foreground">{site.site_code}</p>
             </div>
           </div>
-          <div className="flex items-center gap-1.5">
+          <div className="flex flex-wrap items-center gap-1.5 justify-end">
             <MomentumBadge
               direction={site.momentum_direction}
               score={site.momentum_score}
             />
             <MomentumStaleBadge updatedAt={site.momentum_updated_at} />
+            {/* Migration 020 — Atak/Defans tutum chip'i. API 'unknown'
+                fallback'i ile döner; o durumda da soluk gri chip görünür. */}
+            <StanceBadge
+              stance={site.stance}
+              velocityDelta={site.stance_velocity_delta}
+              tooltip={formatStanceTooltip({
+                stance: site.stance,
+                velocityDelta: site.stance_velocity_delta,
+                stanceScore: site.stance_score,
+                updatedAt: site.stance_updated_at,
+              })}
+            />
           </div>
         </div>
       </CardHeader>

@@ -79,7 +79,12 @@ function bonusMetricsCte(
           CAST(NULLIF(TRIM(COALESCE(
             JSON_UNQUOTE(JSON_EXTRACT(c.metadata, '$.ai_analysis.extractedTags.cashback_percent')),
             JSON_UNQUOTE(JSON_EXTRACT(c.metadata, '$.ai_analysis.conditions.cashback_percentage'))
-          )), '') AS DECIMAL(20,4)) as cashback_percent
+          )), '') AS DECIMAL(20,4)) as cashback_percent,
+          -- Turnover string olarak gelir ("10x", "5 kez"); UI parse eder.
+          NULLIF(TRIM(COALESCE(
+            JSON_UNQUOTE(JSON_EXTRACT(c.metadata, '$.ai_analysis.extractedTags.turnover')),
+            JSON_UNQUOTE(JSON_EXTRACT(c.metadata, '$.ai_analysis.conditions.turnover'))
+          )), '') as turnover
         FROM campaigns c
         ${whereClause}
       ),
@@ -116,6 +121,11 @@ type SiteRow = {
   momentum_last_7_days: number | null;
   momentum_prev_7_days: number | null;
   momentum_updated_at: Date | string | null;
+  // Migration 020 — additive. Atak/Defans tutum kolonları.
+  stance: 'aggressive' | 'neutral' | 'defensive' | 'unknown' | null;
+  stance_velocity_delta: number | null;
+  stance_score: number | null;
+  stance_updated_at: Date | string | null;
   total_campaigns: number;
   active_campaigns: number;
   avg_bonus: number;
@@ -138,6 +148,10 @@ type ActiveCampaignRow = {
   category: string | null;
   bonus_amount: number | null;
   bonus_percentage: number | null;
+  // Slice B: net (effective) bonus + çevrim chip için ek alanlar.
+  min_deposit: number | null;
+  max_bonus: number | null;
+  turnover: string | null;
   status: string;
   valid_from: Date | null;
   valid_to: Date | null;
@@ -240,6 +254,12 @@ export async function GET(
         s.momentum_last_7_days,
         s.momentum_prev_7_days,
         s.momentum_updated_at,
+        -- Migration 020 — Atak/Defans (additive). NULL fallback ENUM/INT
+        -- default'lara güvenir; eski sites henüz hesaplanmamışsa 'unknown'.
+        COALESCE(s.stance, 'unknown') as stance,
+        COALESCE(s.stance_velocity_delta, 0) as stance_velocity_delta,
+        s.stance_score as stance_score,
+        s.stance_updated_at as stance_updated_at,
         COUNT(cbv.id) as total_campaigns,
         SUM(CASE WHEN cbv.status = 'active' THEN 1 ELSE 0 END) as active_campaigns,
         COALESCE(AVG(cbv.effective_bonus_amount), 0) as avg_bonus,
@@ -253,7 +273,8 @@ export async function GET(
       WHERE s.code = ${codePlaceholder}
       GROUP BY s.id, s.name, s.code, s.base_url, s.last_scraped_at,
                s.momentum_score, s.momentum_direction, s.momentum_last_7_days,
-               s.momentum_prev_7_days, s.momentum_updated_at
+               s.momentum_prev_7_days, s.momentum_updated_at,
+               s.stance, s.stance_velocity_delta, s.stance_score, s.stance_updated_at
       `,
       [...cteSiteRow.dateParams, code]
     );
@@ -410,6 +431,9 @@ export async function GET(
         cbv.category,
         cbv.effective_bonus_amount as bonus_amount,
         cbv.bonus_percentage,
+        cbv.min_deposit,
+        cbv.max_bonus,
+        cbv.turnover,
         cbv.status,
         c.valid_from,
         cbv.valid_to,
@@ -497,6 +521,18 @@ export async function GET(
             momentum_last_7_days: Number(siteRow.momentum_last_7_days) || 0,
             momentum_prev_7_days: Number(siteRow.momentum_prev_7_days) || 0,
             momentum_updated_at: siteRow.momentum_updated_at,
+            // Migration 020 — Atak/Defans (additive). UI StanceBadge consumer.
+            stance:
+              (siteRow.stance as
+                | 'aggressive'
+                | 'neutral'
+                | 'defensive'
+                | 'unknown'
+                | null) || 'unknown',
+            stance_velocity_delta: Number(siteRow.stance_velocity_delta) || 0,
+            stance_score:
+              siteRow.stance_score == null ? null : Number(siteRow.stance_score),
+            stance_updated_at: siteRow.stance_updated_at,
             total_campaigns: Number(siteRow.total_campaigns) || 0,
             active_campaigns: Number(siteRow.active_campaigns) || 0,
             avg_bonus: Number(siteRow.avg_bonus) || 0,
@@ -513,6 +549,10 @@ export async function GET(
               category: c.category,
               bonus_amount: c.bonus_amount !== null ? Number(c.bonus_amount) : null,
               bonus_percentage: c.bonus_percentage !== null ? Number(c.bonus_percentage) : null,
+              // Slice B: BonusChips ve "Net" sütunu için ek alanlar.
+              min_deposit: c.min_deposit !== null && c.min_deposit !== undefined ? Number(c.min_deposit) : null,
+              max_bonus: c.max_bonus !== null && c.max_bonus !== undefined ? Number(c.max_bonus) : null,
+              turnover: c.turnover ?? null,
               status: c.status,
               // Ham DB tarihleri — mevcut tüketiciler kırılmasın diye additive
               // tutuluyor. UI bunları artık primary olarak kullanmamalı.

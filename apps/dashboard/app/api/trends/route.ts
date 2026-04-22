@@ -12,6 +12,8 @@ type TrendRow = {
   count: string;
   category: string | null;
   sentiment: string | null;
+  /** Migration 018 — surfaced alongside `sentiment` (additive, not replacing). */
+  competitive_intent: string | null;
   site_name: string | null;
   avg_value_score: number | null;
 };
@@ -68,16 +70,17 @@ export async function GET(request: NextRequest) {
 
     const sentimentDistributionQuery = `
       WITH latest_ai AS (
-        SELECT campaign_id, sentiment_label
+        SELECT campaign_id, sentiment_label, competitive_intent
         FROM (
           SELECT ai2.campaign_id,
                  ai2.sentiment_label,
+                 ai2.competitive_intent,
                  ROW_NUMBER() OVER (PARTITION BY ai2.campaign_id ORDER BY ai2.created_at DESC) as rn
           FROM campaign_ai_analyses ai2
         ) t
         WHERE t.rn = 1
       )
-      SELECT 
+      SELECT
         COALESCE(
           NULLIF(JSON_UNQUOTE(JSON_EXTRACT(c.metadata, '$.ai_analysis.sentiment')), ''),
           NULLIF(ai.sentiment_label, ''),
@@ -89,6 +92,35 @@ export async function GET(request: NextRequest) {
       WHERE c.created_at >= $1
         AND ${qualityFilter}
       GROUP BY sentiment
+    `;
+
+    // Migration 018 — competitive_intent distribution mirrors the sentiment
+    // query but groups on the new taxonomy. Returned as an additional field
+    // so existing chart consumers keep working.
+    const intentDistributionQuery = `
+      WITH latest_ai AS (
+        SELECT campaign_id, competitive_intent
+        FROM (
+          SELECT ai2.campaign_id,
+                 ai2.competitive_intent,
+                 ROW_NUMBER() OVER (PARTITION BY ai2.campaign_id ORDER BY ai2.created_at DESC) as rn
+          FROM campaign_ai_analyses ai2
+          WHERE ai2.competitive_intent IS NOT NULL
+        ) t
+        WHERE t.rn = 1
+      )
+      SELECT
+        COALESCE(
+          ai.competitive_intent,
+          NULLIF(JSON_UNQUOTE(JSON_EXTRACT(c.metadata, '$.ai_analysis.competitive_intent')), ''),
+          'unknown'
+        ) as competitive_intent,
+        COUNT(*) as count
+      FROM campaigns c
+      LEFT JOIN latest_ai ai ON ai.campaign_id = c.id
+      WHERE c.created_at >= $1
+        AND ${qualityFilter}
+      GROUP BY competitive_intent
     `;
 
     const topCategoriesQuery = `
@@ -154,6 +186,7 @@ export async function GET(request: NextRequest) {
       campaignsOverTime,
       categoryTrends,
       sentimentDistribution,
+      intentDistribution,
       topCategories,
       topSites,
       valueScoreBySite,
@@ -162,6 +195,7 @@ export async function GET(request: NextRequest) {
       query<TrendRow>(campaignsOverTimeQuery, [dateFrom]),
       query<TrendRow>(categoryTrendQuery, [dateFrom]),
       query<TrendRow>(sentimentDistributionQuery, [dateFrom]),
+      query<TrendRow>(intentDistributionQuery, [dateFrom]),
       query<TrendRow>(topCategoriesQuery, [dateFrom]),
       query<SiteStatsRow>(topSitesQuery, [dateFrom]),
       query<SiteStatsRow>(valueScoreBySiteQuery, [dateFrom]),
@@ -193,6 +227,11 @@ export async function GET(request: NextRequest) {
       count: parseInt(row.count, 10),
     }));
 
+    const intentDist = intentDistribution.map((row) => ({
+      intent: row.competitive_intent || 'unknown',
+      count: parseInt(row.count, 10),
+    }));
+
     const sites = topSites.map((row) => ({
       siteName: row.site_name,
       campaignCount: parseInt(row.campaign_count, 10),
@@ -218,6 +257,8 @@ export async function GET(request: NextRequest) {
           categoryByDate,
           categoryDistribution,
           sentimentDistribution: sentimentDist,
+          // Migration 018 — additive distribution. Charts can opt in.
+          intentDistribution: intentDist,
           topSites: sites,
           valueScoresBySite: valueScores,
           topCategoriesThisWeek: weeklyCategories,
@@ -235,6 +276,7 @@ export async function GET(request: NextRequest) {
           categoryByDate: {},
           categoryDistribution: [],
           sentimentDistribution: [],
+          intentDistribution: [],
           topSites: [],
           valueScoresBySite: [],
           topCategoriesThisWeek: [],

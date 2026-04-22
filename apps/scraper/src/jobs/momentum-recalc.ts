@@ -1,5 +1,6 @@
 import { logger } from '../utils/logger';
 import { getDb } from '../db';
+import { createNotification } from './notifications';
 
 export interface MomentumRecalcResult {
   sitesUpdated: number;
@@ -141,6 +142,48 @@ export async function processMomentumRecalcJob(
 
   if (transitions.length > 0) {
     logger.info('Momentum direction transitions', { transitions });
+  }
+
+  // Wave 4 — emit notification for every meaningful direction transition
+  // (we filter out *_to_stable to avoid noise; up<->down is the high-signal
+  // shift the sales/competitive teams care about).
+  for (const t of transitions) {
+    const isMeaningful =
+      (t.from === 'up' && t.to === 'down') ||
+      (t.from === 'down' && t.to === 'up') ||
+      (t.from === 'stable' && (t.to === 'up' || t.to === 'down'));
+    if (!isMeaningful) continue;
+
+    const arrow =
+      t.to === 'up' ? '↑' : t.to === 'down' ? '↓' : '→';
+    const label =
+      t.to === 'up'
+        ? 'momentum yükselişe geçti'
+        : t.to === 'down'
+          ? 'momentum düşüşe geçti'
+          : 'momentum sabitlendi';
+
+    await createNotification({
+      type: 'momentum_shift',
+      severity: 'medium',
+      title: `${t.code}: ${label} ${arrow}`,
+      message: `Momentum yönü ${t.from} → ${t.to} (skor ${t.score})`,
+      payload: {
+        site_code: t.code,
+        from_direction: t.from,
+        to_direction: t.to,
+        score: t.score,
+      },
+      sourceTable: 'sites.momentum',
+      sourceId: `${t.code}:${t.from}->${t.to}:${new Date()
+        .toISOString()
+        .slice(0, 10)}`,
+      linkUrl: `/competition/sites/${encodeURIComponent(t.code)}`,
+      // Same site flipping back-and-forth in a single day still produces 2
+      // distinct sourceIds (different transition strings) — but two recalc
+      // runs on the same day with the same transition will dedupe.
+      dedupeBySource: true,
+    });
   }
 
   return {

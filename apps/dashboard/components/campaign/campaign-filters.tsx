@@ -5,6 +5,7 @@ import { Input } from '@/components/ui/input'
 import { Select } from '@/components/ui/select'
 import { Button } from '@/components/ui/button'
 import { Search, X } from 'lucide-react'
+import { COMPETITIVE_INTENT_OPTIONS } from '@/components/ui/intent-badge'
 import type { CampaignFilters } from '@/types'
 
 interface CampaignFiltersProps {
@@ -22,23 +23,18 @@ const DATE_MODE_OPTIONS = [
   { value: 'seen_in_range', label: 'Görülme tarihi' },
 ]
 
-// Backend (scraper) writes status values from the set
-// {'active', 'expired', 'hidden', 'passive', 'changed'}. The legacy filter
-// only exposed the 'ended' / 'passive' aliases, which never matched any row
-// after the bulk recalc job started writing 'expired' / 'hidden'.
+// Wave 1 #1.4 — Kanonik 4 state. Backend yalnız active/expired/hidden/pending
+// yazıyor; legacy 'passive' / 'ended' opsiyonları kaldırıldı.
 const STATUS_OPTIONS = [
   { value: 'active', label: 'Aktif' },
   { value: 'expired', label: 'Bitmiş' },
-  { value: 'hidden', label: 'Gizli' },
-  { value: 'passive', label: 'Pasif' },
-  { value: 'changed', label: 'Değişmiş' },
+  { value: 'hidden', label: 'Pasif' },
+  { value: 'pending', label: 'Beklemede' },
 ]
 
-const SENTIMENT_OPTIONS = [
-  { value: 'positive', label: 'Pozitif' },
-  { value: 'negative', label: 'Negatif' },
-  { value: 'neutral', label: 'Nötr' },
-]
+// Migration 018 — `intent` filter (Amaç) replaces sentiment in the UI.
+// `COMPETITIVE_INTENT_OPTIONS` is the single source of truth for label/value.
+const INTENT_OPTIONS = COMPETITIVE_INTENT_OPTIONS
 
 const DATE_COMPLETENESS_OPTIONS = [
   { value: 'complete', label: 'Başlangıç + Bitiş Var' },
@@ -210,14 +206,14 @@ export function CampaignFilters({ filters, onFiltersChange, sites }: CampaignFil
         </div>
 
         <div>
-          <label className="text-sm font-medium text-muted-foreground">Duygu</label>
+          <label className="text-sm font-medium text-muted-foreground">Amaç</label>
           <Select
-            value={filters.sentiment || ''}
-            onChange={(e) => handleChange('sentiment', e.target.value)}
+            value={filters.intent || ''}
+            onChange={(e) => handleChange('intent', e.target.value)}
             className="mt-1"
           >
             <option value="">Tümü</option>
-            {SENTIMENT_OPTIONS.map((opt) => (
+            {INTENT_OPTIONS.map((opt) => (
               <option key={opt.value} value={opt.value}>
                 {opt.label}
               </option>

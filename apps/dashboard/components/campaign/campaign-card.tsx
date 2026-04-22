@@ -5,9 +5,11 @@ import Link from 'next/link'
 import { Badge } from '@/components/ui/badge'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { DataQualityBadge } from '@/components/ui/data-quality-badge'
+import { BonusChips } from '@/components/ui/bonus-chips'
+import { IntentBadge } from '@/components/ui/intent-badge'
 import { resolveCampaignDateDisplay } from '@/lib/campaign-dates'
-import { getCampaignQualitySignals, getCampaignTypeLabel, getDisplaySentimentLabel, getDisplayStatusLabel } from '@/lib/campaign-presentation'
-import { formatDate, getSentimentColor, getStatusColor, cn } from '@/lib/utils'
+import { getCampaignQualitySignals, getCampaignTypeLabel } from '@/lib/campaign-presentation'
+import { StatusBadge } from '@/components/campaign/status-badge'
 import type { Campaign } from '@/types'
 
 interface CampaignCardProps {
@@ -15,8 +17,6 @@ interface CampaignCardProps {
 }
 
 export function CampaignCard({ campaign }: CampaignCardProps) {
-  const sentimentClass = getSentimentColor(campaign.sentiment || campaign.aiSentiment || 'neutral')
-  const statusClass = getStatusColor(campaign.status)
   const qualitySignals = getCampaignQualitySignals(campaign)
   const startDate = resolveCampaignDateDisplay(campaign.validFrom, campaign.validFromSource, campaign.body, 'start')
   const endDate = resolveCampaignDateDisplay(campaign.validTo, campaign.validToSource, campaign.body, 'end')
@@ -30,17 +30,7 @@ export function CampaignCard({ campaign }: CampaignCardProps) {
         <CardHeader className="pb-2">
           {/* FE-13: Status badge at top for visibility */}
           <div className="flex items-start justify-between gap-2 mb-2">
-            {campaign.status && (
-              <Badge className={cn('shrink-0', statusClass)}>
-                {getDisplayStatusLabel(campaign.status)}
-              </Badge>
-            )}
-            {/* FE-13: Show bonus amount prominently if available */}
-            {(campaign.metadata as any)?.ai_analysis?.extractedTags?.bonus_amount && (
-              <Badge variant="outline" className="bg-emerald-50 text-emerald-700 border-emerald-200">
-                ₺{(campaign.metadata as any)?.ai_analysis?.extractedTags?.bonus_amount}
-              </Badge>
-            )}
+            {campaign.status && <StatusBadge status={campaign.status} className="shrink-0" />}
           </div>
           {/* Title - most important after status */}
           <CardTitle className="text-base font-medium line-clamp-2">
@@ -67,45 +57,25 @@ export function CampaignCard({ campaign }: CampaignCardProps) {
               </span>
             </div>
           </div>
-          {/* Type and sentiment row */}
+          {/* Type and competitive intent row */}
           <div className="flex flex-wrap gap-2 items-center">
             <span className="text-sm">
               <span className="font-medium">Tür:</span> {getCampaignTypeLabel(campaign)}
             </span>
-            {(campaign.sentiment || campaign.aiSentiment) && (
-              <Badge className={sentimentClass}>
-                {getDisplaySentimentLabel(campaign.sentiment || campaign.aiSentiment)}
-              </Badge>
-            )}
+            <IntentBadge value={campaign.competitiveIntent} />
           </div>
-          {/* AI extracted bonus tags */}
-          {(campaign.metadata as any)?.ai_analysis?.extractedTags && (
-            <div className="flex flex-wrap gap-2 mt-2">
-              {(campaign.metadata as any)?.ai_analysis?.extractedTags?.bonus_percentage && (
-                <Badge variant="outline" className="text-xs">
-                  %{(campaign.metadata as any)?.ai_analysis?.extractedTags?.bonus_percentage}
-                </Badge>
-              )}
-              {(campaign.metadata as any)?.ai_analysis?.extractedTags?.min_deposit && (
-                <Badge variant="outline" className="text-xs">
-                  Min: {(campaign.metadata as any)?.ai_analysis?.extractedTags?.min_deposit} TL
-                </Badge>
-              )}
-              {(campaign.metadata as any)?.ai_analysis?.extractedTags?.turnover && (
-                <Badge variant="outline" className="text-xs">
-                  Çevrim: {(campaign.metadata as any)?.ai_analysis?.extractedTags?.turnover}
-                </Badge>
-              )}
-              {(campaign.metadata as any)?.ai_analysis?.extractedTags?.free_bet_amount && (
-                <Badge variant="outline" className="text-xs">
-                  Freebet: {(campaign.metadata as any)?.ai_analysis?.extractedTags?.free_bet_amount} TL
-                </Badge>
-              )}
-              {(campaign.metadata as any)?.ai_analysis?.extractedTags?.cashback_percent && (
-                <Badge variant="outline" className="text-xs">
-                  Cashback: %{(campaign.metadata as any)?.ai_analysis?.extractedTags?.cashback_percent}
-                </Badge>
-              )}
+          {/* Bonus chips — bonus, %, min deposit, turnover, effective bonus
+              hepsini tek BonusChips component'i renkli render eder. */}
+          <div className="mt-2">
+            <BonusChips campaign={campaign} showEffective />
+          </div>
+          {/* Cashback hâlâ chip-stack dışında — BonusChips bilinçli olarak
+              cashback'i temsil etmiyor (UI'da göründüğünde "extra" sayılır). */}
+          {(campaign.metadata as any)?.ai_analysis?.extractedTags?.cashback_percent && (
+            <div className="mt-1">
+              <Badge variant="outline" className="text-xs">
+                Cashback: %{(campaign.metadata as any)?.ai_analysis?.extractedTags?.cashback_percent}
+              </Badge>
             </div>
           )}
           {/* Quality signals at bottom */}

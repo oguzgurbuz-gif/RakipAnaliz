@@ -35,6 +35,12 @@ type SiteRanking = {
   momentum_score: number;
   momentum_direction: 'up' | 'down' | 'stable';
   momentum_updated_at: Date | string | null;
+  // Migration 020 — additive. Stance derives from competitive-stance-calc job
+  // (24h cadence). Velocity delta = last_7d_count - last_4w_avg.
+  stance: 'aggressive' | 'neutral' | 'defensive' | 'unknown';
+  stance_velocity_delta: number;
+  stance_score: number | null;
+  stance_updated_at: Date | string | null;
 };
 
 type BestDeal = {
@@ -300,10 +306,17 @@ export async function GET(request: NextRequest) {
             END
           ) as momentum_score,
           COALESCE(s.momentum_direction, 'stable') as momentum_direction,
-          s.momentum_updated_at as momentum_updated_at
+          s.momentum_updated_at as momentum_updated_at,
+          -- Migration 020 — Atak/Defans tutum kolonları. NULL/eski sites
+          -- migration uygulanmadıysa COALESCE ile 'unknown'/0 fallback'i.
+          COALESCE(s.stance, 'unknown') as stance,
+          COALESCE(s.stance_velocity_delta, 0) as stance_velocity_delta,
+          s.stance_score as stance_score,
+          s.stance_updated_at as stance_updated_at
         FROM campaign_bonus_values cbv
         JOIN sites s ON s.id = cbv.site_id
-        GROUP BY cbv.site_id, s.name, s.code, s.momentum_score, s.momentum_direction, s.momentum_updated_at
+        GROUP BY cbv.site_id, s.name, s.code, s.momentum_score, s.momentum_direction, s.momentum_updated_at,
+                 s.stance, s.stance_velocity_delta, s.stance_score, s.stance_updated_at
       ) ranked
       ORDER BY CASE
         WHEN ${metricPlaceholder} = 'avg_bonus' THEN ranked.avg_bonus

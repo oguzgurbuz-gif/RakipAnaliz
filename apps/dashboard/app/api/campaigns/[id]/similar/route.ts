@@ -38,8 +38,11 @@ export async function GET(
       throw new NotFoundError('Campaign', id);
     }
 
+    // Migration 022 — read the human-readable `reason` column when set,
+    // otherwise fall back to the legacy `comparison_type` enum so older
+    // rows still render something useful in the dashboard.
     const rows = await query<SimilarCampaignRow>(`
-      SELECT 
+      SELECT
         c.id,
         c.title,
         c.body,
@@ -50,7 +53,7 @@ export async function GET(
         s.name as site_name,
         s.code as site_code,
         cs.similarity_score,
-        cs.comparison_type as similarity_reason
+        COALESCE(cs.reason, cs.comparison_type) as similarity_reason
       FROM campaign_similarities cs
       JOIN campaigns c ON c.id = cs.campaign_id_2
       JOIN sites s ON s.id = c.site_id

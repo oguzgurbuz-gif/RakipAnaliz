@@ -146,7 +146,11 @@ export type JobType =
   | 'date-extraction'
   | 'weekly-report'
   | 'status-recalc'
-  | 'momentum-recalc';
+  | 'momentum-recalc'
+  // Migration 018 — re-process every campaign so competitive_intent is filled.
+  | 'competitive-intent-reprocess'
+  // Migration 022 — recompute campaign_similarities for the full corpus.
+  | 'similarity-recalc';
 
 export interface ScrapeRun {
   id: string;

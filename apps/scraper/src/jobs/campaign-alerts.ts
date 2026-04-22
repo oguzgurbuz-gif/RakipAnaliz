@@ -1,5 +1,6 @@
 import { logger } from '../utils/logger';
 import { getDb } from '../db';
+import { createNotification } from './notifications';
 
 export interface CampaignAlertsResult {
   endingSoonCandidates: number;
@@ -53,7 +54,36 @@ export async function processCampaignAlertsJob(
        VALUES ($1, 'ending_soon', $2, JSON_ARRAY())`,
       [row.id, row.valid_to]
     );
+    const wasInserted = (insertRes.rowCount ?? 0) > 0;
     inserted += insertRes.rowCount ?? 0;
+
+    // Wave 4 — emit a notification only when this scan inserted a brand new
+    // ending_soon row. campaign_alerts (campaign_id, alert_type, target_date)
+    // is unique, so we trust INSERT IGNORE rowCount as the dedup gate.
+    if (wasInserted) {
+      // row.valid_to is typed as string but mysql2 may hand us a Date depending
+      // on the connection's typeCast settings; normalize defensively.
+      const validToRaw: unknown = row.valid_to as unknown;
+      const validToIso =
+        validToRaw instanceof Date
+          ? validToRaw.toISOString()
+          : String(validToRaw);
+      await createNotification({
+        type: 'campaign_end',
+        severity: 'medium',
+        title: `Kampanya bitiyor: ${row.title ?? 'Kampanya'}`,
+        message: `${row.title ?? 'Kampanya'} 7 gün içinde sona eriyor (${validToIso}).`,
+        payload: {
+          campaign_id: row.id,
+          campaign_title: row.title,
+          valid_to: validToIso,
+        },
+        sourceTable: 'campaign_alerts',
+        sourceId: `${row.id}:ending_soon:${validToIso.slice(0, 10)}`,
+        linkUrl: `/campaigns/${row.id}`,
+        dedupeBySource: true,
+      });
+    }
 
     // TODO: dispatch email to recipient_emails when delivery worker lands.
     // For now we only persist the intent — see plan in TASKS.md.

@@ -1,4 +1,4 @@
-import { CATEGORY_CODES, SENTIMENT_LABELS } from './prompts';
+import { CATEGORY_CODES, COMPETITIVE_INTENT_CODES, SENTIMENT_LABELS } from './prompts';
 
 export interface DateExtractionResult {
   valid_from: string | null;
@@ -19,7 +19,15 @@ export interface CategoryInfo {
 
 export interface ContentAnalysisResult {
   category: string;
-  sentiment: string;
+  /**
+   * Legacy. New AI calls return `competitive_intent` instead. Some old AI
+   * calls may still return this; accept it for backward compatibility but
+   * prefer `competitive_intent` downstream.
+   */
+  sentiment?: string;
+  /** New growth-focused taxonomy. See migration 018. */
+  competitive_intent?: string;
+  competitive_intent_confidence?: number | null;
   summary: string;
   key_points: string[];
   min_deposit?: number | null;
@@ -134,31 +142,58 @@ export function isValidCategoryString(obj: unknown): obj is string {
 
 export function isValidContentAnalysisResult(obj: unknown): obj is ContentAnalysisResult {
   if (!obj || typeof obj !== 'object') return false;
-  
+
   const result = obj as Record<string, unknown>;
-  
+
   if (typeof result.category !== 'string') return false;
   if (!CATEGORY_CODES.includes(result.category as typeof CATEGORY_CODES[number])) {
     return false;
   }
-  
-  if (typeof result.sentiment !== 'string') return false;
-  if (!SENTIMENT_LABELS.includes(result.sentiment as typeof SENTIMENT_LABELS[number])) {
-    return false;
+
+  // sentiment is now optional/legacy. If present, must be a known label;
+  // if absent, that's fine — the new pipeline returns competitive_intent.
+  if ('sentiment' in result && result.sentiment !== undefined && result.sentiment !== null) {
+    if (typeof result.sentiment !== 'string') return false;
+    if (!SENTIMENT_LABELS.includes(result.sentiment as typeof SENTIMENT_LABELS[number])) {
+      return false;
+    }
   }
-  
+
+  // competitive_intent is the new preferred field. Validate when present.
+  if ('competitive_intent' in result && result.competitive_intent !== undefined && result.competitive_intent !== null) {
+    if (typeof result.competitive_intent !== 'string') return false;
+    if (!COMPETITIVE_INTENT_CODES.includes(result.competitive_intent as typeof COMPETITIVE_INTENT_CODES[number])) {
+      return false;
+    }
+  }
+
   if (typeof result.summary !== 'string') return false;
   if (!Array.isArray(result.key_points)) return false;
   if (!result.key_points.every((kp: unknown) => typeof kp === 'string')) return false;
-  
-  const numericFields = ['min_deposit', 'max_bonus', 'free_bet_amount', 'cashback_percent', 'bonus_amount', 'bonus_percentage'];
+
+  const numericFields = ['min_deposit', 'max_bonus', 'free_bet_amount', 'cashback_percent', 'bonus_amount', 'bonus_percentage', 'competitive_intent_confidence'];
   for (const field of numericFields) {
     if (field in result && result[field] !== null && typeof result[field] !== 'number') return false;
   }
-  
+
   if ('turnover' in result && result.turnover !== null && typeof result.turnover !== 'string') return false;
-  
+
   return true;
+}
+
+/**
+ * Normalize an arbitrary AI-returned value into a valid CompetitiveIntent.
+ * Falls back to 'unknown' for anything we don't recognize.
+ */
+export function normalizeCompetitiveIntent(
+  value: unknown
+): typeof COMPETITIVE_INTENT_CODES[number] {
+  if (typeof value !== 'string') return 'unknown';
+  const normalized = value.toLowerCase().trim();
+  if (COMPETITIVE_INTENT_CODES.includes(normalized as typeof COMPETITIVE_INTENT_CODES[number])) {
+    return normalized as typeof COMPETITIVE_INTENT_CODES[number];
+  }
+  return 'unknown';
 }
 
 export function isValidWeeklyReportResult(obj: unknown): obj is WeeklyReportResult {

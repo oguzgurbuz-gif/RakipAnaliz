@@ -5,7 +5,7 @@ import Link from 'next/link'
 import { ChevronDown, ChevronRight } from 'lucide-react'
 import { cn } from '@/lib/utils'
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip'
-import { getSiteColor } from '@/lib/site-colors'
+import { getSiteColor, compareSitesByPriority } from '@/lib/site-colors'
 import { getCategoryLabel } from '@/lib/category-labels'
 import { getCampaignBonusInfo } from '@/lib/campaign-presentation'
 
@@ -122,8 +122,11 @@ export function GanttChart({ campaigns, rangeStart, rangeEnd }: GanttChartProps)
       g.rows.sort((a, b) => a.start.getTime() - b.start.getTime())
     }
 
+    // Site grupları: önce öncelikli (bitalih, hipodrom, atyarisi),
+    // sonra kalanlar alphabetical. Site CODE üzerinden karşılaştırıyoruz —
+    // priority listesi de code-based.
     return Array.from(bySite.values()).sort((a, b) =>
-      a.siteName.localeCompare(b.siteName, 'tr')
+      compareSitesByPriority(a.siteCode, b.siteCode)
     )
   }, [campaigns, view])
 

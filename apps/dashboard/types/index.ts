@@ -28,6 +28,9 @@ export interface Campaign {
   updatedAt: string
   category?: string | null
   sentiment?: 'positive' | 'negative' | 'neutral' | null
+  /** Migration 018 — competitive_intent taxonomy. Replaces sentiment for growth UI. */
+  competitiveIntent?: 'acquisition' | 'retention' | 'brand' | 'clearance' | 'unknown' | null
+  competitiveIntentConfidence?: number | null
   aiSummary?: string | null
   aiCategory?: string | null
   aiSentiment?: string | null
@@ -175,6 +178,10 @@ export interface ReportSummary {
   prevPeriodTo?: string
   topCategories: { category: string; label?: string; count: number; share?: number }[]
   topSites: { siteName: string; count: number }[]
+  /** Wave 1 #1.1: izlenen aktif rakip site sayısı (sites.is_active=true). */
+  activeCompetitors?: number
+  /** Wave 1 #1.1: campaigns.last_seen_at MAX değeri (ISO string) — null = veri yok. */
+  lastUpdatedAt?: string | null
 }
 
 export interface PaginationParams {
@@ -186,7 +193,10 @@ export interface CampaignFilters {
   site?: string
   status?: string
   category?: string
+  /** Legacy filter; backend keeps it for backward compat. */
   sentiment?: string
+  /** Migration 018 — preferred filter. */
+  intent?: string
   dateMode?: string
   dateCompleteness?: string
   dateFrom?: string
@@ -209,7 +219,7 @@ export interface ApiError {
   code?: string
 }
 
-export type LiveEventType = 
+export type LiveEventType =
   | 'new_campaign'
   | 'campaign_updated'
   | 'status_changed'
@@ -218,6 +228,8 @@ export type LiveEventType =
   | 'scrape_started'
   | 'scrape_completed'
   | 'scrape_failed'
+  | 'notification_created'
+  | 'connected'
 
 export interface LiveEvent {
   type: LiveEventType

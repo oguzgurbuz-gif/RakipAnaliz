@@ -163,9 +163,15 @@ export async function GET(
         ORDER BY created_at DESC
       `, [id]),
 
+      // Migration 022 — `reason` column carries the human-readable
+      // explanation written by similarity-calc; `comparison_type` stays as
+      // the algorithm flag (currently always 'hybrid'). The previous query
+      // aliased campaign_id_2 as `similar_campaign_id` but the row mapper
+      // referenced `similar_id` — the `c.id AS similar_id` projection here
+      // restores that contract.
       query<SimilarCampaignRow>(`
-        SELECT 
-          cs.campaign_id_2 as similar_campaign_id,
+        SELECT
+          c.id as similar_id,
           c.title as similar_title,
           c.status as similar_status,
           c.valid_from as similar_valid_from,
@@ -174,13 +180,13 @@ export async function GET(
           s.name as site_name,
           s.code as site_code,
           cs.similarity_score,
-          cs.comparison_type as similarity_reason
+          COALESCE(cs.reason, cs.comparison_type) as similarity_reason
         FROM campaign_similarities cs
         JOIN campaigns c ON c.id = cs.campaign_id_2
         JOIN sites s ON s.id = c.site_id
         WHERE cs.campaign_id_1 = $1
         ORDER BY cs.similarity_score DESC
-        LIMIT 10
+        LIMIT 5
       `, [id]),
     ]);
 

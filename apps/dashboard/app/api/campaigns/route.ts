@@ -15,7 +15,12 @@ const querySchema = z.object({
   status: z.string().optional(),
   category: z.string().optional(),
   campaign_type: z.string().optional(),
+  // Legacy filter — kept for backward compatibility. New UI uses `intent`.
   sentiment: z.string().optional(),
+  // Migration 018 — competitive_intent taxonomy filter.
+  intent: z
+    .enum(['acquisition', 'retention', 'brand', 'clearance', 'unknown'])
+    .optional(),
   dateCompleteness: z.enum(['complete', 'missing_start', 'missing_end', 'missing_any']).optional(),
   dateMode: z.enum([
     'started_in_range',
@@ -49,6 +54,8 @@ type CampaignRow = {
   site_name: string;
   site_code: string;
   ai_sentiment_label: string | null;
+  ai_competitive_intent: string | null;
+  ai_competitive_intent_confidence: number | null;
   ai_category_code: string | null;
   ai_summary_text: string | null;
   ai_key_points: unknown | null;
@@ -154,6 +161,25 @@ export async function GET(request: NextRequest) {
       paramIndex++;
     }
 
+    // Migration 018 — `intent` filter checks both the canonical
+    // campaign_ai_analyses.competitive_intent column (latest row) AND the
+    // mirrored value in campaigns.metadata.ai_analysis.competitive_intent.
+    // The COALESCE keeps the filter resilient if one side has not yet been
+    // backfilled by the reprocess job.
+    if (params.intent) {
+      whereClause += ` AND COALESCE(
+        (SELECT ai.competitive_intent
+           FROM campaign_ai_analyses ai
+          WHERE ai.campaign_id = c.id
+            AND ai.competitive_intent IS NOT NULL
+          ORDER BY ai.created_at DESC
+          LIMIT 1),
+        JSON_UNQUOTE(JSON_EXTRACT(c.metadata, '$.ai_analysis.competitive_intent'))
+      ) = $${paramIndex}`;
+      filterParams.push(params.intent);
+      paramIndex++;
+    }
+
     if (params.dateCompleteness) {
       const hasStartDateExpr = `(c.valid_from IS NOT NULL OR NULLIF(JSON_UNQUOTE(JSON_EXTRACT(c.metadata, '$.ai_analysis.valid_from')), '') IS NOT NULL)`;
       const hasEndDateExpr = `(c.valid_to IS NOT NULL OR NULLIF(JSON_UNQUOTE(JSON_EXTRACT(c.metadata, '$.ai_analysis.valid_to')), '') IS NOT NULL)`;
@@ -215,6 +241,11 @@ export async function GET(request: NextRequest) {
     const countResult = await query<{ total: string }>(countQuery, filterParams);
     const total = parseInt(countResult[0]?.total || '0', 10);
 
+    // Migration 018 — pull the latest competitive_intent / confidence from
+    // `campaign_ai_analyses` via a correlated subquery. We can't add this to
+    // the main FROM as a JOIN easily because the row count would multiply
+    // when older analyses also have non-null values; the subquery is
+    // bounded to the most recent row per campaign.
     const dataQuery = `
       SELECT
         c.id,
@@ -234,6 +265,21 @@ export async function GET(request: NextRequest) {
         s.name as site_name,
         s.code as site_code,
         JSON_UNQUOTE(JSON_EXTRACT(c.metadata, '$.ai_analysis.sentiment')) as ai_sentiment_label,
+        COALESCE(
+          (SELECT ai.competitive_intent
+             FROM campaign_ai_analyses ai
+            WHERE ai.campaign_id = c.id
+              AND ai.competitive_intent IS NOT NULL
+            ORDER BY ai.created_at DESC
+            LIMIT 1),
+          NULLIF(JSON_UNQUOTE(JSON_EXTRACT(c.metadata, '$.ai_analysis.competitive_intent')), '')
+        ) as ai_competitive_intent,
+        (SELECT ai.competitive_intent_confidence
+           FROM campaign_ai_analyses ai
+          WHERE ai.campaign_id = c.id
+            AND ai.competitive_intent IS NOT NULL
+          ORDER BY ai.created_at DESC
+          LIMIT 1) as ai_competitive_intent_confidence,
         ${aiCategoryExpr} as ai_category_code,
         JSON_UNQUOTE(JSON_EXTRACT(c.metadata, '$.ai_analysis.summary')) as ai_summary_text,
         JSON_UNQUOTE(JSON_EXTRACT(c.metadata, '$.ai_analysis.key_points')) as ai_key_points,
@@ -267,6 +313,12 @@ export async function GET(request: NextRequest) {
         code: row.site_code,
       },
       sentiment: row.ai_sentiment_label,
+      // Migration 018 — additive field. UI prefers competitiveIntent now.
+      competitiveIntent: row.ai_competitive_intent,
+      competitiveIntentConfidence:
+        row.ai_competitive_intent_confidence !== null && row.ai_competitive_intent_confidence !== undefined
+          ? Number(row.ai_competitive_intent_confidence)
+          : null,
       category: row.ai_category_code,
       aiSummary: row.ai_summary_text,
       aiKeyPoints: row.ai_key_points,

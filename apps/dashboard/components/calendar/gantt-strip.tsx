@@ -75,11 +75,21 @@ export function GanttStrip({ campaigns, year, viewType }: GanttStripProps) {
   }
 
   const getBarColor = (status: string) => {
+    // Wave 1 #1.4 — Kanonik 4 state (active/expired/hidden/pending). Eski
+    // legacy 'ended' / 'passive' inputlarını da kabul ediyoruz; aynı renge map.
     switch (status) {
-      case 'active': return 'bg-emerald-500'
-      case 'ended': return 'bg-slate-400'
-      case 'pending': return 'bg-amber-400'
-      default: return 'bg-gray-400'
+      case 'active':
+        return 'bg-emerald-500'
+      case 'expired':
+      case 'ended':
+        return 'bg-slate-400'
+      case 'hidden':
+      case 'passive':
+        return 'bg-amber-300'
+      case 'pending':
+        return 'bg-amber-400'
+      default:
+        return 'bg-gray-400'
     }
   }
 

@@ -13,12 +13,14 @@ import { Button } from '@/components/ui/button'
 import { Badge } from '@/components/ui/badge'
 import { getCategoryLabel } from '@/lib/category-labels'
 import { useSSE } from '@/hooks/useSSE'
-import { Crown, Target, TrendingUp, Sparkles, BarChart3, ArrowUpRight, ArrowDownRight, Activity, Users, Zap, Clock } from 'lucide-react'
+import { Crown, Target, TrendingUp, Sparkles, BarChart3, ArrowUpRight, ArrowDownRight, Activity, Users, Clock } from 'lucide-react'
 import Link from 'next/link'
 import { cn } from '@/lib/utils'
 import { AlertBanner } from '@/components/ui/alert-banner'
 import { DateRangePickerHeader } from '@/components/ui/date-range-picker-header'
 import { useDateRange } from '@/lib/date-range/context'
+import { WeeklyBriefCard } from '@/components/dashboard/weekly-brief-card'
+import { WinLossTracker } from '@/components/insights/win-loss-tracker'
 
 const HOME_SCOPE = 'home'
 
@@ -127,44 +129,63 @@ function HeroStatCard({
   )
 }
 
-// Quick Stats Row with gradient backgrounds
-function QuickStatsRow() {
+/**
+ * Wave 1 #1.1 — "Aktiflik %" ve "CTR %" hardcoded değerleri kaldırıldı (gerçek
+ * karşılığı yok). Geriye iki gerçek metrik kaldı:
+ *   - Rakip Sayısı   = sites WHERE is_active = TRUE COUNT
+ *   - Son Güncelleme = MAX(campaigns.last_seen_at) → "Xd / Xs / Xdk önce"
+ */
+function formatRelativeTimeFromNow(iso: string | null | undefined): string {
+  if (!iso) return '—'
+  const ts = Date.parse(iso)
+  if (Number.isNaN(ts)) return '—'
+  const diffMs = Date.now() - ts
+  if (diffMs < 0) return 'şimdi'
+  const minutes = Math.floor(diffMs / 60000)
+  if (minutes < 1) return 'şimdi'
+  if (minutes < 60) return `${minutes}dk önce`
+  const hours = Math.floor(minutes / 60)
+  if (hours < 24) return `${hours}sa önce`
+  const days = Math.floor(hours / 24)
+  if (days < 30) return `${days}g önce`
+  const months = Math.floor(days / 30)
+  if (months < 12) return `${months}ay önce`
+  const years = Math.floor(days / 365)
+  return `${years}y önce`
+}
+
+function QuickStatsRow({
+  activeCompetitors,
+  lastUpdatedAt,
+}: {
+  activeCompetitors: number
+  lastUpdatedAt: string | null
+}) {
+  const lastUpdatedLabel = formatRelativeTimeFromNow(lastUpdatedAt)
+  const lastUpdatedTooltip = lastUpdatedAt
+    ? `Son scrape kayıtlanan campaign.last_seen_at: ${new Date(lastUpdatedAt).toLocaleString('tr-TR')}`
+    : 'Henüz scrape kaydı yok'
   return (
-    <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
-      <div className="flex items-center gap-3 p-4 rounded-2xl bg-gradient-to-br from-emerald-50 to-emerald-100 border border-emerald-200 shadow-sm">
-        <div className="p-2 rounded-lg bg-emerald-500 text-white shadow-sm">
-          <Activity className="w-5 h-5" />
-        </div>
-        <div>
-          <p className="text-xs text-emerald-600 font-medium">Aktiflik Oranı</p>
-          <p className="text-2xl font-bold text-emerald-700">94%</p>
-        </div>
-      </div>
-      <div className="flex items-center gap-3 p-4 rounded-2xl bg-gradient-to-br from-blue-50 to-blue-100 border border-blue-200 shadow-sm">
-        <div className="p-2 rounded-lg bg-blue-500 text-white shadow-sm">
-          <Zap className="w-5 h-5" />
-        </div>
-        <div>
-          <p className="text-xs text-blue-600 font-medium">Ortalama CTR</p>
-          <p className="text-2xl font-bold text-blue-700">4.2%</p>
-        </div>
-      </div>
+    <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
       <div className="flex items-center gap-3 p-4 rounded-2xl bg-gradient-to-br from-violet-50 to-violet-100 border border-violet-200 shadow-sm">
         <div className="p-2 rounded-lg bg-violet-500 text-white shadow-sm">
           <Users className="w-5 h-5" />
         </div>
         <div>
           <p className="text-xs text-violet-600 font-medium">Rakip Sayısı</p>
-          <p className="text-2xl font-bold text-violet-700">11</p>
+          <p className="text-2xl font-bold text-violet-700">{activeCompetitors}</p>
         </div>
       </div>
-      <div className="flex items-center gap-3 p-4 rounded-2xl bg-gradient-to-br from-orange-50 to-orange-100 border border-orange-200 shadow-sm">
+      <div
+        className="flex items-center gap-3 p-4 rounded-2xl bg-gradient-to-br from-orange-50 to-orange-100 border border-orange-200 shadow-sm"
+        title={lastUpdatedTooltip}
+      >
         <div className="p-2 rounded-lg bg-orange-500 text-white shadow-sm">
           <Clock className="w-5 h-5" />
         </div>
         <div>
           <p className="text-xs text-orange-600 font-medium">Son Güncelleme</p>
-          <p className="text-2xl font-bold text-orange-700">2d</p>
+          <p className="text-2xl font-bold text-orange-700">{lastUpdatedLabel}</p>
         </div>
       </div>
     </div>
@@ -357,6 +378,13 @@ export default function DashboardPage() {
       />
 
       <main className="p-6 space-y-6">
+        {/* Hafta Özeti Brief — DeepSeek prescriptive AI; QuickStats'tan ÖNCE */}
+        <WeeklyBriefCard />
+
+        {/* Win/Loss Tracker — ranking_snapshots (migration 021). Bitalih'in
+            haftalık sıralama değişimi: 4 metric pozisyonu + geçtikleri/geçenler. */}
+        <WinLossTracker />
+
         {/* Global tarih aralığı header'ı — `home` scope, default 'Bu Hafta' */}
         <DateRangePickerHeader scope={HOME_SCOPE} />
 
@@ -409,8 +437,11 @@ export default function DashboardPage() {
           </div>
         )}
 
-        {/* Quick Stats Row */}
-        <QuickStatsRow />
+        {/* Quick Stats Row — gerçek değerler (Wave 1 #1.1) */}
+        <QuickStatsRow
+          activeCompetitors={data?.activeCompetitors ?? (otherSites.length + 1)}
+          lastUpdatedAt={data?.lastUpdatedAt ?? null}
+        />
 
         {/* FE-11: Dashboard hero stats benchmark/karşılaştırma notu */}
         <div className="text-xs text-muted-foreground bg-muted/30 rounded-lg px-3 py-2">
