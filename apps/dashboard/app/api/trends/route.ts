@@ -41,6 +41,26 @@ export async function GET(request: NextRequest) {
       AND LOWER(COALESCE(c.body, '')) NOT LIKE LOWER('%güncel kampanya bulunmamaktadır%')
     `;
 
+    // MySQL 8 `only_full_group_by` mode alias'ları GROUP BY'da tanımıyor — her
+    // JSON_EXTRACT expression'ını hem SELECT hem GROUP BY'da birebir tekrarlamak
+    // gerekiyor. Paylaşılan expression'ları const'a alıp string interpolation ile
+    // yerleştirerek tekrarı azaltıyoruz.
+    const categoryExpr = `COALESCE(
+      NULLIF(JSON_UNQUOTE(JSON_EXTRACT(c.metadata, '$.ai_analysis.campaign_type')), ''),
+      NULLIF(JSON_UNQUOTE(JSON_EXTRACT(c.metadata, '$.ai_analysis.category')), ''),
+      'unknown'
+    )`;
+    const sentimentExpr = `COALESCE(
+      NULLIF(JSON_UNQUOTE(JSON_EXTRACT(c.metadata, '$.ai_analysis.sentiment')), ''),
+      NULLIF(ai.sentiment_label, ''),
+      'unknown'
+    )`;
+    const intentExpr = `COALESCE(
+      ai.competitive_intent,
+      NULLIF(JSON_UNQUOTE(JSON_EXTRACT(c.metadata, '$.ai_analysis.competitive_intent')), ''),
+      'unknown'
+    )`;
+
     const campaignsOverTimeQuery = `
       SELECT 
         DATE(c.created_at) as date,
@@ -53,18 +73,14 @@ export async function GET(request: NextRequest) {
     `;
 
     const categoryTrendQuery = `
-      SELECT 
+      SELECT
         DATE(c.created_at) as date,
-        COALESCE(
-          NULLIF(JSON_UNQUOTE(JSON_EXTRACT(c.metadata, '$.ai_analysis.campaign_type')), ''),
-          NULLIF(JSON_UNQUOTE(JSON_EXTRACT(c.metadata, '$.ai_analysis.category')), ''),
-          'unknown'
-        ) as category,
+        ${categoryExpr} as category,
         COUNT(*) as count
       FROM campaigns c
       WHERE c.created_at >= $1
         AND ${qualityFilter}
-      GROUP BY DATE(c.created_at), category
+      GROUP BY DATE(c.created_at), ${categoryExpr}
       ORDER BY date ASC, count DESC
     `;
 
@@ -81,17 +97,13 @@ export async function GET(request: NextRequest) {
         WHERE t.rn = 1
       )
       SELECT
-        COALESCE(
-          NULLIF(JSON_UNQUOTE(JSON_EXTRACT(c.metadata, '$.ai_analysis.sentiment')), ''),
-          NULLIF(ai.sentiment_label, ''),
-          'unknown'
-        ) as sentiment,
+        ${sentimentExpr} as sentiment,
         COUNT(*) as count
       FROM campaigns c
       LEFT JOIN latest_ai ai ON ai.campaign_id = c.id
       WHERE c.created_at >= $1
         AND ${qualityFilter}
-      GROUP BY sentiment
+      GROUP BY ${sentimentExpr}
     `;
 
     // Migration 018 — competitive_intent distribution mirrors the sentiment
@@ -110,31 +122,23 @@ export async function GET(request: NextRequest) {
         WHERE t.rn = 1
       )
       SELECT
-        COALESCE(
-          ai.competitive_intent,
-          NULLIF(JSON_UNQUOTE(JSON_EXTRACT(c.metadata, '$.ai_analysis.competitive_intent')), ''),
-          'unknown'
-        ) as competitive_intent,
+        ${intentExpr} as competitive_intent,
         COUNT(*) as count
       FROM campaigns c
       LEFT JOIN latest_ai ai ON ai.campaign_id = c.id
       WHERE c.created_at >= $1
         AND ${qualityFilter}
-      GROUP BY competitive_intent
+      GROUP BY ${intentExpr}
     `;
 
     const topCategoriesQuery = `
-      SELECT 
-        COALESCE(
-          NULLIF(JSON_UNQUOTE(JSON_EXTRACT(c.metadata, '$.ai_analysis.campaign_type')), ''),
-          NULLIF(JSON_UNQUOTE(JSON_EXTRACT(c.metadata, '$.ai_analysis.category')), ''),
-          'unknown'
-        ) as category,
+      SELECT
+        ${categoryExpr} as category,
         COUNT(*) as count
       FROM campaigns c
       WHERE c.created_at >= $1
         AND ${qualityFilter}
-      GROUP BY category
+      GROUP BY ${categoryExpr}
       ORDER BY count DESC
       LIMIT 10
     `;
@@ -168,16 +172,12 @@ export async function GET(request: NextRequest) {
 
     const weeklyTopCategoriesQuery = `
       SELECT
-        COALESCE(
-          NULLIF(JSON_UNQUOTE(JSON_EXTRACT(c.metadata, '$.ai_analysis.campaign_type')), ''),
-          NULLIF(JSON_UNQUOTE(JSON_EXTRACT(c.metadata, '$.ai_analysis.category')), ''),
-          'unknown'
-        ) as category,
+        ${categoryExpr} as category,
         COUNT(*) as count
       FROM campaigns c
       WHERE c.created_at >= $1
         AND ${qualityFilter}
-      GROUP BY category
+      GROUP BY ${categoryExpr}
       ORDER BY count DESC
       LIMIT 10
     `;
