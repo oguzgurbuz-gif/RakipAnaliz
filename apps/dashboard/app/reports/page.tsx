@@ -9,7 +9,6 @@ import { EmptyState } from '@/components/ui/empty-state'
 import { InsightCard } from '@/components/ui/insight-card'
 import { ReportSummaryComponent } from '@/components/reports/report-summary'
 import { WeeklyReportCard } from '@/components/reports/weekly-report-card'
-import { ScheduleForm } from '@/components/reports/schedule-form'
 import { DateRangePickerHeader } from '@/components/ui/date-range-picker-header'
 import { useDateRange } from '@/lib/date-range/context'
 import { toIsoDate } from '@/lib/date-range/presets'
@@ -163,26 +162,20 @@ export default function ReportsPage() {
 
         {/* Summary Tab */}
         {activeTab === 'summary' && (
-          <div className="grid gap-6 lg:grid-cols-3">
-            <div className="lg:col-span-2">
-              {summaryLoading ? (
-                <div className="grid gap-4 md:grid-cols-5">
-                  {Array.from({ length: 5 }).map((_, i) => (
-                    <Card key={i}>
-                      <CardContent className="p-4">
-                        <div className="h-16 bg-muted animate-pulse rounded" />
-                      </CardContent>
-                    </Card>
-                  ))}
-                </div>
-              ) : (
-                <ReportSummaryComponent data={summaryData ?? null} showDetails />
-              )}
-            </div>
-            <div>
-              {/* Schedule form date range'den ETKİLENMEZ — schedule farklı kavram */}
-              <ScheduleForm />
-            </div>
+          <div>
+            {summaryLoading ? (
+              <div className="grid gap-4 md:grid-cols-5">
+                {Array.from({ length: 5 }).map((_, i) => (
+                  <Card key={i}>
+                    <CardContent className="p-4">
+                      <div className="h-16 bg-muted animate-pulse rounded" />
+                    </CardContent>
+                  </Card>
+                ))}
+              </div>
+            ) : (
+              <ReportSummaryComponent data={summaryData ?? null} showDetails />
+            )}
           </div>
         )}
 
