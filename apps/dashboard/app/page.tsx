@@ -63,14 +63,15 @@ function ProgressBar({ value, max, label, color, explanation }: { value: number;
 
 // Large Stat Card with gradient
 function HeroStatCard({ 
-  title, 
-  value, 
-  subtitle, 
-  icon: Icon, 
+  title,
+  value,
+  subtitle,
+  icon: Icon,
   trend,
   trendValue,
-  color 
-}: { 
+  color,
+  tooltip,
+}: {
   title: string
   value: string | number
   subtitle?: string
@@ -78,6 +79,8 @@ function HeroStatCard({
   trend?: 'up' | 'down' | 'neutral'
   trendValue?: string
   color: 'green' | 'blue' | 'purple' | 'orange' | 'emerald'
+  /** Native hover tooltip — metriğin ne ölçtüğünü, nasıl hesaplandığını açıklar. */
+  tooltip?: string
 }) {
   const colorConfig = {
     green: { bg: 'bg-emerald-50 border-emerald-200', icon: 'bg-emerald-500', text: 'text-emerald-600' },
@@ -90,11 +93,17 @@ function HeroStatCard({
   const config = colorConfig[color]
 
   return (
-    <Card className={cn('border-2 transition-all hover:shadow-md', config.bg)}>
+    <Card
+      className={cn('border-2 transition-all hover:shadow-md', config.bg)}
+      title={tooltip}
+    >
       <CardContent className="p-6">
         <div className="flex items-start justify-between">
           <div className="space-y-2">
-            <p className="text-sm font-medium text-muted-foreground">{title}</p>
+            <p className="text-sm font-medium text-muted-foreground">
+              {title}
+              {tooltip && <span className="ml-1 text-muted-foreground/70" aria-hidden>ⓘ</span>}
+            </p>
             <p className="text-5xl font-bold tracking-tight">{value}</p>
             {subtitle && <p className="text-xs text-muted-foreground">{subtitle}</p>}
             {trend && trendValue && (
@@ -417,6 +426,7 @@ export default function DashboardPage() {
             trend={data?.deltas?.started?.direction}
             trendValue={data?.deltas ? `${data.deltas.started.diff >= 0 ? '+' : ''}${data.deltas.started.diff} (${data.deltas.started.diff >= 0 ? '+' : ''}${data.deltas.started.pct}%)` : undefined}
             color="emerald"
+            tooltip="Seçili dönem içinde ilk kez gözlemlenen (started) kampanya sayısı. Trend: önceki aynı uzunluktaki dönemle fark."
           />
           <HeroStatCard
             title="Aktif Kampanya"
@@ -426,6 +436,7 @@ export default function DashboardPage() {
             trend={data?.deltas?.active?.direction}
             trendValue={data?.deltas ? `${data.deltas.active.diff >= 0 ? '+' : ''}${data.deltas.active.diff} (${data.deltas.active.diff >= 0 ? '+' : ''}${data.deltas.active.pct}%)` : undefined}
             color="blue"
+            tooltip="Şu an aktif olarak çalıştığı gözlemlenen kampanya sayısı (son scrape'te görülmüş ve valid_to geçmemiş)."
           />
           <HeroStatCard
             title="Takip Edilen Rakip"
@@ -433,6 +444,7 @@ export default function DashboardPage() {
             subtitle="Aktif olarak izleniyor"
             icon={Users}
             color="purple"
+            tooltip="Aktif (is_active=true) olarak izlenen site sayısı — bitalih dahil. Yeni rakip eklemek için admin/sites sayfasına git."
           />
           <HeroStatCard
             title="En Yüksek Bonus"
@@ -440,6 +452,7 @@ export default function DashboardPage() {
             subtitle={bestCompetitor?.site_name || 'Bitalih'}
             icon={Crown}
             color="orange"
+            tooltip="Seçili dönemde en yüksek ortalama efektif bonus tutarını sunan rakip sitenin değeri."
           />
         </div>
 

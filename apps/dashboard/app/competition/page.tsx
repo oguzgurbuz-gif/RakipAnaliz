@@ -58,8 +58,10 @@ export default function CompetitionPage() {
   const router = useRouter()
   const pathname = usePathname()
   const [selectedCategory, setSelectedCategory] = useState(searchParams?.get('category') || '')
-  const [showMatrix, setShowMatrix] = useState(false)
-  const [showBonusTable, setShowBonusTable] = useState(false)
+  // Default açık: önceden kapalıydı ve kullanıcı scroll etmezse bu iki tabloyu
+  // (Tür Bazlı Karşılaştırma + Site vs Site Matrisi) hiç görmüyordu.
+  const [showMatrix, setShowMatrix] = useState(true)
+  const [showBonusTable, setShowBonusTable] = useState(true)
 
   // Global tarih aralığı — `competition` scope'u, default 'thisMonth'.
   // Cookie + URL ile persist edilir.

@@ -355,32 +355,46 @@ export default function TrendsPage() {
                     <span>MA30</span>
                   </label>
                 </div>
-                {/* trend-02: Period Comparison Controls */}
+                {/* trend-02: Period Comparison Controls
+                    Geçen Ay/Yıl serileri henüz dedicated trend endpoint'ine
+                    bağlı değil — mevcut window'dan kaydırılmış proxy gösteriyor
+                    (bkz. comparisonData useMemo). Toggle açıkken chart üstünde
+                    "tahmini" uyarısı göster. */}
                 <div className="flex items-center gap-3 text-sm">
                   <span className="text-muted-foreground">Karşılaştır:</span>
-                  <label className="flex items-center gap-1 cursor-pointer">
+                  <label className="flex items-center gap-1 cursor-pointer" title="Tahmini — backend henüz gerçek geçen ay verisi sunmuyor">
                     <input
                       type="checkbox"
                       checked={compareLastMonth}
                       onChange={(e) => setCompareLastMonth(e.target.checked)}
                       className="rounded"
                     />
-                    <span>Geçen Ay</span>
+                    <span>Geçen Ay <span className="text-amber-600">(tahmini)</span></span>
                   </label>
-                  <label className="flex items-center gap-1 cursor-pointer">
+                  <label className="flex items-center gap-1 cursor-pointer" title="Tahmini — backend henüz gerçek geçen yıl verisi sunmuyor">
                     <input
                       type="checkbox"
                       checked={compareLastYear}
                       onChange={(e) => setCompareLastYear(e.target.checked)}
                       className="rounded"
                     />
-                    <span>Geçen Yıl</span>
+                    <span>Geçen Yıl <span className="text-amber-600">(tahmini)</span></span>
                   </label>
                 </div>
               </div>
             </div>
           </CardHeader>
           <CardContent>
+            {(compareLastMonth || compareLastYear) && (
+              <div className="mb-3 text-xs px-3 py-2 rounded-md bg-amber-50 border border-amber-200 text-amber-800 flex items-center gap-2">
+                <span>⚠️</span>
+                <span>
+                  Geçen Ay / Geçen Yıl serileri tahmini veridir (mevcut pencereden
+                  proxy). Backend dedicated trend endpoint'i devreye alındığında
+                  gerçek geçmiş ile değiştirilecek.
+                </span>
+              </div>
+            )}
             {isLoading ? (
               <Skeleton className="h-[320px] w-full" />
             ) : hasTrendData ? (

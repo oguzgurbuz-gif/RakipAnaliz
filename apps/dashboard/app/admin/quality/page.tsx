@@ -229,7 +229,18 @@ export default function DataQualityPage() {
           </Card>
         </div>
 
-        {/* qual-01: Quality Trend Chart */}
+        {/* qual-01: Quality Trend Chart
+            Trend verisi henüz dedicated endpoint'e bağlı değil — current
+            stats'tan deterministik olarak türetilmiş simüle veri (bkz. trend
+            useQuery yukarıda). Kullanıcı gerçek zamanlı tarihsel veri sanmasın
+            diye chart üstünde uyarı gösteriyoruz. */}
+        <div className="text-xs px-3 py-2 rounded-md bg-amber-50 border border-amber-200 text-amber-800 flex items-center gap-2">
+          <span>⚠️</span>
+          <span>
+            Trend grafiği şu an mevcut stats'tan türetilmiş tahmini bir seridir.
+            Gerçek tarihsel veri için backend'de dedicated quality-trend endpoint'i bekleniyor.
+          </span>
+        </div>
         <QualityTrendChart data={trendData || []} isLoading={trendLoading} />
 
         <Card>

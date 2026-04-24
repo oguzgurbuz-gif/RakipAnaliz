@@ -334,6 +334,9 @@ export default function CampaignDetailPage({ params }: { params: { id: string } 
                 <Tabs.Trigger value="rivals" className="px-4 py-2 text-sm font-medium text-muted-foreground hover:text-foreground data-[state=active]:text-foreground data-[state=active]:border-b-2 data-[state=active]:border-primary flex items-center gap-2">
                   <Users className="h-4 w-4" />
                   Rakipler
+                  {campaign.similarCampaigns && campaign.similarCampaigns.length > 0 && (
+                    <Badge variant="outline" className="ml-1 h-5 px-1.5">{campaign.similarCampaigns.length}</Badge>
+                  )}
                 </Tabs.Trigger>
                 <Tabs.Trigger value="changes" className="px-4 py-2 text-sm font-medium text-muted-foreground hover:text-foreground data-[state=active]:text-foreground data-[state=active]:border-b-2 data-[state=active]:border-primary flex items-center gap-2">
                   <GitCompare className="h-4 w-4" />
