@@ -13,9 +13,9 @@ import { Button } from '@/components/ui/button'
 import { Badge } from '@/components/ui/badge'
 import { getCategoryLabel } from '@/lib/category-labels'
 import { useSSE } from '@/hooks/useSSE'
-import { Crown, Target, TrendingUp, Sparkles, BarChart3, ArrowUpRight, ArrowDownRight, Activity, Users, Clock } from 'lucide-react'
+import { Crown, Target, TrendingUp, Sparkles, BarChart3, ArrowUpRight, ArrowDownRight, Activity, Users, Clock, CalendarRange } from 'lucide-react'
 import Link from 'next/link'
-import { cn } from '@/lib/utils'
+import { cn, formatDateRange } from '@/lib/utils'
 import { AlertBanner } from '@/components/ui/alert-banner'
 import { DateRangePickerHeader } from '@/components/ui/date-range-picker-header'
 import { useDateRange } from '@/lib/date-range/context'
@@ -453,10 +453,16 @@ export default function DashboardPage() {
         {/* AI COMPARISON HERO */}
         <Card className="overflow-hidden border-primary/30 bg-gradient-to-br from-primary/5 via-card to-card">
           <CardContent className="p-6">
-            <div className="flex items-center justify-between mb-6">
-              <div className="flex items-center gap-2">
+            <div className="flex items-center justify-between gap-3 mb-6 flex-wrap">
+              <div className="flex items-center gap-2 flex-wrap">
                 <Sparkles className="h-5 w-5 text-primary" />
                 <h2 className="text-lg font-semibold">AI Karşılaştırma Paneli</h2>
+                {dateFrom && dateTo && (
+                  <Badge variant="outline" className="gap-1 ml-2 text-xs font-normal">
+                    <CalendarRange className="h-3 w-3" />
+                    {formatDateRange(dateFrom, dateTo)}
+                  </Badge>
+                )}
               </div>
               <select
                 className="border rounded px-3 py-1.5 text-sm bg-background"
@@ -478,34 +484,37 @@ export default function DashboardPage() {
               </div>
             ) : (
               <>
-                {/* Main insight cards - larger numbers */}
+                {/* Main insight cards - larger numbers
+                    Tüm değerler seçili tarih aralığı içindir; description'larda
+                    dönem bağlamı verilir (kullanıcılar metriği "tüm zamanlar"
+                    sanıp yanlış kararlar almasın). */}
                 <div className="grid gap-4 md:grid-cols-4 mb-6">
                   <InsightCard
                     icon={Crown}
                     title="Bitalih Pozisyonu"
-                    value={bitalihCampaignsBetter ? 'Üst Sırada' : 'Geliştirilmeli'}
-                    description={`${bitalihData?.total_campaigns ?? 0} kampanya hacmi`}
+                    value={bitalihCampaignsBetter ? 'Kampanya Hacminde Lider' : 'Liderin Gerisinde'}
+                    description={`${bitalihData?.total_campaigns ?? 0} kampanya · seçili dönem`}
                     tone={bitalihCampaignsBetter ? 'positive' : 'warning'}
                   />
                   <InsightCard
                     icon={BarChart3}
                     title="Kampanya Sayısı"
                     value={bitalihData?.total_campaigns ?? 0}
-                    description={`Rakip ort: ${Math.round(avgCompetitorCampaigns)}`}
+                    description={`Rakip ortalaması: ${Math.round(avgCompetitorCampaigns)} · seçili dönem`}
                     tone={bitalihCampaignsBetter ? 'positive' : 'info'}
                   />
                   <InsightCard
                     icon={Target}
                     title="Bonus Agresifliği"
-                    value={bitalihBonusBetter ? 'Üst Sırada' : 'Ortalama'}
-                    description={`En yüksek: ${bestCompetitor?.site_name || '-'} (₺${Math.round(Number(bestCompetitor?.avg_bonus || 0))})`}
+                    value={bitalihBonusBetter ? 'En Yüksek Ortalama' : 'Ortalamanın Altında'}
+                    description={`En yüksek rakip: ${bestCompetitor?.site_name || '-'} (₺${Math.round(Number(bestCompetitor?.avg_bonus || 0))}) · seçili dönem`}
                     tone={bitalihBonusBetter ? 'positive' : 'warning'}
                   />
                   <InsightCard
                     icon={TrendingUp}
                     title="En Güçlü Kategori"
                     value={data?.topCategories?.[0]?.label || 'Belirsiz'}
-                    description={`${data?.topCategories?.[0]?.count || 0} kampanya`}
+                    description={`${data?.topCategories?.[0]?.count || 0} kampanya · seçili dönem`}
                     tone="info"
                   />
                 </div>
