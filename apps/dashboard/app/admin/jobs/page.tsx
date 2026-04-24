@@ -1,6 +1,8 @@
 'use client'
 
-import { useState } from 'react'
+import { useCallback, useState } from 'react'
+import { usePathname, useRouter, useSearchParams } from 'next/navigation'
+import * as Tabs from '@radix-ui/react-tabs'
 import { useQuery } from '@tanstack/react-query'
 import { Card, CardContent, CardHeader } from '@/components/ui/card'
 import { Badge } from '@/components/ui/badge'
@@ -59,6 +61,25 @@ export default function AdminJobsPage() {
   const [actionMessage, setActionMessage] = useState<string | null>(null)
   const [actionError, setActionError] = useState<string | null>(null)
   const [isSubmitting, setIsSubmitting] = useState(false)
+
+  // Tab state URL'de persist; tarayıcı geri tuşu + paylaşılabilir link
+  // (?tab=jobs gibi). Geçersiz değer 'actions' default'una düşer.
+  const searchParams = useSearchParams()
+  const router = useRouter()
+  const pathname = usePathname()
+  const tabParam = searchParams?.get('tab')
+  const activeTab: 'actions' | 'scrape-runs' | 'jobs' =
+    tabParam === 'scrape-runs' || tabParam === 'jobs' ? tabParam : 'actions'
+  const setActiveTab = useCallback(
+    (next: 'actions' | 'scrape-runs' | 'jobs') => {
+      const params = new URLSearchParams(searchParams?.toString() || '')
+      if (next === 'actions') params.delete('tab')
+      else params.set('tab', next)
+      const qs = params.toString()
+      router.replace(qs ? `${pathname}?${qs}` : pathname)
+    },
+    [searchParams, router, pathname]
+  )
 
   const { data, isLoading, refetch } = useQuery<AdminJobsData>({
     queryKey: ['admin-jobs'],
@@ -256,6 +277,39 @@ export default function AdminJobsPage() {
           </Card>
         </div>
 
+        <Tabs.Root
+          value={activeTab}
+          onValueChange={(v) => setActiveTab(v as typeof activeTab)}
+          className="w-full"
+        >
+          <Tabs.List className="flex border-b mb-4 flex-wrap">
+            <Tabs.Trigger
+              value="actions"
+              className="px-4 py-2 text-sm font-medium text-muted-foreground hover:text-foreground data-[state=active]:text-foreground data-[state=active]:border-b-2 data-[state=active]:border-primary"
+            >
+              Aksiyonlar
+            </Tabs.Trigger>
+            <Tabs.Trigger
+              value="scrape-runs"
+              className="px-4 py-2 text-sm font-medium text-muted-foreground hover:text-foreground data-[state=active]:text-foreground data-[state=active]:border-b-2 data-[state=active]:border-primary flex items-center gap-2"
+            >
+              Scrape Geçmişi
+              {data?.scrapeRuns && data.scrapeRuns.length > 0 && (
+                <Badge variant="outline" className="h-5 px-1.5">{data.scrapeRuns.length}</Badge>
+              )}
+            </Tabs.Trigger>
+            <Tabs.Trigger
+              value="jobs"
+              className="px-4 py-2 text-sm font-medium text-muted-foreground hover:text-foreground data-[state=active]:text-foreground data-[state=active]:border-b-2 data-[state=active]:border-primary flex items-center gap-2"
+            >
+              İş Kuyruğu
+              {data?.jobs && data.jobs.length > 0 && (
+                <Badge variant="outline" className="h-5 px-1.5">{data.jobs.length}</Badge>
+              )}
+            </Tabs.Trigger>
+          </Tabs.List>
+
+          <Tabs.Content value="actions" className="space-y-4">
         <Card>
           <CardHeader>
             <SectionHeader
@@ -507,6 +561,9 @@ export default function AdminJobsPage() {
           </CardContent>
         </Card>
 
+          </Tabs.Content>
+
+          <Tabs.Content value="scrape-runs" className="space-y-4">
         <Card>
           <CardHeader>
             <SectionHeader
@@ -584,6 +641,9 @@ export default function AdminJobsPage() {
           </CardContent>
         </Card>
 
+          </Tabs.Content>
+
+          <Tabs.Content value="jobs" className="space-y-4">
         <Card>
           <CardHeader>
             <SectionHeader
@@ -669,6 +729,8 @@ export default function AdminJobsPage() {
             )}
           </CardContent>
         </Card>
+          </Tabs.Content>
+        </Tabs.Root>
       </main>
     </div>
   )
