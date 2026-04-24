@@ -57,6 +57,7 @@ const EMPTY_COMPETITION_DATA: CompetitionData = {
   comparisonTable: [],
   bestDeals: [],
   siteMatrix: {},
+  topByCategory: {},
   gaps: [],
 }
 
@@ -350,6 +351,14 @@ export interface CompetitionData {
     campaign_count: number
     avg_score: number
     is_winner: boolean
+  }>>
+  // Per-category leaderboard. Sites pre-sorted by campaign_count DESC by the API.
+  // [0] is the winner, [1] (when present) is the runner-up.
+  topByCategory: Record<string, Array<{
+    site_name: string
+    site_code: string
+    count: number
+    avg_bonus: number
   }>>
   gaps: GapItem[]
 }

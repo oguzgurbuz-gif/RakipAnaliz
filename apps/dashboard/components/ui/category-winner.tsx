@@ -1,79 +1,62 @@
 'use client'
 
 import * as React from 'react'
+import { useQuery } from '@tanstack/react-query'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { Badge } from '@/components/ui/badge'
-import { Crown, Trophy, Medal, Target } from 'lucide-react'
-import { cn } from '@/lib/utils'
+import { Crown, Trophy, Medal, Target, AlertTriangle } from 'lucide-react'
 import { getCategoryLabel } from '@/lib/category-labels'
+import { fetchCompetition, type CompetitionData } from '@/lib/api'
 
-// Mock data for category winners
-const MOCK_CATEGORY_WINNERS = [
-  {
-    category: 'casino',
-    winner: {
-      site_name: 'Bitalih',
-      site_code: 'bitalih',
-      campaign_count: 847,
-      avg_bonus: 12500,
-    },
-    runner_up: {
-      site_name: 'Nesine',
-      site_code: 'nesine',
-      campaign_count: 723,
-      avg_bonus: 11200,
-    },
-    total_competitors: 11,
-  },
-  {
-    category: 'sports',
-    winner: {
-      site_name: 'Bilyoner',
-      site_code: 'bilyoner',
-      campaign_count: 612,
-      avg_bonus: 8900,
-    },
-    runner_up: {
-      site_name: 'Bitalih',
-      site_code: 'bitalih',
-      campaign_count: 598,
-      avg_bonus: 9500,
-    },
-    total_competitors: 11,
-  },
-  {
-    category: 'poker',
-    winner: {
-      site_name: 'Misli',
-      site_code: 'misli',
-      campaign_count: 234,
-      avg_bonus: 5600,
-    },
-    runner_up: {
-      site_name: 'Oley',
-      site_code: 'oley',
-      campaign_count: 198,
-      avg_bonus: 4800,
-    },
-    total_competitors: 8,
-  },
-  {
-    category: 'bingo',
-    winner: {
-      site_name: 'Sondüzlük',
-      site_code: 'sondzulyuk',
-      campaign_count: 156,
-      avg_bonus: 4200,
-    },
-    runner_up: {
-      site_name: 'Hipodrom',
-      site_code: 'hipodrom',
-      campaign_count: 134,
-      avg_bonus: 3800,
-    },
-    total_competitors: 6,
-  },
-]
+interface CategoryWinnerEntry {
+  category: string
+  winner: {
+    site_name: string
+    site_code: string
+    campaign_count: number
+    avg_bonus: number
+  }
+  runner_up: {
+    site_name: string
+    site_code: string
+    campaign_count: number
+    avg_bonus: number
+  } | null
+  total_competitors: number
+}
+
+// The API returns topByCategory pre-sorted by campaign_count DESC. We just
+// project it into the shape the card wants and keep the first few categories
+// (too many cards clutters the dashboard — the full breakdown lives in the
+// comparison table elsewhere).
+function deriveCategoryWinners(data: CompetitionData | undefined, limit = 6): CategoryWinnerEntry[] {
+  if (!data?.topByCategory) return []
+  const entries: CategoryWinnerEntry[] = []
+  for (const [category, sites] of Object.entries(data.topByCategory)) {
+    if (!sites.length) continue
+    const [winner, runnerUp] = sites
+    entries.push({
+      category,
+      winner: {
+        site_name: winner.site_name,
+        site_code: winner.site_code,
+        campaign_count: winner.count,
+        avg_bonus: winner.avg_bonus,
+      },
+      runner_up: runnerUp
+        ? {
+            site_name: runnerUp.site_name,
+            site_code: runnerUp.site_code,
+            campaign_count: runnerUp.count,
+            avg_bonus: runnerUp.avg_bonus,
+          }
+        : null,
+      total_competitors: sites.length,
+    })
+  }
+  entries.sort((a, b) => b.winner.campaign_count - a.winner.campaign_count)
+  return entries.slice(0, limit)
+}
 
 function WinnerBadge() {
   return (
@@ -95,18 +78,8 @@ function RunnerUpBadge() {
 
 interface CategoryWinnerCardProps {
   category: string
-  winner: {
-    site_name: string
-    site_code: string
-    campaign_count: number
-    avg_bonus: number
-  }
-  runner_up: {
-    site_name: string
-    site_code: string
-    campaign_count: number
-    avg_bonus: number
-  }
+  winner: CategoryWinnerEntry['winner']
+  runner_up: CategoryWinnerEntry['runner_up']
   total_competitors: number
 }
 
@@ -125,7 +98,6 @@ function CategoryWinnerCard({ category, winner, runner_up, total_competitors }: 
         </div>
       </CardHeader>
       <CardContent className="space-y-3">
-        {/* Winner Row */}
         <div className="flex items-center justify-between p-3 rounded-lg bg-yellow-50 border border-yellow-200">
           <div className="flex items-center gap-3">
             <div className="p-2 rounded-lg bg-yellow-500 text-white shadow-sm">
@@ -134,51 +106,100 @@ function CategoryWinnerCard({ category, winner, runner_up, total_competitors }: 
             <div>
               <p className="font-semibold text-sm">{winner.site_name}</p>
               <p className="text-xs text-muted-foreground">
-                {winner.campaign_count} kampanya • ₺{winner.avg_bonus.toLocaleString('tr-TR')} ortalama bonus
+                {winner.campaign_count} kampanya • ₺{Math.round(winner.avg_bonus).toLocaleString('tr-TR')} ortalama bonus
               </p>
             </div>
           </div>
           <WinnerBadge />
         </div>
 
-        {/* Runner Up Row */}
-        <div className="flex items-center justify-between p-3 rounded-lg bg-muted/50 border border-muted">
-          <div className="flex items-center gap-3">
-            <div className="p-2 rounded-lg bg-muted-foreground/20 text-muted-foreground shadow-sm">
-              <Trophy className="h-4 w-4" />
+        {runner_up ? (
+          <div className="flex items-center justify-between p-3 rounded-lg bg-muted/50 border border-muted">
+            <div className="flex items-center gap-3">
+              <div className="p-2 rounded-lg bg-muted-foreground/20 text-muted-foreground shadow-sm">
+                <Trophy className="h-4 w-4" />
+              </div>
+              <div>
+                <p className="font-semibold text-sm">{runner_up.site_name}</p>
+                <p className="text-xs text-muted-foreground">
+                  {runner_up.campaign_count} kampanya • ₺{Math.round(runner_up.avg_bonus).toLocaleString('tr-TR')} ortalama bonus
+                </p>
+              </div>
             </div>
-            <div>
-              <p className="font-semibold text-sm">{runner_up.site_name}</p>
-              <p className="text-xs text-muted-foreground">
-                {runner_up.campaign_count} kampanya • ₺{runner_up.avg_bonus.toLocaleString('tr-TR')} ortalama bonus
-              </p>
-            </div>
+            <RunnerUpBadge />
           </div>
-          <RunnerUpBadge />
-        </div>
+        ) : (
+          <div className="p-3 rounded-lg bg-muted/30 border border-muted text-xs text-muted-foreground">
+            İkinci rakip yok — kategoride tek aktif site.
+          </div>
+        )}
       </CardContent>
     </Card>
   )
 }
 
-export function CategoryWinnerWidget() {
+function SkeletonCard() {
+  return (
+    <Card className="overflow-hidden">
+      <CardHeader className="pb-2">
+        <div className="h-4 w-32 bg-muted animate-pulse rounded" />
+      </CardHeader>
+      <CardContent className="space-y-3">
+        <div className="h-16 bg-muted animate-pulse rounded-lg" />
+        <div className="h-16 bg-muted animate-pulse rounded-lg" />
+      </CardContent>
+    </Card>
+  )
+}
+
+interface CategoryWinnerWidgetProps {
+  dateRange?: { from?: string; to?: string }
+}
+
+export function CategoryWinnerWidget({ dateRange }: CategoryWinnerWidgetProps = {}) {
+  const { data, isLoading, isError } = useQuery({
+    queryKey: ['competition', { dateRange }],
+    queryFn: () => fetchCompetition(undefined, dateRange),
+  })
+
+  const winners = React.useMemo(() => deriveCategoryWinners(data), [data])
+
   return (
     <div className="space-y-4">
       <div className="flex items-center gap-2">
         <Crown className="h-5 w-5 text-yellow-600" />
         <h2 className="text-lg font-semibold">Kategori Kazananları</h2>
       </div>
-      <div className="grid gap-4 md:grid-cols-2">
-        {MOCK_CATEGORY_WINNERS.map((item) => (
-          <CategoryWinnerCard
-            key={item.category}
-            category={item.category}
-            winner={item.winner}
-            runner_up={item.runner_up}
-            total_competitors={item.total_competitors}
-          />
-        ))}
-      </div>
+
+      {isError ? (
+        <div className="flex items-center gap-2 p-4 rounded-lg bg-destructive/10 border border-destructive/30 text-sm text-destructive">
+          <AlertTriangle className="h-4 w-4" />
+          Kategori verisi yüklenemedi. Birazdan tekrar dene.
+        </div>
+      ) : isLoading ? (
+        <div className="grid gap-4 md:grid-cols-2">
+          <SkeletonCard />
+          <SkeletonCard />
+          <SkeletonCard />
+          <SkeletonCard />
+        </div>
+      ) : winners.length === 0 ? (
+        <div className="p-6 rounded-lg bg-muted/30 border border-muted text-sm text-muted-foreground text-center">
+          Seçili dönemde kategori verisi bulunamadı.
+        </div>
+      ) : (
+        <div className="grid gap-4 md:grid-cols-2">
+          {winners.map((item) => (
+            <CategoryWinnerCard
+              key={item.category}
+              category={item.category}
+              winner={item.winner}
+              runner_up={item.runner_up}
+              total_competitors={item.total_competitors}
+            />
+          ))}
+        </div>
+      )}
     </div>
   )
 }
