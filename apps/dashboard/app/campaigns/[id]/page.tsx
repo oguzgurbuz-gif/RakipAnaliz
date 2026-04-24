@@ -30,7 +30,7 @@ import { getCampaignQualitySignals, getCampaignTypeLabel } from '@/lib/campaign-
 import { IntentBadge } from '@/components/ui/intent-badge'
 import type { Campaign, CampaignVersion } from '@/types'
 import { formatDate, formatDateTime, formatDateRange } from '@/lib/utils'
-import { ArrowLeft, Calendar, AlertTriangle, CheckCircle, MessageSquare, Plus, Pencil, X, Save, Flag, Shapes, TimerReset, Users, GitCompare } from 'lucide-react'
+import { ArrowLeft, Calendar, AlertTriangle, CheckCircle, MessageSquare, Plus, Pencil, X, Save, Flag, Shapes, TimerReset, Users, GitCompare, Info } from 'lucide-react'
 import { useState, useEffect } from 'react'
 
 // Wave 1 #1.1 — MOCK_RIVAL_CAMPAIGNS kaldırıldı (Betboo, Tipobet, Youwin,
@@ -348,6 +348,23 @@ export default function CampaignDetailPage({ params }: { params: { id: string } 
               </Tabs.List>
 
               <Tabs.Content value="overview" className="space-y-6">
+                {((campaign.similarCampaigns?.length ?? 0) > 0 || (campaign.versions?.length ?? 0) > 0) && (
+                  <div className="flex items-center gap-2 text-xs text-muted-foreground px-3 py-2 rounded-md bg-muted/30 border border-muted">
+                    <Info className="h-4 w-4 shrink-0" />
+                    <span>
+                      Bu kampanya için
+                      {(campaign.similarCampaigns?.length ?? 0) > 0 && (
+                        <> <strong>{campaign.similarCampaigns!.length} benzer kampanya</strong></>
+                      )}
+                      {(campaign.similarCampaigns?.length ?? 0) > 0 && (campaign.versions?.length ?? 0) > 0 && ' ve'}
+                      {(campaign.versions?.length ?? 0) > 0 && (
+                        <> <strong>{campaign.versions!.length} versiyon değişikliği</strong></>
+                      )}
+                      {' '}bulundu — yukarıdaki sekmelerden inceleyebilirsin.
+                    </span>
+                  </div>
+                )}
+
                 {/* AI Overview Card */}
                 {(aiSummary || aiKeyPoints.length > 0 || aiRiskFlags.length > 0) && (
                   <Card>
