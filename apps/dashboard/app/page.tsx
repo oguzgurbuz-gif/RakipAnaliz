@@ -318,6 +318,41 @@ export default function DashboardPage() {
     ? ' (Sektör ortalaması - geliştirilebilir)'
     : ' (Sektör ortalamasının altında - iyileştirme gerekli)'
 
+  // Sample size guard: AI Karşılaştırma Paneli'ndeki ranking + bonus
+  // metrikleri 10'dan az kampanyada çok gürültülü olur (tek kampanya bir
+  // siteyi yapay olarak lider yapabilir). Toplam aktif rakip kampanya
+  // sayısına bakıyoruz — bitalih hariç, çünkü burada ölçtüğümüz şey
+  // "rakipleri karşılaştırmak için yeterli veri var mı".
+  const totalCompetitorCampaigns = otherSites.reduce(
+    (sum, s) => sum + Number(s.total_campaigns || 0),
+    0
+  )
+  const sampleSizeWarning: { variant: 'warning' | 'error'; title: string; message: string } | null =
+    competitionLoading || !competitionData
+      ? null
+      : totalCompetitorCampaigns === 0
+      ? {
+          variant: 'error',
+          title: 'Bu dönemde rakip kampanya verisi yok',
+          message:
+            'Seçili tarih aralığında hiç rakip kampanya bulunamadı. Aralığı genişlet ya da scraper son çalışmasını kontrol et.',
+        }
+      : totalCompetitorCampaigns < 10
+      ? {
+          variant: 'error',
+          title: `Sadece ${totalCompetitorCampaigns} kampanya tespit edildi`,
+          message:
+            'Veri yetersiz — sıralamalar ve bonus karşılaştırmaları yanıltıcı olabilir. Tarih aralığını genişletmeyi düşün.',
+        }
+      : totalCompetitorCampaigns < 50
+      ? {
+          variant: 'warning',
+          title: `${totalCompetitorCampaigns} kampanya — örneklem küçük`,
+          message:
+            'Trendleri dikkatli yorumla. Tek bir büyük kampanya site sıralamasını kaydırabilir.',
+        }
+      : null
+
   // Calculate max values for comparison bars
   const maxCampaigns = Math.max(
     Number(bitalihData?.total_campaigns || 0),
@@ -433,6 +468,16 @@ export default function DashboardPage() {
           {activeRate > 85 ? ' %85 üzeri sektör ortalamasının üzerinde kabul edilir.' : activeRate > 70 ? ' %70-85 arası sektör ortalamasıdır.' : ' %70 altı sektör ortalamasının altındadır.'}
           Mevcut oranınız: <span className={activeRate > 85 ? 'text-emerald-600 font-semibold' : activeRate > 70 ? 'text-amber-600 font-semibold' : 'text-red-600 font-semibold'}>{activeRate.toFixed(1)}%</span>
         </div>
+
+        {sampleSizeWarning && (
+          <AlertBanner
+            id={`sample-size-${sampleSizeWarning.variant}-${totalCompetitorCampaigns}`}
+            variant={sampleSizeWarning.variant}
+            title={sampleSizeWarning.title}
+            message={sampleSizeWarning.message}
+            dismissable={false}
+          />
+        )}
 
         {/* AI COMPARISON HERO */}
         <Card className="overflow-hidden border-primary/30 bg-gradient-to-br from-primary/5 via-card to-card">
