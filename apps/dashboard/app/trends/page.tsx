@@ -389,9 +389,7 @@ export default function TrendsPage() {
               <div className="mb-3 text-xs px-3 py-2 rounded-md bg-amber-50 border border-amber-200 text-amber-800 flex items-center gap-2">
                 <span>⚠️</span>
                 <span>
-                  Geçen Ay / Geçen Yıl serileri tahmini veridir (mevcut pencereden
-                  proxy). Backend dedicated trend endpoint'i devreye alındığında
-                  gerçek geçmiş ile değiştirilecek.
+                  {`Geçen Ay / Geçen Yıl serileri tahmini veridir (mevcut pencereden proxy). Backend dedicated trend endpoint'i devreye alındığında gerçek geçmiş ile değiştirilecek.`}
                 </span>
               </div>
             )}

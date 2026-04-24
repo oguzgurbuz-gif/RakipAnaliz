@@ -919,8 +919,7 @@ function DayCampaignsModal({ day, onClose }: DayCampaignsModalProps) {
             <div>
               <h2 className="text-lg font-semibold leading-tight">{day.label}</h2>
               <p className="mt-1 text-xs text-muted-foreground">
-                Bu gün aktif {day.campaigns.length} kampanya — kartlardan "Detay"a
-                tıklayarak tek kampanyayı aç, ESC ile modal'ı kapat.
+                {`Bu gün aktif ${day.campaigns.length} kampanya — kartlardan "Detay"a tıklayarak tek kampanyayı aç, ESC ile modal'ı kapat.`}
               </p>
             </div>
             <button
