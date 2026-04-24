@@ -1,5 +1,17 @@
 import type { DbExecutor } from './compat-query';
 import { logger } from '../utils/logger';
+import { normalizeConfidence01, toDecimal4 } from '../ai/confidence';
+
+/**
+ * Coerce any inbound confidence-shaped value into a DB-safe DECIMAL(5,4)
+ * (0..0.9999 or null). Inputs may arrive on a 0..1 scale, a 0..100 percent
+ * scale, or out of range entirely; persisting raw values triggers MySQL
+ * "Out of range" errors and drops the whole INSERT.
+ */
+function toDbConfidence(value: unknown): number | null {
+  const normalized = normalizeConfidence01(value);
+  return normalized == null ? null : toDecimal4(normalized);
+}
 
 // BE-10: Query timeout configuration (default 30 seconds)
 const DEFAULT_QUERY_TIMEOUT_MS = 30000;
@@ -393,18 +405,18 @@ export async function insertAiAnalysis(
       data.promptVersion ?? 'v1',
       data.status ?? 'completed',
       data.sentimentLabel ?? null,
-      data.sentimentScore ?? null,
+      toDbConfidence(data.sentimentScore),
       data.competitiveIntent ?? 'unknown',
-      data.competitiveIntentConfidence ?? null,
+      toDbConfidence(data.competitiveIntentConfidence),
       data.categoryCode ?? null,
-      data.categoryConfidence ?? null,
+      toDbConfidence(data.categoryConfidence),
       data.summaryText ?? null,
       data.keyPoints ? JSON.stringify(data.keyPoints) : JSON.stringify([]),
       data.riskFlags ? JSON.stringify(data.riskFlags) : JSON.stringify([]),
       data.recommendationText ?? null,
       data.extractedValidFrom ?? null,
       data.extractedValidTo ?? null,
-      data.extractedDateConfidence ?? null,
+      toDbConfidence(data.extractedDateConfidence),
       data.minDeposit ?? null,
       data.maxBonus ?? null,
       data.bonusAmount ?? null,
@@ -418,7 +430,7 @@ export async function insertAiAnalysis(
       data.tokensInput ?? null,
       data.tokensOutput ?? null,
       data.durationMs ?? null,
-      data.confidence ?? null,
+      toDbConfidence(data.confidence),
     ]
   );
 
