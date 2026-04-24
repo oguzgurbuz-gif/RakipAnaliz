@@ -16,22 +16,6 @@ import { StatusBadge } from '@/components/campaign/status-badge'
 import { Search, Star, X, Download, AlertTriangle, Calendar, Tag, ThumbsUp, ThumbsDown, Minus, TrendingUp, Info, CheckCircle } from 'lucide-react'
 import { jsPDF } from 'jspdf'
 
-// FE-2/FE-17: Site code to friendly name mapping
-const SITE_FRIENDLY_NAMES: Record<string, string> = {
-  bitalih: 'Bitalih',
-  nesine: 'Nesine',
-  sondzulyuk: 'Sondüzlük',
-  bilyoner: 'Bilyoner',
-  misli: 'Misli',
-  oley: 'Oley',
-  hipodrom: 'Hipodrom',
-  atyarisi: 'Atyarisi',
-  birebin: 'Birebin',
-  altiliganyan: 'Altiliganyan',
-  ekuri: 'Ekuri',
-  '4nala': '4nala',
-}
-
 // Color palette for site cards (up to 5 sites)
 const SITE_COLORS = [
   { bg: 'bg-blue-100', border: 'border-blue-400', text: 'text-blue-800', header: 'bg-blue-200' },
@@ -76,7 +60,7 @@ function CompareClient() {
     ? [
         {
           label: 'Site',
-          values: selectedCampaigns.map((c) => SITE_FRIENDLY_NAMES[c.site?.name?.toLowerCase() || ''] || c.site?.name || '-'),
+          values: selectedCampaigns.map((c) => c.site?.name || '-'),
         },
         {
           label: 'Tür',
@@ -108,23 +92,23 @@ function CompareClient() {
     const analysis: { field: string; values: { site: string; value: string }[]; differences: boolean }[] = []
     
     // Compare campaign titles
-    const titles = selectedCampaigns.map((c, i) => ({ site: SITE_FRIENDLY_NAMES[c.site?.name?.toLowerCase() || ''] || c.site?.name || '-', value: c.title }))
+    const titles = selectedCampaigns.map((c, i) => ({ site: c.site?.name || '-', value: c.title }))
     analysis.push({ field: 'Kampanya Adı', values: titles, differences: new Set(titles.map(t => t.value)).size > 1 })
 
     // Compare types
-    const types = selectedCampaigns.map((c) => ({ site: SITE_FRIENDLY_NAMES[c.site?.name?.toLowerCase() || ''] || c.site?.name || '-', value: getCampaignTypeLabel(c) }))
+    const types = selectedCampaigns.map((c) => ({ site: c.site?.name || '-', value: getCampaignTypeLabel(c) }))
     analysis.push({ field: 'Tür', values: types, differences: new Set(types.map(t => t.value)).size > 1 })
 
     // Compare sentiments
-    const sentiments = selectedCampaigns.map((c) => ({ site: SITE_FRIENDLY_NAMES[c.site?.name?.toLowerCase() || ''] || c.site?.name || '-', value: getDisplaySentimentLabel(c.sentiment || c.aiSentiment) }))
+    const sentiments = selectedCampaigns.map((c) => ({ site: c.site?.name || '-', value: getDisplaySentimentLabel(c.sentiment || c.aiSentiment) }))
     analysis.push({ field: 'Duygu', values: sentiments, differences: new Set(sentiments.map(s => s.value)).size > 1 })
 
     // Compare start dates
-    const starts = selectedCampaigns.map((c) => ({ site: SITE_FRIENDLY_NAMES[c.site?.name?.toLowerCase() || ''] || c.site?.name || '-', value: resolveCampaignDateDisplay(c.validFrom, c.validFromSource, c.body, 'start').value || '-' }))
+    const starts = selectedCampaigns.map((c) => ({ site: c.site?.name || '-', value: resolveCampaignDateDisplay(c.validFrom, c.validFromSource, c.body, 'start').value || '-' }))
     analysis.push({ field: 'Başlangıç', values: starts, differences: new Set(starts.map(s => s.value)).size > 1 })
 
     // Compare end dates
-    const ends = selectedCampaigns.map((c) => ({ site: SITE_FRIENDLY_NAMES[c.site?.name?.toLowerCase() || ''] || c.site?.name || '-', value: resolveCampaignDateDisplay(c.validTo, c.validToSource, c.body, 'end').value || '-' }))
+    const ends = selectedCampaigns.map((c) => ({ site: c.site?.name || '-', value: resolveCampaignDateDisplay(c.validTo, c.validToSource, c.body, 'end').value || '-' }))
     analysis.push({ field: 'Bitiş', values: ends, differences: new Set(ends.map(e => e.value)).size > 1 })
 
     return analysis
@@ -162,7 +146,7 @@ function CompareClient() {
     // Selected sites
     doc.setFontSize(14)
     doc.setTextColor(40, 40, 40)
-    doc.text(`Seçili Siteler: ${selectedCampaigns.map(c => SITE_FRIENDLY_NAMES[c.site?.name?.toLowerCase() || ''] || c.site?.name).join(', ')}`, 20, yPos)
+    doc.text(`Seçili Siteler: ${selectedCampaigns.map(c => c.site?.name).join(', ')}`, 20, yPos)
     
     yPos += 15
 
@@ -175,7 +159,7 @@ function CompareClient() {
     
     selectedCampaigns.forEach((c, i) => {
       const xPos = 60 + (i * 30)
-      doc.text(`${SITE_FRIENDLY_NAMES[c.site?.name?.toLowerCase() || ''] || c.site?.name}`.substring(0, 15), xPos, yPos + 7)
+      doc.text(`${c.site?.name}`.substring(0, 15), xPos, yPos + 7)
     })
 
     yPos += 10
@@ -231,7 +215,7 @@ function CompareClient() {
       doc.setFillColor(60, 60, 60)
       doc.rect(20, yPos, pageWidth - 40, 8, 'F')
       doc.setTextColor(255, 255, 255)
-      doc.text(`${SITE_FRIENDLY_NAMES[c.site?.name?.toLowerCase() || ''] || c.site?.name} - ${c.title}`.substring(0, 70), 25, yPos + 6)
+      doc.text(`${c.site?.name} - ${c.title}`.substring(0, 70), 25, yPos + 6)
       
       yPos += 8
 
@@ -415,7 +399,7 @@ function CompareClient() {
                     <div className={cn('px-4 py-3 text-center font-semibold', siteColor.header, siteColor.text)}>
                       <div className="flex items-center justify-center gap-2">
                         <CheckCircle className="h-5 w-5" />
-                        <span>{SITE_FRIENDLY_NAMES[campaign.site?.name?.toLowerCase() || ''] || campaign.site?.name}</span>
+                        <span>{campaign.site?.name}</span>
                       </div>
                     </div>
 
@@ -527,7 +511,7 @@ function CompareClient() {
                         <th className="border p-3 text-left font-medium">Özellik</th>
                         {selectedCampaigns.map((c, i) => (
                           <th key={c.id} className={cn('border p-3 text-left font-medium', SITE_COLORS[i % SITE_COLORS.length].bg)}>
-                            {SITE_FRIENDLY_NAMES[c.site?.name?.toLowerCase() || ''] || c.site?.name}
+                            {c.site?.name}
                           </th>
                         ))}
                       </tr>
