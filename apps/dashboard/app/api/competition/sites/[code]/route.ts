@@ -22,7 +22,12 @@ const categoryExpr = `COALESCE(
 // inline (rather than imported) so this endpoint stays self-contained and
 // changes to the main route's CTE do not silently affect site profiles.
 //
-// `from`/`to` filtreleri varsa CTE içine `c.first_seen_at` koşulu eklenir;
+// `from`/`to` filtreleri varsa CTE'ye "active_during_range" kesişim koşulu
+// uygulanır — seçili [from, to] aralığında AKTİF olan kampanyalar (ilk
+// görülenler değil). Bir kampanya aralığa şu şartla girer:
+//   (valid_from IS NULL OR valid_from <= to+1day)
+//   AND (valid_to   IS NULL OR valid_to   >= from)
+//   AND c.first_seen_at <= to+1day   -- defans: gelecekte oluşan kampanyayı sayma
 // `to` günü dahil olsun diye `< to + 1 day` kullanırız.
 function bonusMetricsCte(
   options: { from?: string; to?: string; startIndex?: number } = {}
@@ -32,12 +37,21 @@ function bonusMetricsCte(
   const dateParams: string[] = [];
   const conditions: string[] = [];
 
+  // active_during_range: kampanya aralığı [valid_from, valid_to] ile seçili
+  // [from, to] kesişiyorsa kampanya "aktif" sayılır. Null uçlar açık-uçlu aralık.
+  if (to) {
+    const idx = startIndex + dateParams.length;
+    conditions.push(`(c.valid_from IS NULL OR c.valid_from < DATE_ADD($${idx}, INTERVAL 1 DAY))`);
+    dateParams.push(to);
+  }
   if (from) {
-    conditions.push(`c.first_seen_at >= $${startIndex + dateParams.length}`);
+    const idx = startIndex + dateParams.length;
+    conditions.push(`(c.valid_to IS NULL OR c.valid_to >= $${idx})`);
     dateParams.push(from);
   }
   if (to) {
-    conditions.push(`c.first_seen_at < DATE_ADD($${startIndex + dateParams.length}, INTERVAL 1 DAY)`);
+    const idx = startIndex + dateParams.length;
+    conditions.push(`c.first_seen_at < DATE_ADD($${idx}, INTERVAL 1 DAY)`);
     dateParams.push(to);
   }
 

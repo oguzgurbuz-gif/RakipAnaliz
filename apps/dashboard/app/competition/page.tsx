@@ -118,6 +118,7 @@ export default function CompetitionPage() {
                 Karşılaştırma dönemi:{' '}
                 <span className="font-medium text-foreground">{presetLabel}</span>
                 <span className="ml-1">({rangeLabel})</span>
+                <span className="ml-1 italic">— bu dönemde aktif olan kampanyalar</span>
               </span>
             </div>
           )}
