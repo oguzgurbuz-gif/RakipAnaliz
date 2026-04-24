@@ -123,14 +123,24 @@ const categoryExpr = `COALESCE(
 )`;
 
 /**
- * `from`/`to` filtreleri varsa CTE'ye "active_during_range" kesişim koşulu
- * uygulanır — seçili [from, to] aralığında AKTİF olan kampanyalar
- * (ilk görülenler değil). Bir kampanya aralığa şu şartla girer:
- *   (valid_from IS NULL OR valid_from <= to+1day)
- *   AND (valid_to   IS NULL OR valid_to   >= from)
- *   AND c.first_seen_at <= to+1day   -- defans: gelecekte oluşan kampanyayı sayma
- * Tarih aralığı YYYY-MM-DD; `to` günü dahil olsun diye `< to + 1 day` kullanırız
- * (BETWEEN ile yapsaydık 'to 23:59' kayıtları kaçırırdık).
+ * `from`/`to` filtreleri varsa CTE'ye "active_during_range" koşulu uygulanır —
+ * seçili [from, to] aralığında AKTİF olan kampanyalar (ilk görülenler değil).
+ *
+ * Bir kampanya aralığa şu şartla girer:
+ *   c.first_seen_at <= to+1day    -- defans: gelecekte oluşan kampanyayı sayma
+ *   AND (
+ *     -- Nominal aralık kesişiyor (landing'de yazan tarihler güvenilirse):
+ *     ((c.valid_from IS NULL OR c.valid_from <= to+1day)
+ *      AND (c.valid_to IS NULL OR c.valid_to >= from))
+ *     OR
+ *     -- VEYA scrape'te aralık içinde hala görülüyor. `valid_to` çoğu site için
+ *     -- landing'deki eski orijinal tarihtir ve yenilenmez; bu yüzden scrape
+ *     -- tabanlı `last_seen_at` gerçek "canlılığın" daha güvenilir sinyalidir.
+ *     c.last_seen_at >= from
+ *   )
+ *
+ * `to` günü dahil olsun diye `< to + 1 day` kullanırız (BETWEEN ile 'to 23:59'
+ * kaydı kaçardı).
  *
  * `startIndex` — bu CTE içinde kullanılacak ilk pg parametre index'i (1 tabanlı).
  * Dönüş: `{ sql, nextIndex }` — caller bir sonraki index'i kendi placeholder'ları
@@ -144,25 +154,43 @@ function bonusMetricsCte(
   const dateParams: string[] = [];
   const conditions: string[] = [];
 
-  // active_during_range: kampanya aralığı [valid_from, valid_to] ile seçili
-  // [from, to] kesişiyorsa kampanya "aktif" sayılır. Null uçlar açık-uçlu aralık.
-  if (to) {
-    // valid_from <= to+1day (veya valid_from NULL — belirsiz başlangıç)
-    const idx = startIndex + dateParams.length;
-    conditions.push(`(c.valid_from IS NULL OR c.valid_from < DATE_ADD($${idx}, INTERVAL 1 DAY))`);
+  if (from && to) {
+    // Defans: kampanya, seçili aralıktan sonra oluşmamış olmalı.
+    const toIdx1 = startIndex + dateParams.length;
+    conditions.push(`c.first_seen_at < DATE_ADD($${toIdx1}, INTERVAL 1 DAY)`);
     dateParams.push(to);
-  }
-  if (from) {
-    // valid_to >= from (veya valid_to NULL — halen devam ediyor)
-    const idx = startIndex + dateParams.length;
-    conditions.push(`(c.valid_to IS NULL OR c.valid_to >= $${idx})`);
+
+    // Nominal kesişim VEYA last_seen_at fallback.
+    const toIdx2 = startIndex + dateParams.length;
+    dateParams.push(to);
+    const fromIdx1 = startIndex + dateParams.length;
     dateParams.push(from);
-  }
-  if (to) {
-    // Defans: kampanya oluşmuş olmalı (gelecekte first_seen olamaz).
-    const idx = startIndex + dateParams.length;
-    conditions.push(`c.first_seen_at < DATE_ADD($${idx}, INTERVAL 1 DAY)`);
+    const fromIdx2 = startIndex + dateParams.length;
+    dateParams.push(from);
+    conditions.push(
+      `(
+        ((c.valid_from IS NULL OR c.valid_from < DATE_ADD($${toIdx2}, INTERVAL 1 DAY))
+         AND (c.valid_to IS NULL OR c.valid_to >= $${fromIdx1}))
+        OR c.last_seen_at >= $${fromIdx2}
+      )`
+    );
+  } else if (to) {
+    // Sadece üst sınır: alt sınır yok, last_seen_at fallback'e gerek yok.
+    const toIdx1 = startIndex + dateParams.length;
+    conditions.push(`(c.valid_from IS NULL OR c.valid_from < DATE_ADD($${toIdx1}, INTERVAL 1 DAY))`);
     dateParams.push(to);
+    const toIdx2 = startIndex + dateParams.length;
+    conditions.push(`c.first_seen_at < DATE_ADD($${toIdx2}, INTERVAL 1 DAY)`);
+    dateParams.push(to);
+  } else if (from) {
+    // Sadece alt sınır: valid_to kesişimi VEYA last_seen_at fallback.
+    const fromIdx1 = startIndex + dateParams.length;
+    dateParams.push(from);
+    const fromIdx2 = startIndex + dateParams.length;
+    dateParams.push(from);
+    conditions.push(
+      `((c.valid_to IS NULL OR c.valid_to >= $${fromIdx1}) OR c.last_seen_at >= $${fromIdx2})`
+    );
   }
 
   const whereClause = conditions.length > 0 ? `WHERE ${conditions.join(' AND ')}` : '';
