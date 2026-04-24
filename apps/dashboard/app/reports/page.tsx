@@ -9,6 +9,7 @@ import { EmptyState } from '@/components/ui/empty-state'
 import { InsightCard } from '@/components/ui/insight-card'
 import { ReportSummaryComponent } from '@/components/reports/report-summary'
 import { WeeklyReportCard } from '@/components/reports/weekly-report-card'
+import { AutoAnalysisCard } from '@/components/reports/auto-analysis-card'
 import { DateRangePickerHeader } from '@/components/ui/date-range-picker-header'
 import { useDateRange } from '@/lib/date-range/context'
 import { toIsoDate } from '@/lib/date-range/presets'
@@ -181,6 +182,18 @@ export default function ReportsPage() {
 
         {activeTab === 'weekly' && (
           <>
+            {/* D6 — Otomatik AI rapor. Seçili aralıkta kayıtlı weekly_report
+                yoksa gösterilir (hideIfExistingReport). Veri hazır değilse
+                "scrape devam ediyor" mesajı, AI başarısızsa "Tekrar dene"
+                butonu kartın kendi içinde handle edilir. */}
+            {dateFrom && dateTo && (
+              <AutoAnalysisCard
+                from={dateFrom}
+                to={dateTo}
+                hideIfExistingReport={hasReports}
+              />
+            )}
+
             {/* Stats */}
             {!weeklyLoading && hasReports && (
               <div className="grid gap-4 md:grid-cols-4">
