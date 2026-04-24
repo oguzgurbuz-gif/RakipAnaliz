@@ -131,6 +131,7 @@ export default function CalendarPage() {
 
   const updateQueryParam = useCallback(
     (key: string, value: string | undefined) => {
+      if (!pathname) return
       const params = new URLSearchParams(searchParams?.toString() || '')
       if (value === undefined || value === '') params.delete(key)
       else params.set(key, value)

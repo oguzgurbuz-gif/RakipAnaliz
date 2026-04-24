@@ -72,6 +72,7 @@ export default function AdminJobsPage() {
     tabParam === 'scrape-runs' || tabParam === 'jobs' ? tabParam : 'actions'
   const setActiveTab = useCallback(
     (next: 'actions' | 'scrape-runs' | 'jobs') => {
+      if (!pathname) return
       const params = new URLSearchParams(searchParams?.toString() || '')
       if (next === 'actions') params.delete('tab')
       else params.set('tab', next)
