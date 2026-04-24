@@ -50,7 +50,12 @@ export async function closeDb(): Promise<void> {
 
 export async function getTransaction() {
   const conn = await getMysqlPool().getConnection();
-  await conn.beginTransaction();
+  try {
+    await conn.beginTransaction();
+  } catch (err) {
+    conn.release();
+    throw err;
+  }
   const client: DbExecutor = {
     query: (text, params) => mysqlQuery(conn, text, params),
   };
