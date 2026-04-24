@@ -4,12 +4,25 @@ import { getCorsHeaders } from '@/lib/response';
 
 export async function GET(request: Request) {
   try {
-    const sites = await query<{ id: string; name: string; code: string }>(`
-      SELECT id, name, code
+    const rows = await query<{
+      id: string;
+      name: string;
+      code: string;
+      is_priority: number;
+    }>(`
+      SELECT id, name, code, is_priority
       FROM sites
       WHERE is_active = true
-      ORDER BY priority DESC, name ASC
+      ORDER BY is_priority DESC, priority DESC, name ASC
     `);
+    // MySQL TINYINT(1) returns 0/1 — surface a real boolean so the
+    // frontend can use it with a plain truthy check.
+    const sites = rows.map((r) => ({
+      id: r.id,
+      name: r.name,
+      code: r.code,
+      is_priority: r.is_priority === 1,
+    }));
 
     return NextResponse.json(
       { success: true, data: sites },
