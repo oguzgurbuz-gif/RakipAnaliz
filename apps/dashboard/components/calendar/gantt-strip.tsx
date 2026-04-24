@@ -36,7 +36,7 @@ type GanttStripProps = {
   viewType: '3-month' | '6-month' | '12-month'
 }
 
-const MONTHS_TR = ['Oca', 'Şub', 'Mar', 'Nis', 'May', 'Haz', 'Tem', 'Ağu', 'Eyl', 'Eki', 'Kas', 'Ara']
+const MONTH_LABEL_FORMATTER = new Intl.DateTimeFormat('tr-TR', { month: 'short' })
 
 export function GanttStrip({ campaigns, year, viewType }: GanttStripProps) {
   const monthCount = viewType === '3-month' ? 3 : viewType === '6-month' ? 6 : 12
@@ -46,7 +46,11 @@ export function GanttStrip({ campaigns, year, viewType }: GanttStripProps) {
     return Array.from({ length: monthCount }).map((_, i) => {
       const monthIndex = (startMonth + i) % 12
       const displayYear = startMonth + i >= 12 ? year + 1 : year
-      return { month: monthIndex, year: displayYear, label: MONTHS_TR[monthIndex] }
+      return {
+        month: monthIndex,
+        year: displayYear,
+        label: MONTH_LABEL_FORMATTER.format(new Date(displayYear, monthIndex, 1)),
+      }
     })
   }, [monthCount, startMonth, year])
 

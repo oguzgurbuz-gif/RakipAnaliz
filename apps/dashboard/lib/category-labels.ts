@@ -26,9 +26,23 @@ const GENERIC_CATEGORY_CODES = new Set([
   'genel-promosyon',
 ])
 
+/**
+ * Bilinmeyen bir kategori kodunu insan-okur bir başlığa çevirir
+ * (`free_spins` → `Free Spins`, `slot-bonus` → `Slot Bonus`). Backend
+ * yeni bir kategori eklediğinde mapping güncellenmeden önce bile UI
+ * boş "Bilinmiyor" yerine anlamlı bir şey gösterir.
+ */
+function humanizeCategoryCode(code: string): string {
+  return code
+    .split(/[-_\s]+/)
+    .filter(Boolean)
+    .map((word) => word.charAt(0).toLocaleUpperCase('tr') + word.slice(1).toLocaleLowerCase('tr'))
+    .join(' ')
+}
+
 export function getCategoryLabel(category: string | null | undefined): string {
   if (!category) return 'Bilinmiyor'
-  return CATEGORY_LABELS[category] ?? category
+  return CATEGORY_LABELS[category] ?? humanizeCategoryCode(category)
 }
 
 export function isGenericCategory(category: string | null | undefined): boolean {
