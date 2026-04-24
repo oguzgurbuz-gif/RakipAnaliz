@@ -1,7 +1,8 @@
 'use client'
 
 import { useQuery } from '@tanstack/react-query'
-import { useEffect, useMemo, useState } from 'react'
+import { useCallback, useEffect, useMemo, useState } from 'react'
+import { usePathname, useRouter, useSearchParams } from 'next/navigation'
 import * as Tabs from '@radix-ui/react-tabs'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { Button } from '@/components/ui/button'
@@ -116,13 +117,39 @@ export default function CalendarPage() {
   // kullanır. Cookie + URL ile persist edilir, scope-spesifik default 'thisMonth'.
   const { from: dateFrom, to: dateTo, setRange } = useDateRange('calendar')
 
-  const [view, setView] = useState<'month' | 'gantt'>('month')
+  // View ve Gantt strip yoğunluğu URL'de persist — paylaşılan link'ler aynı
+  // görünümü açsın, geri tuşu state sıçratmasın. Default'lar: view=month,
+  // strip=6-month. URL'de geçersiz değer varsa default'a fallback.
+  const searchParams = useSearchParams()
+  const router = useRouter()
+  const pathname = usePathname()
+
+  const view: 'month' | 'gantt' = searchParams?.get('view') === 'gantt' ? 'gantt' : 'month'
+  const stripParam = searchParams?.get('strip')
+  const viewType: '3-month' | '6-month' | '12-month' =
+    stripParam === '3-month' || stripParam === '12-month' ? stripParam : '6-month'
+
+  const updateQueryParam = useCallback(
+    (key: string, value: string | undefined) => {
+      const params = new URLSearchParams(searchParams?.toString() || '')
+      if (value === undefined || value === '') params.delete(key)
+      else params.set(key, value)
+      const qs = params.toString()
+      router.replace(qs ? `${pathname}?${qs}` : pathname)
+    },
+    [searchParams, router, pathname]
+  )
+
+  const setView = (next: 'month' | 'gantt') =>
+    updateQueryParam('view', next === 'gantt' ? 'gantt' : undefined)
+  const setViewType = (next: '3-month' | '6-month' | '12-month') =>
+    updateQueryParam('strip', next === '6-month' ? undefined : next)
+
   const [selectedSite, setSelectedSite] = useState<string>('')
   const [selectedCategory, setSelectedCategory] = useState<string>('')
   const [selectedStatus, setSelectedStatus] = useState<string>('')
   const [searchInput, setSearchInput] = useState('')
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set())
-  const [viewType, setViewType] = useState<'3-month' | '6-month' | '12-month'>('6-month')
 
   const search = useDebounced(searchInput, 350)
 
@@ -887,11 +914,22 @@ function DayCampaignsModal({ day, onClose }: DayCampaignsModalProps) {
     >
       {day && (
         <div className="space-y-4">
-          <header className="border-b pb-3">
-            <h2 className="text-lg font-semibold leading-tight">{day.label}</h2>
-            <p className="mt-1 text-xs text-muted-foreground">
-              Bu gün aktif {day.campaigns.length} kampanya
-            </p>
+          <header className="border-b pb-3 flex items-start justify-between gap-3">
+            <div>
+              <h2 className="text-lg font-semibold leading-tight">{day.label}</h2>
+              <p className="mt-1 text-xs text-muted-foreground">
+                Bu gün aktif {day.campaigns.length} kampanya — kartlardan "Detay"a
+                tıklayarak tek kampanyayı aç, ESC ile modal'ı kapat.
+              </p>
+            </div>
+            <button
+              type="button"
+              onClick={onClose}
+              aria-label="Kapat"
+              className="shrink-0 rounded-md p-1 text-muted-foreground hover:bg-muted hover:text-foreground transition-colors"
+            >
+              <svg className="h-5 w-5" fill="none" stroke="currentColor" strokeWidth="2" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" /></svg>
+            </button>
           </header>
 
           {day.campaigns.length === 0 ? (
