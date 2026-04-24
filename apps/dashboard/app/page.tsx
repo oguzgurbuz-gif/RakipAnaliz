@@ -24,43 +24,6 @@ import { WinLossTracker } from '@/components/insights/win-loss-tracker'
 
 const HOME_SCOPE = 'home'
 
-// FE-9: Progress Bar Component with percentage explanations
-function ProgressBar({ value, max, label, color, explanation }: { value: number; max?: number; label: string; color?: 'green' | 'yellow' | 'red' | 'blue' | 'purple' | 'violet' | 'orange' | 'emerald'; explanation?: string }) {
-  const maxVal = max || 1
-  const percentage = Math.min(100, Math.round((value / maxVal) * 100))
-  const autoColor = percentage > 90 ? 'red' : percentage > 70 ? 'yellow' : 'green'
-  const barColor = color || autoColor
-  
-  const colorMap = {
-    green: 'bg-emerald-500',
-    emerald: 'bg-emerald-500',
-    yellow: 'bg-amber-500', 
-    red: 'bg-red-500',
-    blue: 'bg-blue-500',
-    purple: 'bg-violet-500',
-    violet: 'bg-violet-500',
-    orange: 'bg-orange-500',
-  }
-
-  // FE-9: Build tooltip text with explanation
-  const tooltipText = explanation || `${label}: ${percentage}%`
-
-  return (
-    <div className="space-y-1.5" title={tooltipText}>
-      <div className="flex justify-between text-xs">
-        <span className="text-muted-foreground">{label}</span>
-        <span className="font-semibold">{percentage}%</span>
-      </div>
-      <div className="h-2.5 bg-muted rounded-full overflow-hidden">
-        <div 
-          className={cn('h-full rounded-full transition-all duration-700 ease-out', colorMap[barColor])}
-          style={{ width: `${percentage}%` }}
-        />
-      </div>
-    </div>
-  )
-}
-
 // Large Stat Card with gradient
 function HeroStatCard({ 
   title,
@@ -319,14 +282,6 @@ export default function DashboardPage() {
   const bitalihCampaignsBetter = (bitalihData?.total_campaigns ?? 0) >= avgCompetitorCampaigns
   const bitalihBonusBetter = (bitalihData?.avg_bonus ?? 0) >= (bestCompetitor?.avg_bonus ?? 0)
 
-  // FE-11: Add benchmark note to hero stats - explain what "94%" means
-  const activeRate = Number(bitalihData?.active_rate || 0) * 100
-  const benchmarkNote = activeRate > 85
-    ? ' (Sektör ortalamasının üzerinde - iyi performans)'
-    : activeRate > 70
-    ? ' (Sektör ortalaması - geliştirilebilir)'
-    : ' (Sektör ortalamasının altında - iyileştirme gerekli)'
-
   // Sample size guard: AI Karşılaştırma Paneli'ndeki ranking + bonus
   // metrikleri 10'dan az kampanyada çok gürültülü olur (tek kampanya bir
   // siteyi yapay olarak lider yapabilir). Toplam aktif rakip kampanya
@@ -475,13 +430,6 @@ export default function DashboardPage() {
           lastUpdatedAt={data?.lastUpdatedAt ?? null}
         />
 
-        {/* FE-11: Dashboard hero stats benchmark/karşılaştırma notu */}
-        <div className="text-xs text-muted-foreground bg-muted/30 rounded-lg px-3 py-2">
-          <span className="font-medium">Aktiflik Oranı:</span> Bu dönemde aktif olan kampanyaların toplam kampanyalara oranını gösterir.
-          {activeRate > 85 ? ' %85 üzeri sektör ortalamasının üzerinde kabul edilir.' : activeRate > 70 ? ' %70-85 arası sektör ortalamasıdır.' : ' %70 altı sektör ortalamasının altındadır.'}
-          Mevcut oranınız: <span className={activeRate > 85 ? 'text-emerald-600 font-semibold' : activeRate > 70 ? 'text-amber-600 font-semibold' : 'text-red-600 font-semibold'}>{activeRate.toFixed(1)}%</span>
-        </div>
-
         {sampleSizeWarning && (
           <AlertBanner
             id={`sample-size-${sampleSizeWarning.variant}-${totalCompetitorCampaigns}`}
@@ -616,53 +564,6 @@ export default function DashboardPage() {
                       ))}
                     </div>
                   </div>
-                </div>
-
-                {/* Performance Progress Bars for Categories */}
-                <div className="mt-6 grid gap-4 md:grid-cols-2">
-                  <Card className="border-emerald-200 bg-emerald-50/30">
-                    <CardHeader className="pb-2">
-                      <CardTitle className="text-sm font-medium">Kampanya Performansı</CardTitle>
-                    </CardHeader>
-                    <CardContent className="space-y-3">
-                      <ProgressBar 
-                        value={Number(bitalihData?.total_campaigns || 0)} 
-                        max={maxCampaigns}
-                        label="Bitalih vs En Yüksek Rakip"
-                        explanation={`Bitalih'in kampanya sayısı (${bitalihData?.total_campaigns || 0}) en yüksek rakip kampanya sayısına (${maxCampaigns}) oranla: %${Math.round((Number(bitalihData?.total_campaigns || 0) / maxCampaigns) * 100) || 0}`}
-                        color="emerald"
-                      />
-                      <ProgressBar 
-                        value={avgCompetitorCampaigns} 
-                        max={maxCampaigns}
-                        label="Rakip Ortalaması"
-                        explanation={`Rakip sitelerin ortalama kampanya sayısı (${Math.round(avgCompetitorCampaigns)}) en yüksek rakibe göre: %${Math.round((avgCompetitorCampaigns / maxCampaigns) * 100) || 0}`}
-                        color="blue"
-                      />
-                    </CardContent>
-                  </Card>
-                  
-                  <Card className="border-violet-200 bg-violet-50/30">
-                    <CardHeader className="pb-2">
-                      <CardTitle className="text-sm font-medium">Bonus Performansı</CardTitle>
-                    </CardHeader>
-                    <CardContent className="space-y-3">
-                      <ProgressBar 
-                        value={Number(bitalihData?.avg_bonus || 0)} 
-                        max={maxBonus}
-                        label="Bitalih Bonus"
-                        explanation={`Bitalih'in ortalama bonus miktarı (₺${Math.round(Number(bitalihData?.avg_bonus || 0))}) en yüksek rakip bonusa (₺${Math.round(Number(bestCompetitor?.avg_bonus || 0))}) oranla: %${Math.round((Number(bitalihData?.avg_bonus || 0) / Number(bestCompetitor?.avg_bonus || 1)) * 100) || 0}`}
-                        color="violet"
-                      />
-                      <ProgressBar 
-                        value={Number(bestCompetitor?.avg_bonus || 0)} 
-                        max={maxBonus}
-                        label="En Yüksek Bonus"
-                        explanation={`En yüksek ortalama bonus ₺${Math.round(Number(bestCompetitor?.avg_bonus || 0))} (${bestCompetitor?.site_name ?? '-'})`}
-                        color="orange"
-                      />
-                    </CardContent>
-                  </Card>
                 </div>
 
                 {/* Quick Summary Banner */}
