@@ -48,23 +48,36 @@ export function getSiteColor(code: string | null | undefined): string {
 }
 
 /**
- * Öncelikli siteler — Gantt accordion'ları, OverlapHeatmap satırları ve
- * Site Renk Lejantı bu sırada başlatılır. Kalan siteler alphabetical (tr)
- * olarak eklenir.
+ * Fallback öncelikli site listesi — backend'den `sites.is_priority`
+ * yüklenemediğinde devreye girer (örn. SSR / fallback path). Yeni
+ * callerlar `makeCompareSitesByPriority(prioritySet)` ile backend'den
+ * gelen kümeyi geçirmeli. Bu sabit liste sadece güvenlik ağı.
  */
-export const PRIORITY_SITES = ['bitalih', 'hipodrom', 'atyarisi'] as const
+export const FALLBACK_PRIORITY_SITES = ['bitalih', 'hipodrom', 'atyarisi'] as const
 
 /**
- * `compareSitesByPriority(a, b)` — `Array.sort` ile uyumlu comparator.
- * Önce öncelikli site listesi sırasında, sonra alphabetical (tr).
+ * Verilen priority set'e göre `Array.sort` ile uyumlu bir comparator
+ * üretir. Öncelikli siteler önce gelir, kalanlar alphabetical (tr).
+ * Set verilmezse `FALLBACK_PRIORITY_SITES` kullanılır.
+ */
+export function makeCompareSitesByPriority(
+  prioritySet: ReadonlySet<string> = new Set(FALLBACK_PRIORITY_SITES)
+): (a: string, b: string) => number {
+  return (a, b) => {
+    const ai = prioritySet.has(a.toLowerCase())
+    const bi = prioritySet.has(b.toLowerCase())
+    if (ai && !bi) return -1
+    if (!ai && bi) return 1
+    return a.localeCompare(b, 'tr')
+  }
+}
+
+/**
+ * Tarihsel API — yeni kullanımlar `makeCompareSitesByPriority` üzerinden
+ * gitmeli ki backend `is_priority`'si dynamically ele alınsın.
  */
 export function compareSitesByPriority(a: string, b: string): number {
-  const ai = PRIORITY_SITES.indexOf(a.toLowerCase() as (typeof PRIORITY_SITES)[number])
-  const bi = PRIORITY_SITES.indexOf(b.toLowerCase() as (typeof PRIORITY_SITES)[number])
-  if (ai === -1 && bi === -1) return a.localeCompare(b, 'tr')
-  if (ai === -1) return 1
-  if (bi === -1) return -1
-  return ai - bi
+  return makeCompareSitesByPriority()(a, b)
 }
 
 /** All known sites, priority-first then alphabetical (tr), for legend rendering. */

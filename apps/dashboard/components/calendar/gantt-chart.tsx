@@ -5,7 +5,7 @@ import Link from 'next/link'
 import { ChevronDown, ChevronRight } from 'lucide-react'
 import { cn } from '@/lib/utils'
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip'
-import { getSiteColor, compareSitesByPriority } from '@/lib/site-colors'
+import { getSiteColor, makeCompareSitesByPriority } from '@/lib/site-colors'
 import { getCategoryLabel } from '@/lib/category-labels'
 import { getCampaignBonusInfo } from '@/lib/campaign-presentation'
 
@@ -26,6 +26,11 @@ export type GanttChartProps = {
   rangeStart: string
   /** Inclusive ISO end date for the visible window (YYYY-MM-DD). */
   rangeEnd: string
+  /**
+   * Backend'den (`/api/sites`) gelen `is_priority` site code'ları.
+   * Verilmezse fallback hardcoded liste kullanılır.
+   */
+  prioritySiteCodes?: readonly string[]
 }
 
 const ROW_HEIGHT = 32
@@ -69,8 +74,16 @@ type GanttRow = {
   widthPct: number
 }
 
-export function GanttChart({ campaigns, rangeStart, rangeEnd }: GanttChartProps) {
+export function GanttChart({ campaigns, rangeStart, rangeEnd, prioritySiteCodes }: GanttChartProps) {
   const [openSites, setOpenSites] = useState<Record<string, boolean>>({})
+
+  const compareSites = useMemo(
+    () =>
+      makeCompareSitesByPriority(
+        prioritySiteCodes ? new Set(prioritySiteCodes.map((c) => c.toLowerCase())) : undefined
+      ),
+    [prioritySiteCodes]
+  )
 
   const view = useMemo(() => {
     const viewStart = parseLocalIso(rangeStart)
@@ -122,13 +135,13 @@ export function GanttChart({ campaigns, rangeStart, rangeEnd }: GanttChartProps)
       g.rows.sort((a, b) => a.start.getTime() - b.start.getTime())
     }
 
-    // Site grupları: önce öncelikli (bitalih, hipodrom, atyarisi),
-    // sonra kalanlar alphabetical. Site CODE üzerinden karşılaştırıyoruz —
-    // priority listesi de code-based.
+    // Site grupları: önce öncelikli (backend `is_priority`'den gelir,
+    // prop verilmezse fallback hardcoded liste), sonra kalanlar
+    // alphabetical. Site CODE üzerinden karşılaştırıyoruz.
     return Array.from(bySite.values()).sort((a, b) =>
-      compareSitesByPriority(a.siteCode, b.siteCode)
+      compareSites(a.siteCode, b.siteCode)
     )
-  }, [campaigns, view])
+  }, [campaigns, view, compareSites])
 
   // Month tick marks across the top.
   const monthTicks = useMemo(() => {

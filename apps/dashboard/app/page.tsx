@@ -24,22 +24,6 @@ import { WinLossTracker } from '@/components/insights/win-loss-tracker'
 
 const HOME_SCOPE = 'home'
 
-// FE-2: Site code to friendly name mapping
-const SITE_FRIENDLY_NAMES: Record<string, string> = {
-  bitalih: 'Bitalih',
-  nesine: 'Nesine',
-  sondzulyuk: 'Sondüzlük',
-  bilyoner: 'Bilyoner',
-  misli: 'Misli',
-  oley: 'Oley',
-  hipodrom: 'Hipodrom',
-  atyarisi: 'Atyarisi',
-  birebin: 'Birebin',
-  altiliganyan: 'Altiliganyan',
-  ekuri: 'Ekuri',
-  '4nala': '4nala',
-}
-
 // FE-9: Progress Bar Component with percentage explanations
 function ProgressBar({ value, max, label, color, explanation }: { value: number; max?: number; label: string; color?: 'green' | 'yellow' | 'red' | 'blue' | 'purple' | 'violet' | 'orange' | 'emerald'; explanation?: string }) {
   const maxVal = max || 1
@@ -225,7 +209,7 @@ function ComparisonBar({
     <div 
       className={cn('flex items-center gap-3', onClick && 'cursor-pointer hover:bg-muted/30 rounded p-1 -mx-1 transition-colors')}
       onClick={onClick}
-      title={siteCode ? `${SITE_FRIENDLY_NAMES[siteCode] || label} - Detaylar için tıklayın` : undefined}
+      title={siteCode ? `${label} - Detaylar için tıklayın` : undefined}
     >
       <span className={cn('w-20 text-sm', isPrimary ? 'font-bold' : 'text-muted-foreground truncate')} title={label}>
         {label}
@@ -538,7 +522,7 @@ export default function DashboardPage() {
                       {otherSites.slice(0, 5).map((site) => (
                         <ComparisonBar 
                           key={site.site_id}
-                          label={SITE_FRIENDLY_NAMES[site.site_code] || site.site_name} 
+                          label={site.site_name}
                           value={Number(site.total_campaigns)} 
                           maxValue={maxCampaigns}
                           siteCode={site.site_code}
@@ -565,7 +549,7 @@ export default function DashboardPage() {
                       {otherSites.slice(0, 5).sort((a, b) => Number(b.avg_bonus) - Number(a.avg_bonus)).map((site) => (
                         <ComparisonBar 
                           key={site.site_id}
-                          label={SITE_FRIENDLY_NAMES[site.site_code] || site.site_name} 
+                          label={site.site_name}
                           value={Number(site.avg_bonus)} 
                           maxValue={maxBonus}
                           siteCode={site.site_code}
@@ -616,7 +600,7 @@ export default function DashboardPage() {
                         value={Number(bestCompetitor?.avg_bonus || 0)} 
                         max={maxBonus}
                         label="En Yüksek Bonus"
-                        explanation={`En yüksek ortalama bonus ₺${Math.round(Number(bestCompetitor?.avg_bonus || 0))} (${SITE_FRIENDLY_NAMES[bestCompetitor?.site_code || ''] || bestCompetitor?.site_name})`}
+                        explanation={`En yüksek ortalama bonus ₺${Math.round(Number(bestCompetitor?.avg_bonus || 0))} (${bestCompetitor?.site_name ?? '-'})`}
                         color="orange"
                       />
                     </CardContent>
