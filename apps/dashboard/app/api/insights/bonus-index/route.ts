@@ -25,6 +25,7 @@ const querySchema = z.object({
   from: z.string().regex(dateRegex).optional(),
   to: z.string().regex(dateRegex).optional(),
   category: z.string().min(1).optional(),
+  compareYoY: z.enum(['0', '1']).optional(),
 })
 
 const categoryExpr = `COALESCE(
@@ -93,6 +94,129 @@ function weekOf(date: Date): string {
   return `${monday.getUTCFullYear()}-${String(monday.getUTCMonth() + 1).padStart(2, '0')}-${String(monday.getUTCDate()).padStart(2, '0')}`
 }
 
+interface Row {
+  campaignId: string
+  title: string
+  siteName: string
+  siteCode: string
+  category: string
+  bonus: number
+  firstSeen: Date
+}
+
+interface CategorySummary {
+  category: string
+  median: number
+  p90: number
+  outlierCount: number
+  totalBonusVolume: number
+}
+
+interface WindowAggregate {
+  median: number
+  p90: number
+  outlierCount: number
+  sampleSize: number
+  perCategory: Record<
+    string,
+    { median: number; p90: number; outlierCount: number; totalBonusVolume: number }
+  >
+}
+
+async function fetchRows(dateFrom: Date, dateTo: Date, category?: string): Promise<Row[]> {
+  const conditions: string[] = []
+  const sqlParams: unknown[] = []
+  sqlParams.push(dateFrom)
+  conditions.push(`c.first_seen_at >= $${sqlParams.length}`)
+  sqlParams.push(dateTo)
+  conditions.push(`c.first_seen_at <= $${sqlParams.length}`)
+  if (category) {
+    sqlParams.push(category)
+    conditions.push(`${categoryExpr} = $${sqlParams.length}`)
+  }
+
+  const whereClause = `WHERE ${conditions.join(' AND ')}`
+
+  const rows = await query<{
+    campaign_id: string
+    title: string
+    site_name: string
+    site_code: string
+    category: string | null
+    bonus: string | number | null
+    first_seen_at: string | Date
+  }>(
+    `
+      SELECT
+        c.id AS campaign_id,
+        c.title,
+        s.name AS site_name,
+        s.code AS site_code,
+        ${categoryExpr} AS category,
+        ${effectiveBonusExpr} AS bonus,
+        c.first_seen_at
+      FROM campaigns c
+      JOIN sites s ON s.id = c.site_id
+      ${whereClause}
+      `,
+    sqlParams
+  )
+
+  return rows
+    .map((r) => {
+      const seen = r.first_seen_at instanceof Date ? r.first_seen_at : new Date(r.first_seen_at)
+      return {
+        campaignId: r.campaign_id,
+        title: r.title,
+        siteName: r.site_name,
+        siteCode: r.site_code,
+        category: r.category || '',
+        bonus: asFloat(r.bonus),
+        firstSeen: seen,
+      }
+    })
+    .filter((r) => r.bonus > 0 && r.category && !Number.isNaN(r.firstSeen.getTime()))
+}
+
+function aggregateWindow(rows: Row[]): WindowAggregate {
+  const allBonus = rows.map((r) => r.bonus)
+  const m = median(allBonus)
+  const p90 = percentile(allBonus, 90)
+  const outlierThreshold = p90 * 1.5
+  const outlierCount = allBonus.filter((b) => b > outlierThreshold).length
+
+  const byCategory = new Map<string, Row[]>()
+  for (const row of rows) {
+    const list = byCategory.get(row.category) || []
+    list.push(row)
+    byCategory.set(row.category, list)
+  }
+
+  const perCategory: WindowAggregate['perCategory'] = {}
+  for (const [cat, rs] of byCategory.entries()) {
+    const bonuses = rs.map((r) => r.bonus)
+    const catMedian = median(bonuses)
+    const catP90 = percentile(bonuses, 90)
+    const localOutlier = catP90 * 1.5
+    const catOutlierCount = bonuses.filter((b) => b > localOutlier).length
+    const totalVolume = bonuses.reduce((acc, b) => acc + b, 0)
+    perCategory[cat] = {
+      median: Math.round(catMedian),
+      p90: Math.round(catP90),
+      outlierCount: catOutlierCount,
+      totalBonusVolume: Math.round(totalVolume),
+    }
+  }
+
+  return {
+    median: Math.round(m),
+    p90: Math.round(p90),
+    outlierCount,
+    sampleSize: rows.length,
+    perCategory,
+  }
+}
+
 export async function GET(request: NextRequest) {
   try {
     const params = Object.fromEntries(new URLSearchParams(request.nextUrl.search))
@@ -107,82 +231,19 @@ export async function GET(request: NextRequest) {
     const eightWeeksAgo = new Date()
     eightWeeksAgo.setUTCDate(eightWeeksAgo.getUTCDate() - 7 * 8)
 
-    // Veri çekme — tek geniş sorgu, kategori + bonus + first_seen.
-    const conditions: string[] = []
-    const sqlParams: unknown[] = []
+    // Tüm veri (sparkline + range) — eightWeeksAgo'dan dateTo'ya kadar
     const minDate = dateFrom < eightWeeksAgo ? dateFrom : eightWeeksAgo
-    sqlParams.push(minDate)
-    conditions.push(`c.first_seen_at >= $${sqlParams.length}`)
-    sqlParams.push(dateTo)
-    conditions.push(`c.first_seen_at <= $${sqlParams.length}`)
-    if (parsed.category) {
-      sqlParams.push(parsed.category)
-      conditions.push(`${categoryExpr} = $${sqlParams.length}`)
-    }
-
-    const whereClause = `WHERE ${conditions.join(' AND ')}`
-
-    const rows = await query<{
-      campaign_id: string
-      title: string
-      site_name: string
-      site_code: string
-      category: string | null
-      bonus: string | number | null
-      first_seen_at: string | Date
-    }>(
-      `
-      SELECT
-        c.id AS campaign_id,
-        c.title,
-        s.name AS site_name,
-        s.code AS site_code,
-        ${categoryExpr} AS category,
-        ${effectiveBonusExpr} AS bonus,
-        c.first_seen_at
-      FROM campaigns c
-      JOIN sites s ON s.id = c.site_id
-      ${whereClause}
-      `,
-      sqlParams
-    )
-
-    interface Row {
-      campaignId: string
-      title: string
-      siteName: string
-      siteCode: string
-      category: string
-      bonus: number
-      firstSeen: Date
-    }
-
-    const allRows: Row[] = rows
-      .map((r) => {
-        const seen = r.first_seen_at instanceof Date ? r.first_seen_at : new Date(r.first_seen_at)
-        return {
-          campaignId: r.campaign_id,
-          title: r.title,
-          siteName: r.site_name,
-          siteCode: r.site_code,
-          category: r.category || '',
-          bonus: asFloat(r.bonus),
-          firstSeen: seen,
-        }
-      })
-      .filter((r) => r.bonus > 0 && r.category && !Number.isNaN(r.firstSeen.getTime()))
+    const allRows = await fetchRows(minDate, dateTo, parsed.category)
 
     // ----- Range içindeki rows -----
     const inRange = allRows.filter(
       (r) => r.firstSeen >= dateFrom && r.firstSeen <= dateTo
     )
 
-    // KPI (range geneli)
-    const allBonus = inRange.map((r) => r.bonus)
-    const todayMedian = median(allBonus)
-    const todayP90 = percentile(allBonus, 90)
-    const outlierThreshold = todayP90 * 1.5
-    const outlierCount = allBonus.filter((b) => b > outlierThreshold).length
+    const windowAgg = aggregateWindow(inRange)
+    const todayMedian = windowAgg.median
+    const todayP90 = windowAgg.p90
+    const outlierCount = windowAgg.outlierCount
 
     // ----- Per kategori (range içindeki) -----
     const byCategory = new Map<string, Row[]>()
@@ -252,6 +313,25 @@ export async function GET(request: NextRequest) {
       return point
     })
 
+    // ----- categoryBreakdown — totalBonusVolume dahil, median desc -----
+    const categoryBreakdown: CategorySummary[] = Array.from(byCategory.entries())
+      .map(([category, rs]) => {
+        const bonuses = rs.map((r) => r.bonus)
+        const m = median(bonuses)
+        const p90 = percentile(bonuses, 90)
+        const localOutlier = p90 * 1.5
+        const catOutlierCount = bonuses.filter((b) => b > localOutlier).length
+        const totalVolume = bonuses.reduce((acc, b) => acc + b, 0)
+        return {
+          category,
+          median: Math.round(m),
+          p90: Math.round(p90),
+          outlierCount: catOutlierCount,
+          totalBonusVolume: Math.round(totalVolume),
+        }
+      })
+      .sort((a, b) => b.median - a.median)
+
     // ----- Top outliers (P90'ı global olarak kıran top 5) -----
     const topOutliers = inRange
       .filter((r) => r.bonus > todayP90 && todayP90 > 0)
@@ -265,6 +345,40 @@ export async function GET(request: NextRequest) {
         category: r.category,
         bonusAmount: Math.round(r.bonus),
       }))
+
+    // ----- YoY (opsiyonel) — 52 hafta öncesi aynı pencere -----
+    let yoy: {
+      dateFrom: string
+      dateTo: string
+      median: number
+      p90: number
+      outlierCount: number
+      sampleSize: number
+      perCategory: Record<
+        string,
+        { median: number; p90: number; outlierCount: number; totalBonusVolume: number }
+      >
+    } | null = null
+
+    if (parsed.compareYoY === '1') {
+      const weekMs = 7 * 24 * 60 * 60 * 1000
+      const yoyFrom = new Date(dateFrom.getTime() - 52 * weekMs)
+      const yoyTo = new Date(dateTo.getTime() - 52 * weekMs)
+
+      const yoyRows = await fetchRows(yoyFrom, yoyTo, parsed.category)
+      if (yoyRows.length > 0) {
+        const yoyAgg = aggregateWindow(yoyRows)
+        yoy = {
+          dateFrom: yoyFrom.toISOString().slice(0, 10),
+          dateTo: yoyTo.toISOString().slice(0, 10),
+          median: yoyAgg.median,
+          p90: yoyAgg.p90,
+          outlierCount: yoyAgg.outlierCount,
+          sampleSize: yoyAgg.sampleSize,
+          perCategory: yoyAgg.perCategory,
+        }
+      }
+    }
 
     return successResponse({
       dateFrom: dateFrom.toISOString().slice(0, 10),
@@ -280,6 +394,8 @@ export async function GET(request: NextRequest) {
       weeklyAll,
       categories: Array.from(byCategory.keys()).sort(),
       topOutliers,
+      categoryBreakdown,
+      yoy,
     })
   } catch (error) {
     return handleApiError(error)

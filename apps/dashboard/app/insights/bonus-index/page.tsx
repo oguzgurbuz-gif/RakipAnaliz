@@ -1,8 +1,9 @@
 'use client'
 
 import { useQuery } from '@tanstack/react-query'
-import { useState } from 'react'
+import { useCallback, useMemo, useState } from 'react'
 import Link from 'next/link'
+import { useRouter, useSearchParams, usePathname } from 'next/navigation'
 import {
   AreaChart,
   Area,
@@ -29,7 +30,16 @@ import { DateRangePickerHeader } from '@/components/ui/date-range-picker-header'
 import { useDateRange } from '@/lib/date-range/context'
 import { fetchBonusIndex } from '@/lib/api'
 import { getCategoryLabel } from '@/lib/category-labels'
-import { Crown, TrendingUp, AlertTriangle, ExternalLink, BarChart3 } from 'lucide-react'
+import {
+  Crown,
+  TrendingUp,
+  AlertTriangle,
+  ExternalLink,
+  BarChart3,
+  ArrowUp,
+  ArrowDown,
+  ArrowUpDown,
+} from 'lucide-react'
 
 const SCOPE = 'insights-bonus'
 
@@ -55,20 +65,87 @@ function fmtWeekLabel(week: string): string {
   return d.toLocaleDateString('tr-TR', { day: '2-digit', month: 'short' })
 }
 
+type SortField = 'category' | 'median' | 'p90' | 'outlierCount' | 'totalBonusVolume'
+type SortDir = 'asc' | 'desc'
+
+function calcDelta(current: number, previous: number): number | null {
+  if (!Number.isFinite(current) || !Number.isFinite(previous) || previous === 0) return null
+  return Math.round(((current - previous) / previous) * 100)
+}
+
 export default function BonusIndexPage() {
   const { from, to } = useDateRange(SCOPE)
+  const router = useRouter()
+  const pathname = usePathname()
+  const searchParams = useSearchParams()
+
   const [selectedCategory, setSelectedCategory] = useState<string>('')
+  const [compareYoY, setCompareYoY] = useState<boolean>(
+    searchParams?.get('compareYoY') === '1'
+  )
+  const [sort, setSort] = useState<{ field: SortField; dir: SortDir }>({
+    field: 'median',
+    dir: 'desc',
+  })
+
+  const updateUrl = useCallback(
+    (updates: Record<string, string | undefined>) => {
+      const params = new URLSearchParams(searchParams?.toString() || '')
+      for (const [key, value] of Object.entries(updates)) {
+        if (value === undefined || value === '') {
+          params.delete(key)
+        } else {
+          params.set(key, value)
+        }
+      }
+      const qs = params.toString()
+      const basePath = pathname ?? '/insights/bonus-index'
+      router.replace(qs ? `${basePath}?${qs}` : basePath)
+    },
+    [searchParams, router, pathname]
+  )
+
+  const handleCompareYoYToggle = () => {
+    const next = !compareYoY
+    setCompareYoY(next)
+    updateUrl({ compareYoY: next ? '1' : undefined })
+  }
 
   const { data, isLoading, error, refetch } = useQuery({
-    queryKey: ['insights', 'bonus-index', from, to, selectedCategory],
+    queryKey: ['insights', 'bonus-index', from, to, selectedCategory, compareYoY],
     queryFn: () =>
       fetchBonusIndex({
         from: from || undefined,
         to: to || undefined,
         category: selectedCategory || undefined,
+        compareYoY,
       }),
     enabled: Boolean(from && to),
   })
+
+  const handleSort = (field: SortField) => {
+    setSort((prev) => {
+      if (prev.field === field) {
+        return { field, dir: prev.dir === 'desc' ? 'asc' : 'desc' }
+      }
+      return { field, dir: field === 'category' ? 'asc' : 'desc' }
+    })
+  }
+
+  const sortedBreakdown = useMemo(() => {
+    const rows = data?.categoryBreakdown ?? []
+    const copy = [...rows]
+    copy.sort((a, b) => {
+      let cmp = 0
+      if (sort.field === 'category') {
+        cmp = getCategoryLabel(a.category).localeCompare(getCategoryLabel(b.category), 'tr')
+      } else {
+        cmp = (a[sort.field] as number) - (b[sort.field] as number)
+      }
+      return sort.dir === 'asc' ? cmp : -cmp
+    })
+    return copy
+  }, [data?.categoryBreakdown, sort])
 
   if (error) {
     return <ErrorDisplay error={error} onRetry={() => refetch()} />
@@ -77,6 +154,11 @@ export default function BonusIndexPage() {
   const hasData = (data?.perCategory?.length ?? 0) > 0
   // Çoklu kategori için lineChart anahtarları (weeklyAll içindeki cat key'leri)
   const lineChartCats = data?.categories ?? []
+
+  const yoy = data?.yoy ?? null
+  const medianDelta = yoy ? calcDelta(data?.kpi.todayMedian ?? 0, yoy.median) : null
+  const p90Delta = yoy ? calcDelta(data?.kpi.todayP90 ?? 0, yoy.p90) : null
+  const outlierDelta = yoy ? calcDelta(data?.kpi.outlierCount ?? 0, yoy.outlierCount) : null
 
   return (
     <div className="min-h-screen bg-background">
@@ -93,8 +175,8 @@ export default function BonusIndexPage() {
       <main className="p-6 space-y-6">
         <DateRangePickerHeader scope={SCOPE} />
 
-        {/* Kategori filtresi */}
-        <div className="flex items-center gap-3 text-sm">
+        {/* Kategori filtresi + YoY toggle */}
+        <div className="flex flex-wrap items-center gap-3 text-sm">
           <span className="text-muted-foreground">Kategori filtresi:</span>
           <select
             className="border rounded px-3 py-1.5 bg-background"
@@ -108,31 +190,65 @@ export default function BonusIndexPage() {
               </option>
             ))}
           </select>
+
+          <Button
+            variant={compareYoY ? 'default' : 'outline'}
+            size="sm"
+            onClick={handleCompareYoYToggle}
+            className="ml-auto"
+          >
+            {compareYoY ? 'YoY açık' : 'Geçen yıl ile karşılaştır'}
+          </Button>
         </div>
 
         {/* KPI Cards */}
         <div className="grid gap-4 md:grid-cols-3">
-          <InsightCard
-            icon={BarChart3}
-            title="Pazar Median"
-            value={isLoading ? '—' : fmtTry(data?.kpi.todayMedian ?? 0)}
-            description={`Seçili dönem · n=${data?.kpi.sampleSize ?? 0}`}
-            tone="info"
-          />
-          <InsightCard
-            icon={Crown}
-            title="P90 Bonus"
-            value={isLoading ? '—' : fmtTry(data?.kpi.todayP90 ?? 0)}
-            description="Üst %10 eşik"
-            tone="positive"
-          />
-          <InsightCard
-            icon={AlertTriangle}
-            title="Outlier"
-            value={isLoading ? '—' : data?.kpi.outlierCount ?? 0}
-            description="P90'ı %50+ aşan kampanya"
-            tone="warning"
-          />
+          <div className="space-y-2">
+            <InsightCard
+              icon={BarChart3}
+              title="Pazar Median"
+              value={isLoading ? '—' : fmtTry(data?.kpi.todayMedian ?? 0)}
+              description={`Seçili dönem · n=${data?.kpi.sampleSize ?? 0}`}
+              tone="info"
+            />
+            <KpiDelta
+              active={compareYoY}
+              delta={medianDelta}
+              previousValue={yoy ? fmtTry(yoy.median) : null}
+              noYoyData={compareYoY && !yoy}
+            />
+          </div>
+          <div className="space-y-2">
+            <InsightCard
+              icon={Crown}
+              title="P90 Bonus"
+              value={isLoading ? '—' : fmtTry(data?.kpi.todayP90 ?? 0)}
+              description="Üst %10 eşik"
+              tone="positive"
+            />
+            <KpiDelta
+              active={compareYoY}
+              delta={p90Delta}
+              previousValue={yoy ? fmtTry(yoy.p90) : null}
+              noYoyData={compareYoY && !yoy}
+            />
+          </div>
+          <div className="space-y-2">
+            <InsightCard
+              icon={AlertTriangle}
+              title="Outlier"
+              value={isLoading ? '—' : data?.kpi.outlierCount ?? 0}
+              description={`P90'ı %50+ aşan kampanya`}
+              tone="warning"
+            />
+            <KpiDelta
+              active={compareYoY}
+              delta={outlierDelta}
+              previousValue={yoy ? String(yoy.outlierCount) : null}
+              invertColor
+              noYoyData={compareYoY && !yoy}
+            />
+          </div>
         </div>
 
         {/* Tablo: kategori başına */}
@@ -292,7 +408,184 @@ export default function BonusIndexPage() {
             )}
           </CardContent>
         </Card>
+
+        {/* Kategori Breakdown Tablosu */}
+        <Card>
+          <CardHeader>
+            <SectionHeader
+              title="Kategori Bonus Özeti"
+              description="Seçili dönemdeki kategori bazında median, P90, outlier ve toplam hacim. Kolon başlığına tıklayarak sırala."
+            />
+          </CardHeader>
+          <CardContent>
+            {isLoading ? (
+              <Skeleton className="h-48 w-full" />
+            ) : sortedBreakdown.length === 0 ? (
+              <EmptyState
+                icon={BarChart3}
+                title="Bu dönemde kategori verisi yetersiz"
+                description="Tarih aralığını genişletin veya kategori filtresini kaldırın."
+              />
+            ) : (
+              <div className="overflow-x-auto">
+                <table className="w-full text-sm">
+                  <thead>
+                    <tr className="border-b text-left text-xs uppercase tracking-wider text-muted-foreground">
+                      <SortableTh
+                        field="category"
+                        label="Kategori"
+                        sort={sort}
+                        onSort={handleSort}
+                      />
+                      <SortableTh
+                        field="median"
+                        label="Median"
+                        align="right"
+                        sort={sort}
+                        onSort={handleSort}
+                      />
+                      <SortableTh
+                        field="p90"
+                        label="P90"
+                        align="right"
+                        sort={sort}
+                        onSort={handleSort}
+                      />
+                      <SortableTh
+                        field="outlierCount"
+                        label="Outlier"
+                        align="right"
+                        sort={sort}
+                        onSort={handleSort}
+                      />
+                      <SortableTh
+                        field="totalBonusVolume"
+                        label="Toplam Hacim"
+                        align="right"
+                        sort={sort}
+                        onSort={handleSort}
+                      />
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {sortedBreakdown.map((row) => (
+                      <tr
+                        key={row.category}
+                        className="border-b last:border-0 hover:bg-muted/30"
+                      >
+                        <td className="py-2 pr-4 font-medium">
+                          {getCategoryLabel(row.category)}
+                        </td>
+                        <td className="py-2 pr-4 text-right">{fmtTry(row.median)}</td>
+                        <td className="py-2 pr-4 text-right">{fmtTry(row.p90)}</td>
+                        <td className="py-2 pr-4 text-right">
+                          {row.outlierCount > 0 ? (
+                            <Badge
+                              variant="outline"
+                              className="border-orange-300 bg-orange-50 text-orange-700"
+                            >
+                              {row.outlierCount}
+                            </Badge>
+                          ) : (
+                            <span className="text-muted-foreground">0</span>
+                          )}
+                        </td>
+                        <td className="py-2 pr-4 text-right font-medium">
+                          {fmtTry(row.totalBonusVolume)}
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            )}
+          </CardContent>
+        </Card>
       </main>
+    </div>
+  )
+}
+
+function SortableTh({
+  field,
+  label,
+  align = 'left',
+  sort,
+  onSort,
+}: {
+  field: SortField
+  label: string
+  align?: 'left' | 'right'
+  sort: { field: SortField; dir: SortDir }
+  onSort: (field: SortField) => void
+}) {
+  const active = sort.field === field
+  const Icon = !active ? ArrowUpDown : sort.dir === 'desc' ? ArrowDown : ArrowUp
+  return (
+    <th
+      className={`py-2 pr-4 font-medium ${align === 'right' ? 'text-right' : ''}`}
+    >
+      <button
+        type="button"
+        onClick={() => onSort(field)}
+        className={`inline-flex items-center gap-1 uppercase tracking-wider hover:text-foreground ${
+          active ? 'text-foreground' : ''
+        } ${align === 'right' ? 'justify-end w-full' : ''}`}
+      >
+        <span>{label}</span>
+        <Icon className="h-3 w-3 opacity-70" />
+      </button>
+    </th>
+  )
+}
+
+function KpiDelta({
+  active,
+  delta,
+  previousValue,
+  invertColor = false,
+  noYoyData = false,
+}: {
+  active: boolean
+  delta: number | null
+  previousValue: string | null
+  invertColor?: boolean
+  noYoyData?: boolean
+}) {
+  if (!active) return null
+  if (noYoyData) {
+    return (
+      <p className="text-xs text-muted-foreground pl-1">YoY verisi mevcut değil</p>
+    )
+  }
+  if (delta === null || previousValue === null) {
+    return (
+      <p className="text-xs text-muted-foreground pl-1">YoY verisi mevcut değil</p>
+    )
+  }
+
+  const isUp = delta > 0
+  const isFlat = delta === 0
+  // Normalde: artış emerald, azalış red. invertColor=true (outlier) → tersi.
+  const goodDirection = invertColor ? !isUp : isUp
+  const colorClass = isFlat
+    ? 'text-muted-foreground'
+    : goodDirection
+      ? 'text-emerald-600'
+      : 'text-red-600'
+  const Arrow = isFlat ? null : isUp ? ArrowUp : ArrowDown
+  const sign = isUp ? '+' : ''
+
+  return (
+    <div className={`flex items-center gap-1 pl-1 text-xs ${colorClass}`}>
+      {Arrow && <Arrow className="h-3 w-3" />}
+      <span className="font-medium">
+        {sign}
+        {delta}%
+      </span>
+      <span className="text-muted-foreground">
+        {`(geçen yıl ${previousValue})`}
+      </span>
     </div>
   )
 }

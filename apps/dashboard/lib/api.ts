@@ -918,6 +918,27 @@ export interface BonusIndexOutlier {
   bonusAmount: number
 }
 
+export interface BonusIndexCategorySummary {
+  category: string
+  median: number
+  p90: number
+  outlierCount: number
+  totalBonusVolume: number
+}
+
+export interface BonusIndexYoY {
+  dateFrom: string
+  dateTo: string
+  median: number
+  p90: number
+  outlierCount: number
+  sampleSize: number
+  perCategory: Record<
+    string,
+    { median: number; p90: number; outlierCount: number; totalBonusVolume: number }
+  >
+}
+
 export interface BonusIndexData {
   dateFrom: string
   dateTo: string
@@ -932,6 +953,8 @@ export interface BonusIndexData {
   weeklyAll: ({ week: string } & Record<string, number | string>)[]
   categories: string[]
   topOutliers: BonusIndexOutlier[]
+  categoryBreakdown: BonusIndexCategorySummary[]
+  yoy: BonusIndexYoY | null
 }
 
 const EMPTY_BONUS_INDEX: BonusIndexData = {
@@ -943,16 +966,19 @@ const EMPTY_BONUS_INDEX: BonusIndexData = {
   weeklyAll: [],
   categories: [],
   topOutliers: [],
+  categoryBreakdown: [],
+  yoy: null,
 }
 
 export async function fetchBonusIndex(
-  filters: { from?: string; to?: string; category?: string } = {}
+  filters: { from?: string; to?: string; category?: string; compareYoY?: boolean } = {}
 ): Promise<BonusIndexData> {
   return withFallback(EMPTY_BONUS_INDEX, async () => {
     const params = new URLSearchParams()
     if (filters.from) params.append('from', filters.from)
     if (filters.to) params.append('to', filters.to)
     if (filters.category) params.append('category', filters.category)
+    if (filters.compareYoY) params.append('compareYoY', '1')
     const qs = params.toString()
     return fetchApi<BonusIndexData>(`/api/insights/bonus-index${qs ? `?${qs}` : ''}`)
   })
@@ -1197,6 +1223,55 @@ export interface PressEvent {
   description: string | null
   country: string
   impact_score: number
+}
+
+// ---------------------------------------------------------------------------
+// D6 — Auto analysis (dönem için anlık AI raporu)
+// ---------------------------------------------------------------------------
+
+export interface AutoAnalysisSections {
+  summary: string
+  topMovers: string
+  bonusInsights: string
+  categoryInsights: string
+  riskFlags: string
+  recommendations: string
+}
+
+export interface AutoAnalysisResponse {
+  period: { from: string; to: string }
+  dataReady: boolean
+  lastScrapeAt: string | null
+  hasExistingReport: boolean
+  analysis: AutoAnalysisSections | null
+  notes: string[]
+  generatedAt: string
+}
+
+const EMPTY_AUTO_ANALYSIS: AutoAnalysisResponse = {
+  period: { from: '', to: '' },
+  dataReady: false,
+  lastScrapeAt: null,
+  hasExistingReport: false,
+  analysis: null,
+  notes: ['Auto analiz istemcisi fallback sonucu.'],
+  generatedAt: '',
+}
+
+export async function fetchAutoAnalysis(
+  from: string,
+  to: string,
+  options: { force?: boolean } = {}
+): Promise<AutoAnalysisResponse> {
+  return withFallback(EMPTY_AUTO_ANALYSIS, async () => {
+    const params = new URLSearchParams()
+    params.set('from', from)
+    params.set('to', to)
+    if (options.force) params.set('force', '1')
+    return fetchApi<AutoAnalysisResponse>(
+      `/api/reports/auto-analysis?${params.toString()}`
+    )
+  })
 }
 
 export async function fetchPressEvents(
