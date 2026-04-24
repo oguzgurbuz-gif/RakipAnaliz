@@ -252,6 +252,6 @@ export async function DELETE(request: NextRequest) {
   }
 }
 
-export async function OPTIONS() {
-  return new NextResponse(null, { status: 204, headers: getCorsHeaders() });
+export async function OPTIONS(request: Request) {
+  return new NextResponse(null, { status: 204, headers: getCorsHeaders(request) });
 }

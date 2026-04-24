@@ -569,7 +569,7 @@ export async function GET(
           momentumTimeline,
         },
       },
-      { headers: getCorsHeaders() }
+      { headers: getCorsHeaders(request) }
     );
   } catch (error) {
     console.error('Site profile API error:', error);
@@ -583,6 +583,6 @@ export async function GET(
   }
 }
 
-export async function OPTIONS() {
-  return new NextResponse(null, { status: 204, headers: getCorsHeaders() });
+export async function OPTIONS(request: Request) {
+  return new NextResponse(null, { status: 204, headers: getCorsHeaders(request) });
 }

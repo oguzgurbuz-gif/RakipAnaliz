@@ -118,13 +118,13 @@ export async function GET(request: NextRequest) {
       console.warn('press_events table missing — returning empty list')
       return NextResponse.json(
         { success: true, data: [] as PressEvent[] },
-        { status: 200, headers: getCorsHeaders() }
+        { status: 200, headers: getCorsHeaders(request) }
       )
     }
     return handleApiError(error)
   }
 }
 
-export async function OPTIONS() {
-  return new NextResponse(null, { status: 204, headers: getCorsHeaders() })
+export async function OPTIONS(request: Request) {
+  return new NextResponse(null, { status: 204, headers: getCorsHeaders(request) })
 }

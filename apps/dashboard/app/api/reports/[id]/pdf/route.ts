@@ -121,7 +121,7 @@ export async function GET(
         'Content-Type': 'application/pdf',
         'Content-Disposition': `attachment; filename="${filename}"`,
         'Content-Length': pdfBuffer.length.toString(),
-        ...getCorsHeaders(),
+        ...getCorsHeaders(request),
       },
     })
   } catch (error) {
@@ -132,6 +132,6 @@ export async function GET(
   }
 }
 
-export async function OPTIONS() {
-  return new NextResponse(null, { status: 204, headers: getCorsHeaders() })
+export async function OPTIONS(request: Request) {
+  return new NextResponse(null, { status: 204, headers: getCorsHeaders(request) })
 }

@@ -4,7 +4,7 @@ import { errorResponse, getCorsHeaders } from '@/lib/response';
 
 const START_TIME = Date.now();
 
-export async function GET() {
+export async function GET(request: Request) {
   try {
     const dbOk = await checkConnection();
     
@@ -30,7 +30,7 @@ export async function GET() {
           timestamp: new Date().toISOString(),
         },
       },
-      { status: 200, headers: getCorsHeaders() }
+      { status: 200, headers: getCorsHeaders(request) }
     );
   } catch (error) {
     console.error('Health check error:', error);
@@ -38,6 +38,6 @@ export async function GET() {
   }
 }
 
-export async function OPTIONS() {
-  return new NextResponse(null, { status: 204, headers: getCorsHeaders() });
+export async function OPTIONS(request: Request) {
+  return new NextResponse(null, { status: 204, headers: getCorsHeaders(request) });
 }

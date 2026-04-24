@@ -264,7 +264,7 @@ export async function GET(request: NextRequest) {
           topCategoriesThisWeek: weeklyCategories,
         },
       },
-      { headers: getCorsHeaders() }
+      { headers: getCorsHeaders(request) }
     );
   } catch (error) {
     console.error('Trends API fallback:', error);
@@ -283,11 +283,11 @@ export async function GET(request: NextRequest) {
         },
         fallback: true,
       },
-      { headers: getCorsHeaders() }
+      { headers: getCorsHeaders(request) }
     );
   }
 }
 
-export async function OPTIONS() {
-  return new NextResponse(null, { status: 204, headers: getCorsHeaders() });
+export async function OPTIONS(request: Request) {
+  return new NextResponse(null, { status: 204, headers: getCorsHeaders(request) });
 }

@@ -110,7 +110,7 @@ export async function GET(request: NextRequest) {
         success: true,
         data: campaigns,
       },
-      { headers: getCorsHeaders() }
+      { headers: getCorsHeaders(request) }
     );
   } catch (error) {
     if (error instanceof z.ZodError) {
@@ -122,7 +122,7 @@ export async function GET(request: NextRequest) {
             message: error.errors.map(e => `${e.path.join('.')}: ${e.message}`).join(', '),
           },
         },
-        { status: 400, headers: getCorsHeaders() }
+        { status: 400, headers: getCorsHeaders(request) }
       );
     }
 
@@ -135,11 +135,11 @@ export async function GET(request: NextRequest) {
           message: 'An error occurred',
         },
       },
-      { status: 500, headers: getCorsHeaders() }
+      { status: 500, headers: getCorsHeaders(request) }
     );
   }
 }
 
-export async function OPTIONS() {
-  return new NextResponse(null, { status: 204, headers: getCorsHeaders() });
+export async function OPTIONS(request: Request) {
+  return new NextResponse(null, { status: 204, headers: getCorsHeaders(request) });
 }

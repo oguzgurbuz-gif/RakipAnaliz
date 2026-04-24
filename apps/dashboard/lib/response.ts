@@ -89,17 +89,35 @@ export function handleApiError(error: unknown): NextResponse<ApiErrorResponse> {
   return errorResponse('INTERNAL_ERROR', 'An unknown error occurred', 500);
 }
 
-export function getCorsHeaders(): Record<string, string> {
-  return {
-    'Access-Control-Allow-Origin': '*',
-    'Access-Control-Allow-Methods': 'GET, POST, PUT, DELETE, OPTIONS',
-    'Access-Control-Allow-Headers': 'Content-Type, Authorization',
-  };
+const CORS_METHOD_HEADERS: Record<string, string> = {
+  'Access-Control-Allow-Methods': 'GET, POST, PUT, DELETE, OPTIONS',
+  'Access-Control-Allow-Headers': 'Content-Type, Authorization',
+};
+
+function parseAllowedOrigins(): string[] {
+  const raw = process.env.ALLOWED_ORIGINS;
+  if (!raw) return [];
+  return raw.split(',').map((s) => s.trim()).filter((s) => s.length > 0);
 }
 
-export function optionsResponse(): NextResponse {
+export function getCorsHeaders(request: Request | null = null): Record<string, string> {
+  const allowed = parseAllowedOrigins();
+  if (allowed.length === 0) {
+    if (process.env.NODE_ENV !== 'production') {
+      return { 'Access-Control-Allow-Origin': '*', ...CORS_METHOD_HEADERS };
+    }
+    return {};
+  }
+  const origin = request?.headers.get('origin') ?? null;
+  if (origin && allowed.includes(origin)) {
+    return { 'Access-Control-Allow-Origin': origin, Vary: 'Origin', ...CORS_METHOD_HEADERS };
+  }
+  return {};
+}
+
+export function optionsResponse(request: Request | null = null): NextResponse {
   return new NextResponse(null, {
     status: 204,
-    headers: getCorsHeaders(),
+    headers: getCorsHeaders(request),
   });
 }

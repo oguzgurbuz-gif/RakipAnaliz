@@ -15,7 +15,7 @@ type CampaignRow = {
   site_code: string;
 };
 
-export async function GET() {
+export async function GET(request: Request) {
   try {
     const rows = await query<CampaignRow>(`
       SELECT 
@@ -56,7 +56,7 @@ export async function GET() {
           items: feed,
         },
       },
-      { headers: getCorsHeaders() }
+      { headers: getCorsHeaders(request) }
     );
   } catch (error) {
     console.error('Feed API error:', error);
@@ -68,11 +68,11 @@ export async function GET() {
           message: 'An error occurred',
         },
       },
-      { status: 500, headers: getCorsHeaders() }
+      { status: 500, headers: getCorsHeaders(request) }
     );
   }
 }
 
-export async function OPTIONS() {
-  return new NextResponse(null, { status: 204, headers: getCorsHeaders() });
+export async function OPTIONS(request: Request) {
+  return new NextResponse(null, { status: 204, headers: getCorsHeaders(request) });
 }

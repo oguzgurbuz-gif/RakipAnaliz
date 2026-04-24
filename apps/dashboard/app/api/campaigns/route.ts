@@ -336,7 +336,7 @@ export async function GET(request: NextRequest) {
           totalPages: Math.ceil(total / pageSize),
         },
       },
-      { headers: getCorsHeaders() }
+      { headers: getCorsHeaders(request) }
     );
   } catch (error) {
     console.error('Campaigns API error:', error);
@@ -352,11 +352,11 @@ export async function GET(request: NextRequest) {
           totalPages: 0,
         },
       },
-      { status: 500, headers: getCorsHeaders() }
+      { status: 500, headers: getCorsHeaders(request) }
     );
   }
 }
 
-export async function OPTIONS() {
-  return new NextResponse(null, { status: 204, headers: getCorsHeaders() });
+export async function OPTIONS(request: Request) {
+  return new NextResponse(null, { status: 204, headers: getCorsHeaders(request) });
 }

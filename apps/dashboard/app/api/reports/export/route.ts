@@ -205,7 +205,7 @@ export async function GET(request: NextRequest) {
         'Content-Type': 'text/csv; charset=utf-8',
         'Content-Disposition': `attachment; filename="${filename}"`,
         'Cache-Control': 'no-store',
-        ...getCorsHeaders(),
+        ...getCorsHeaders(request),
       },
     });
   } catch (error) {
@@ -216,6 +216,6 @@ export async function GET(request: NextRequest) {
   }
 }
 
-export async function OPTIONS() {
-  return new NextResponse(null, { status: 204, headers: getCorsHeaders() });
+export async function OPTIONS(request: Request) {
+  return new NextResponse(null, { status: 204, headers: getCorsHeaders(request) });
 }

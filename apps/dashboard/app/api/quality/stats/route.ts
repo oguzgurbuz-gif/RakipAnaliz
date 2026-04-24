@@ -2,7 +2,7 @@ import { NextResponse } from 'next/server'
 import { query } from '@/lib/db'
 import { getCorsHeaders } from '@/lib/response'
 
-export async function GET() {
+export async function GET(request: Request) {
   try {
     const [total, aiCount, missingDates, bothDates, missingBody, suspicious, active, ended, pending] = await Promise.all([
       query<{ count: string }>(`SELECT COUNT(*) as count FROM campaigns`),
@@ -40,10 +40,10 @@ export async function GET() {
       endedCampaigns: 0,
       pendingCampaigns: 0,
       fallback: true,
-    }, { headers: getCorsHeaders() })
+    }, { headers: getCorsHeaders(request) })
   }
 }
 
-export async function OPTIONS() {
-  return new NextResponse(null, { status: 204, headers: getCorsHeaders() })
+export async function OPTIONS(request: Request) {
+  return new NextResponse(null, { status: 204, headers: getCorsHeaders(request) })
 }

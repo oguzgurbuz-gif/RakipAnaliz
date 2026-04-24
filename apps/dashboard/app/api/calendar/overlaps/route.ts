@@ -81,7 +81,7 @@ export async function GET(request: NextRequest) {
     // simple (`CalendarOverlap[]` instead of an envelope).
     return NextResponse.json(
       { success: true, data },
-      { headers: getCorsHeaders() }
+      { headers: getCorsHeaders(request) }
     );
   } catch (error) {
     console.error('Calendar overlaps API error:', error);
@@ -91,11 +91,11 @@ export async function GET(request: NextRequest) {
         error: error instanceof Error ? error.message : 'Internal server error',
         data: [],
       },
-      { status: 500, headers: getCorsHeaders() }
+      { status: 500, headers: getCorsHeaders(request) }
     );
   }
 }
 
-export async function OPTIONS() {
-  return new NextResponse(null, { status: 204, headers: getCorsHeaders() });
+export async function OPTIONS(request: Request) {
+  return new NextResponse(null, { status: 204, headers: getCorsHeaders(request) });
 }
