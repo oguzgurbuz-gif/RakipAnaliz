@@ -6,11 +6,11 @@ import { useSearchParams, useRouter, usePathname } from 'next/navigation'
 import { CampaignCard } from '@/components/campaign/campaign-card'
 import { CampaignTable } from '@/components/campaign/campaign-table'
 import { CampaignFilters } from '@/components/campaign/campaign-filters'
+import { FilterPresetsInline } from '@/components/campaign/filter-presets'
 import { Button } from '@/components/ui/button'
 import { EmptyState } from '@/components/ui/empty-state'
 import { ErrorDisplay } from '@/components/ui/error'
 import { InsightCard } from '@/components/ui/insight-card'
-import { Input } from '@/components/ui/input'
 import { PageHeader } from '@/components/ui/page-header'
 import { DateRangePickerHeader } from '@/components/ui/date-range-picker-header'
 import { useDateRange } from '@/lib/date-range/context'
@@ -205,43 +205,10 @@ export default function CampaignsPage() {
   // `lib/i18n/filters.ts` dosyasından besleniyor (duplikasyon yok).
   const URL_PARAM_LABELS = FILTER_FIELD_LABELS
 
-  // FE-6: Saved filter presets with localStorage
-  const [presets, setPresets] = useState<{id: string; name: string; filters: CampaignFiltersType}[]>([])
-  const [showPresetModal, setShowPresetModal] = useState(false)
-  const [presetName, setPresetName] = useState('')
-
-  useEffect(() => {
-    const saved = localStorage.getItem('campaign-filter-presets')
-    if (saved) {
-      try {
-        setPresets(JSON.parse(saved))
-      } catch {}
-    }
-  }, [])
-
-  const savePreset = () => {
-    if (!presetName.trim()) return
-    const newPreset = {
-      id: Date.now().toString(),
-      name: presetName.trim(),
-      filters: { ...filters },
-    }
-    const updated = [...presets, newPreset]
-    setPresets(updated)
-    localStorage.setItem('campaign-filter-presets', JSON.stringify(updated))
-    setPresetName('')
-    setShowPresetModal(false)
-  }
-
-  const deletePreset = (id: string) => {
-    const updated = presets.filter(p => p.id !== id)
-    setPresets(updated)
-    localStorage.setItem('campaign-filter-presets', JSON.stringify(updated))
-  }
-
-  const applyFilterPreset = (preset: typeof presets[0]) => {
-    handleFiltersChange(preset.filters)
-  }
+  // FE-6 — Kayıtlı filtre preset'leri artık `FilterPresetsInline` bileşeni
+  // tarafından yönetiliyor (storage key `rakip-analiz:filter-presets`).
+  // Burada inline state tutulmuyor; kaydet/sil/yeniden adlandır UI'ları o
+  // bileşende.
   const visibleCampaigns = showFavoritesOnly
     ? (data?.data.filter(c => favorites.includes(c.id)) || [])
     : (data?.data || [])
@@ -467,53 +434,14 @@ export default function CampaignsPage() {
 
           <span className="text-muted-foreground">|</span>
 
-          <Button variant="outline" size="sm" onClick={() => setShowPresetModal(true)} className="text-xs h-7">
-            Filtre Kaydet
-          </Button>
+          {/* FE-6 — kaydet butonu + chip listesi tek bileşende. */}
+          <FilterPresetsInline
+            filters={filters}
+            onApplyPreset={(p) => handleFiltersChange(p)}
+            onClearFilters={handleClear}
+            activeFilterEntries={activeFilterEntries}
+          />
         </div>
-
-        {/* FE-6: Saved filter presets */}
-        {presets.length > 0 && (
-          <div className="flex flex-wrap gap-2">
-            <span className="text-sm text-muted-foreground py-1">Kayıtlı Filtreler:</span>
-            {presets.map((preset) => (
-              <div key={preset.id} className="flex items-center gap-1">
-                <button
-                  onClick={() => applyFilterPreset(preset)}
-                  className="text-xs px-3 py-1 rounded-full border border-primary/30 bg-primary/10 hover:bg-primary/20 transition-colors"
-                >
-                  {preset.name}
-                </button>
-                <button
-                  onClick={() => deletePreset(preset.id)}
-                  className="text-xs text-muted-foreground hover:text-red-500"
-                  title="Sil"
-                >
-                  ×
-                </button>
-              </div>
-            ))}
-          </div>
-        )}
-
-        {/* FE-6: Save preset modal */}
-        {showPresetModal && (
-          <div className="fixed inset-0 bg-black/50 z-50 flex items-center justify-center">
-            <div className="bg-background rounded-lg p-6 shadow-lg max-w-sm w-full">
-              <h3 className="text-lg font-semibold mb-4">Filtre Kaydet</h3>
-              <Input
-                placeholder="Filtre adı..."
-                value={presetName}
-                onChange={(e) => setPresetName(e.target.value)}
-                className="mb-4"
-              />
-              <div className="flex justify-end gap-2">
-                <Button variant="outline" size="sm" onClick={() => setShowPresetModal(false)}>İptal</Button>
-                <Button size="sm" onClick={savePreset}>Kaydet</Button>
-              </div>
-            </div>
-          </div>
-        )}
 
         {/* FE-5 — count önizlemesi artık CampaignFilters içinde inline. */}
 
