@@ -14,7 +14,8 @@
     "./errors": "./src/errors/index.ts",
     "./validation": "./src/validation/index.ts",
     "./sql/convert-pg-params": "./src/sql/convert-pg-params.ts",
-    "./sql/mysql-url": "./src/sql/mysql-url.ts"
+    "./sql/mysql-url": "./src/sql/mysql-url.ts",
+    "./reports": "./src/reports/index.ts"
   },
   "scripts": {
     "typecheck": "tsc --noEmit",

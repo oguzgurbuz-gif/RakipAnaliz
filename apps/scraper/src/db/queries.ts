@@ -1553,6 +1553,50 @@ export async function retryFailedJob(
     `UPDATE failed_jobs SET retried = true, retried_at = NOW(), new_job_id = $1 WHERE id = $2`,
     [jobId, failedJobId]
   );
-  
+
   return jobId;
+}
+
+// BE-11: Weekly report diff-check helpers ----------------------------------
+
+/**
+ * Fetch the immediately-previous weekly report (by period_start) before
+ * the given periodStart. Returns null when no prior report exists.
+ */
+export async function getPreviousWeeklyReport(
+  db: DbExecutor,
+  periodStart: string
+): Promise<Record<string, unknown> | null> {
+  const result = await db.query(
+    `SELECT *
+     FROM weekly_reports
+     WHERE period_start IS NOT NULL
+       AND period_start < $1
+     ORDER BY period_start DESC
+     LIMIT 1`,
+    [periodStart]
+  );
+  return result.rows[0] ?? null;
+}
+
+/**
+ * Persist the BE-11 diff-check output on the existing weekly_reports row.
+ * Both columns are JSON; callers pass already-stringified payloads.
+ */
+export async function updateWeeklyReportDiffMetadata(
+  db: DbExecutor,
+  reportId: string,
+  data: {
+    anomalyFlagsJson: string;
+    diffMetadataJson: string;
+  }
+): Promise<void> {
+  await db.query(
+    `UPDATE weekly_reports
+     SET anomaly_flags = CAST($1 AS JSON),
+         diff_metadata = CAST($2 AS JSON),
+         updated_at = CURRENT_TIMESTAMP(6)
+     WHERE id = $3`,
+    [data.anomalyFlagsJson, data.diffMetadataJson, reportId]
+  );
 }
