@@ -14,10 +14,15 @@ export class ScrapeManager {
   private browser: Browser | null = null;
   private activeSites: Map<string, boolean> = new Map();
   private activeRuns: Map<string, ScrapeRun> = new Map();
-  // BE-10: Batch AI analysis collector per site
+  // BE-10: Batch AI analysis collector per site.
+  // The collector groups freshly-scraped campaigns and ships them as a single
+  // `ai-analysis-batch` job. The job processor itself further chunks them
+  // into `AI_BATCH_SIZE` (default 5) sub-batches before each AI call, so the
+  // collector's trigger size is just a coarse upstream heuristic.
   private pendingAiBatch: Map<string, Array<{ campaignId: string; normalized: NormalizedCampaignInput }>> = new Map();
   private batchScheduleTimeout: Map<string, NodeJS.Timeout> = new Map();
-  private readonly BATCH_SIZE = 20; // Schedule batch when this many campaigns accumulate
+  // Default 20 keeps historical behavior; AI_COLLECTOR_BATCH_SIZE can override.
+  private readonly BATCH_SIZE = parseInt(process.env.AI_COLLECTOR_BATCH_SIZE ?? '20', 10);
   private readonly BATCH_TIMEOUT_MS = 30000; // Or after 30 seconds of inactivity
 
   async initialize(): Promise<void> {
