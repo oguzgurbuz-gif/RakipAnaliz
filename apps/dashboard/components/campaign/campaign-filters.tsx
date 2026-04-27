@@ -1,6 +1,7 @@
 'use client'
 
 import * as React from 'react'
+import { useQuery } from '@tanstack/react-query'
 import { Input } from '@/components/ui/input'
 import { Select } from '@/components/ui/select'
 import { Button } from '@/components/ui/button'
@@ -8,12 +9,22 @@ import { Search, X } from 'lucide-react'
 import { COMPETITIVE_INTENT_OPTIONS } from '@/components/ui/intent-badge'
 import { CANONICAL_STATUS_OPTIONS } from '@/lib/i18n/status'
 import { SORT_FIELD_LABELS, getSortOptionLabel } from '@/lib/i18n/filters'
+import { fetchCampaignsCount } from '@/lib/api'
+import { useDebounced } from '@/lib/hooks/use-debounced'
 import type { CampaignFilters } from '@/types'
 
 interface CampaignFiltersProps {
   filters: CampaignFilters
   onFiltersChange: (filters: CampaignFilters) => void
   sites?: { id: string; name: string }[]
+  /**
+   * FE-5 — count önizlemesini etkinleştirir. Tarih aralığı + activeOnly
+   * gibi container-seviye filtreleri de count sorgusuna dahil etmek için
+   * dışarıdan effective filtre objesi verilebilir; verilmezse sadece
+   * `filters` kullanılır.
+   */
+  showCountPreview?: boolean
+  effectiveFiltersForCount?: CampaignFilters
 }
 
 const DATE_MODE_OPTIONS = [
@@ -73,7 +84,13 @@ const SORT_OPTIONS: Array<{ value: string; label: string }> = [
   { value: '-duration', label: getSortOptionLabel('-duration') },
 ]
 
-export function CampaignFilters({ filters, onFiltersChange, sites }: CampaignFiltersProps) {
+export function CampaignFilters({
+  filters,
+  onFiltersChange,
+  sites,
+  showCountPreview = false,
+  effectiveFiltersForCount,
+}: CampaignFiltersProps) {
   const handleChange = (key: keyof CampaignFilters, value: string) => {
     onFiltersChange({
       ...filters,
@@ -87,6 +104,18 @@ export function CampaignFilters({ filters, onFiltersChange, sites }: CampaignFil
 
   const hasFilters = Object.values(filters).some((v) => v && v !== '')
 
+  // FE-5 — Filtre değişince debounced (400ms) lightweight count çağrısı.
+  // `effectiveFiltersForCount` verilmişse onu kullan (container tarih aralığı
+  // ve activeOnly toggle'ı genelde dışarıda mix'leniyor); yoksa local filters.
+  const filtersForCount = effectiveFiltersForCount ?? filters
+  const debouncedFilters = useDebounced(filtersForCount, 400)
+  const { data: countData, isFetching: isCountFetching } = useQuery({
+    queryKey: ['campaigns-count', debouncedFilters],
+    queryFn: () => fetchCampaignsCount(debouncedFilters),
+    enabled: showCountPreview,
+    staleTime: 30_000,
+  })
+
   return (
     <div className="space-y-4 rounded-lg border bg-card p-4">
       <div className="flex items-center gap-4">
@@ -99,6 +128,9 @@ export function CampaignFilters({ filters, onFiltersChange, sites }: CampaignFil
             className="pl-9"
           />
         </div>
+        {showCountPreview && (
+          <CountBadge total={countData?.total} isLoading={isCountFetching} />
+        )}
         {hasFilters && (
           <Button variant="ghost" size="sm" onClick={handleClear}>
             <X className="h-4 w-4 mr-1" />
@@ -237,5 +269,39 @@ export function CampaignFilters({ filters, onFiltersChange, sites }: CampaignFil
         </div>
       </div>
     </div>
+  )
+}
+
+/**
+ * FE-5 — küçük "37 kampanya bulundu" badge'i. Yükleniyor durumunda skelet
+ * gösterir (animate-pulse). undefined total = henüz veri gelmedi.
+ */
+function CountBadge({
+  total,
+  isLoading,
+}: {
+  total: number | undefined
+  isLoading: boolean
+}) {
+  if (isLoading || total === undefined) {
+    return (
+      <span
+        className="inline-flex items-center gap-1 rounded-full border border-border/70 bg-muted/40 px-3 py-1 text-xs text-muted-foreground animate-pulse"
+        aria-live="polite"
+      >
+        <span className="inline-block h-2 w-2 rounded-full bg-muted-foreground/40" />
+        Hesaplanıyor&hellip;
+      </span>
+    )
+  }
+  return (
+    <span
+      className="inline-flex items-center gap-1 rounded-full border border-primary/30 bg-primary/10 px-3 py-1 text-xs font-medium text-primary"
+      aria-live="polite"
+      title="Mevcut filtrelere uyan toplam kayıt sayısı"
+    >
+      <span className="inline-block h-2 w-2 rounded-full bg-primary/70" />
+      {total.toLocaleString('tr-TR')} kampanya bulundu
+    </span>
   )
 }

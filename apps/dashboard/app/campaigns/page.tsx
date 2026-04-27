@@ -189,12 +189,9 @@ export default function CampaignsPage() {
     return merged
   }, [filters, dateFrom, dateTo, activeOnly])
 
-  // FE-5: Preview result count when filters are applied
-  const { data: previewData, isLoading: isPreviewLoading } = useQuery({
-    queryKey: ['campaigns-preview', effectiveFilters],
-    queryFn: () => fetchCampaigns({ ...effectiveFilters, page: 1, limit: 1 }),
-    enabled: Object.values(filters).some(v => v !== undefined && v !== ''),
-  })
+  // FE-5 — Sonuç sayısı önizlemesi artık `CampaignFilters` bileşeni
+  // içinden lightweight `count_only=1` çağrısı ile yapılıyor; debounce ve
+  // skeleton state orada. Burada eski `previewData` kullanımı kaldırıldı.
 
   const { data, isLoading, error, refetch } = useQuery({
     queryKey: ['campaigns', effectiveFilters, page, dateFrom, dateTo, activeOnly],
@@ -443,6 +440,8 @@ export default function CampaignsPage() {
           filters={filters}
           onFiltersChange={handleFiltersChange}
           sites={sites}
+          showCountPreview
+          effectiveFiltersForCount={effectiveFilters}
         />
 
         {/* "Sadece aktif" toggle + filtre preset yönetimi. */}
@@ -516,18 +515,7 @@ export default function CampaignsPage() {
           </div>
         )}
 
-        {/* FE-5: Preview result count when filters are applied */}
-        {activeFilterEntries.length > 0 && !isPreviewLoading && previewData && (
-          <div className="text-sm text-muted-foreground bg-muted/50 rounded-lg px-4 py-2">
-            <span className="font-medium">{previewData.total}</span> kampanya bulundu
-            {previewData.total > 20 && ` (ilk 20 gösteriliyor, ${previewData.total} toplam)`}
-          </div>
-        )}
-        {activeFilterEntries.length > 0 && isPreviewLoading && (
-          <div className="text-sm text-muted-foreground bg-muted/50 rounded-lg px-4 py-2 animate-pulse">
-            Sonuçlar kontrol ediliyor...
-          </div>
-        )}
+        {/* FE-5 — count önizlemesi artık CampaignFilters içinde inline. */}
 
         {activeFilterEntries.length > 0 && (
           <div className="flex flex-wrap gap-2">
