@@ -6,6 +6,8 @@ import { Select } from '@/components/ui/select'
 import { Button } from '@/components/ui/button'
 import { Search, X } from 'lucide-react'
 import { COMPETITIVE_INTENT_OPTIONS } from '@/components/ui/intent-badge'
+import { CANONICAL_STATUS_OPTIONS } from '@/lib/i18n/status'
+import { SORT_FIELD_LABELS, getSortOptionLabel } from '@/lib/i18n/filters'
 import type { CampaignFilters } from '@/types'
 
 interface CampaignFiltersProps {
@@ -25,12 +27,8 @@ const DATE_MODE_OPTIONS = [
 
 // Wave 1 #1.4 — Kanonik 4 state. Backend yalnız active/expired/hidden/pending
 // yazıyor; legacy 'passive' / 'ended' opsiyonları kaldırıldı.
-const STATUS_OPTIONS = [
-  { value: 'active', label: 'Aktif' },
-  { value: 'expired', label: 'Bitmiş' },
-  { value: 'hidden', label: 'Pasif' },
-  { value: 'pending', label: 'Beklemede' },
-]
+// FE-1 — etiketler `lib/i18n/status.ts` üzerinden tek noktadan besleniyor.
+const STATUS_OPTIONS = CANONICAL_STATUS_OPTIONS
 
 // Migration 018 — `intent` filter (Amaç) replaces sentiment in the UI.
 // `COMPETITIVE_INTENT_OPTIONS` is the single source of truth for label/value.
@@ -59,19 +57,20 @@ const CAMPAIGN_TYPE_OPTIONS = [
   { value: 'diğer', label: 'Diğer' },
 ]
 
-const SORT_OPTIONS = [
-  { value: 'last_seen_at', label: 'Son görülme' },
-  { value: 'valid_from', label: 'Başlangıç tarihi' },
-  { value: 'valid_to', label: 'Bitiş tarihi' },
-  { value: 'created_at', label: 'Oluşturulma' },
-  { value: 'updated_at', label: 'Güncellenme' },
-  { value: 'title', label: 'Başlık (A-Z)' },
+// FE-3 — sort etiketleri `lib/i18n/filters.ts` tek noktasından besleniyor.
+const SORT_OPTIONS: Array<{ value: string; label: string }> = [
+  { value: 'last_seen_at', label: SORT_FIELD_LABELS.last_seen_at },
+  { value: 'valid_from', label: SORT_FIELD_LABELS.valid_from },
+  { value: 'valid_to', label: SORT_FIELD_LABELS.valid_to },
+  { value: 'created_at', label: SORT_FIELD_LABELS.created_at },
+  { value: 'updated_at', label: SORT_FIELD_LABELS.updated_at },
+  { value: 'title', label: SORT_FIELD_LABELS.title },
   { value: '-title', label: 'Başlık (Z-A)' },
-  { value: 'status', label: 'Durum' },
-  { value: 'bonus_amount', label: 'Bonus miktarı' },
-  { value: '-bonus_amount', label: 'Bonus miktarı (azalan)' },
-  { value: 'duration', label: 'Kampanya süresi' },
-  { value: '-duration', label: 'Kampanya süresi (azalan)' },
+  { value: 'status', label: SORT_FIELD_LABELS.status },
+  { value: 'bonus_amount', label: SORT_FIELD_LABELS.bonus_amount },
+  { value: '-bonus_amount', label: getSortOptionLabel('-bonus_amount') },
+  { value: 'duration', label: SORT_FIELD_LABELS.duration },
+  { value: '-duration', label: getSortOptionLabel('-duration') },
 ]
 
 export function CampaignFilters({ filters, onFiltersChange, sites }: CampaignFiltersProps) {

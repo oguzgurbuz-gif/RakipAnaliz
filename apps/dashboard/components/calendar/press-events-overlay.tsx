@@ -10,6 +10,7 @@ import {
 } from '@/lib/api'
 import { Modal } from '@/components/ui/modal'
 import { cn } from '@/lib/utils'
+import { getSiteDisplayName } from '@/lib/i18n/site'
 
 /**
  * Press / event calendar overlay primitives.
@@ -263,7 +264,7 @@ function YoYCard({
             {w.topBonuses.map((b) => (
               <li key={b.campaign_id} className="text-[11px] flex items-baseline gap-2">
                 <span className="font-mono text-muted-foreground">
-                  {b.site_code ?? '?'}
+                  {getSiteDisplayName(b.site_code, undefined) || '?'}
                 </span>
                 <span className="flex-1 truncate">{b.title}</span>
                 <span className="font-semibold">

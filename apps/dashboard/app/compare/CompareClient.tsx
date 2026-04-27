@@ -24,6 +24,7 @@ import {
 } from '@/lib/campaign-presentation'
 import { getSentimentColor, cn } from '@/lib/utils'
 import { StatusBadge } from '@/components/campaign/status-badge'
+import { getSiteDisplayName } from '@/lib/i18n/site'
 import {
   Search,
   Star,
@@ -1066,7 +1067,9 @@ function BrandCompareTab() {
                   <CardHeader className="pb-3">
                     <div className="flex items-center justify-between gap-2">
                       <div className="min-w-0">
-                        <CardTitle className="text-lg truncate">{site.site_name}</CardTitle>
+                        <CardTitle className="text-lg truncate">
+                          {getSiteDisplayName(site.site_code, site.site_name)}
+                        </CardTitle>
                         <p className="text-xs text-muted-foreground">{site.site_code}</p>
                       </div>
                     </div>

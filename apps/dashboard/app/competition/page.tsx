@@ -21,6 +21,7 @@ import { GapAnalysis } from '@/components/competition/gap-analysis'
 import { ShareOfVoice } from '@/components/competition/share-of-voice'
 import { PositioningMap } from '@/components/competition/positioning-map'
 import { getCategoryLabel } from '@/lib/category-labels'
+import { getSiteDisplayName } from '@/lib/i18n/site'
 import { cn } from '@/lib/utils'
 import { fetchCompetition } from '@/lib/api'
 import { useDateRange } from '@/lib/date-range/context'
@@ -289,7 +290,9 @@ export default function CompetitionPage() {
                     <TableRow>
                       <TableHead className="sticky left-0 bg-background">Tür</TableHead>
                       {(data?.sites || []).slice(0, 8).map(s => (
-                        <TableHead key={s.site_code} className="text-center">{s.site_code}</TableHead>
+                        <TableHead key={s.site_code} className="text-center">
+                          {getSiteDisplayName(s.site_code, s.site_name)}
+                        </TableHead>
                       ))}
                     </TableRow>
                   </TableHeader>

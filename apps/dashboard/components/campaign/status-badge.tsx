@@ -1,6 +1,7 @@
 import * as React from 'react'
 import { Badge } from '@/components/ui/badge'
 import { cn, getStatusColor } from '@/lib/utils'
+import { getStatusLabel } from '@/lib/i18n/status'
 
 interface StatusBadgeProps {
   status: string
@@ -10,25 +11,11 @@ interface StatusBadgeProps {
 export function StatusBadge({ status, className }: StatusBadgeProps) {
   const statusClass = getStatusColor(status)
 
-  // Scraper schema produces `expired` / `hidden`; legacy UI used `ended` /
-  // `passive`. Accept both so badges render Turkish labels regardless of
-  // which writer set the campaign's status.
-  const labels: Record<string, string> = {
-    active: 'Aktif',
-    ended: 'Bitmiş',
-    expired: 'Bitmiş',
-    passive: 'Pasif',
-    hidden: 'Pasif',
-    changed: 'Değişmiş',
-    pending: 'Beklemede',
-    running: 'Çalışıyor',
-    completed: 'Tamamlandı',
-    failed: 'Başarısız',
-  }
-
+  // FE-1 — Türkçe etiketler `lib/i18n/status.ts` tek noktasından besleniyor.
+  // `ended → Sona Ermiş` mapping'i artık merkezi (önceden "Bitmiş" idi).
   return (
-    <Badge className={cn('capitalize', statusClass)}>
-      {labels[status] || status}
+    <Badge className={cn('capitalize', statusClass, className)}>
+      {getStatusLabel(status) || status}
     </Badge>
   )
 }
