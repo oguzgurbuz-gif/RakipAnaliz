@@ -47,17 +47,51 @@ interface CampaignRow {
 
 /**
  * BE-10: Batch AI Analysis Job Processor
- * 
- * Processes multiple campaigns in a single API call to reduce costs.
- * 50 campaigns = 1 API call instead of 50 API calls.
+ *
+ * Processes multiple campaigns by chunking the input into AI sub-batches of
+ * `AI_BATCH_SIZE` (default 5) and issuing one DeepSeek call per chunk.
+ *
+ * Resilience contract:
+ * - A failure on one chunk MUST NOT fail the whole job. Successful chunks
+ *   still persist; the failed chunk's campaign IDs are reported back so the
+ *   scheduler-level dead letter queue (BE-9) can surface them.
+ * - Confidence normalization (commit `batch-3b`) lives inside
+ *   `queries.insertAiAnalysis` (`toDbConfidence`), so it applies whether we
+ *   call the AI once or N times.
+ * - When `AI_BATCH_SIZE === 1`, behavior is bit-for-bit equivalent to the
+ *   original "tek tek" path: one campaign per AI call, one DB insert per
+ *   campaign. The wrapper is a strict superset.
  */
+const DEFAULT_AI_BATCH_SIZE = 5;
+
+function getAiBatchSize(): number {
+  const raw = process.env.AI_BATCH_SIZE;
+  if (!raw) return DEFAULT_AI_BATCH_SIZE;
+  const parsed = parseInt(raw, 10);
+  if (!Number.isFinite(parsed) || parsed < 1) return DEFAULT_AI_BATCH_SIZE;
+  return parsed;
+}
+
+function chunk<T>(items: T[], size: number): T[][] {
+  if (size <= 1) return items.map((item) => [item]);
+  const out: T[][] = [];
+  for (let i = 0; i < items.length; i += size) {
+    out.push(items.slice(i, i + size));
+  }
+  return out;
+}
+
 export async function processAiAnalysisBatchJob(
   payload: Record<string, unknown>
 ): Promise<AiAnalysisBatchResult> {
   const campaignIds = (payload.campaignIds as string[]) || [];
   const priority = (payload.priority as string) || 'medium';
+  const aiBatchSize = getAiBatchSize();
 
-  logger.info(`Processing batch AI analysis for ${campaignIds.length} campaigns`, { priority });
+  logger.info(`Processing batch AI analysis for ${campaignIds.length} campaigns`, {
+    priority,
+    aiBatchSize,
+  });
 
   // Fetch all campaigns from DB
   const campaigns = await fetchCampaignsForBatch(campaignIds);
@@ -67,49 +101,67 @@ export async function processAiAnalysisBatchJob(
     return { processed: 0, successful: 0, failed: 0, results: [] };
   }
 
-  // Build batch prompt with all campaigns
-  const batchCampaigns: BatchAnalysisCampaign[] = campaigns.map((c) => ({
-    campaignId: String(c.id),
-    title: String(c.title),
-    body: c.body ? String(c.body) : '',
-    siteName: String(c.site_code),
-  }));
+  // Split into AI sub-batches. Each sub-batch fails or succeeds in isolation
+  // so a single bad chunk cannot kill the whole job's progress.
+  const subBatches = chunk(campaigns, aiBatchSize);
+  const allResults: Array<{ campaignId: string; success: boolean; error?: string }> = [];
 
-  try {
-    // Call AI once for all campaigns
-    const result = await processBatchWithAI(batchCampaigns);
+  logger.info(`Splitting batch into ${subBatches.length} sub-batches of <=${aiBatchSize}`);
 
-    // Update each campaign with results
-    const updateResults = await updateCampaignsWithResults(result, campaigns);
+  for (let i = 0; i < subBatches.length; i++) {
+    const subBatch = subBatches[i];
+    const subBatchCampaigns: BatchAnalysisCampaign[] = subBatch.map((c) => ({
+      campaignId: String(c.id),
+      title: String(c.title),
+      body: c.body ? String(c.body) : '',
+      siteName: String(c.site_code),
+    }));
 
-    logger.info(`Batch AI analysis completed`, {
-      processed: campaigns.length,
-      successful: updateResults.filter((r) => r.success).length,
-      failed: updateResults.filter((r) => !r.success).length,
-    });
+    try {
+      const aiResults = await processBatchWithAI(subBatchCampaigns);
+      const updateResults = await updateCampaignsWithResults(aiResults, subBatch);
+      allResults.push(...updateResults);
 
-    return {
-      processed: campaigns.length,
-      successful: updateResults.filter((r) => r.success).length,
-      failed: updateResults.filter((r) => !r.success).length,
-      results: updateResults,
-    };
-  } catch (error) {
-    const errorMessage = error instanceof Error ? error.message : 'Unknown error';
-    logger.error(`Batch AI analysis failed: ${errorMessage}`);
-
-    // Mark all as failed
-    return {
-      processed: campaigns.length,
-      successful: 0,
-      failed: campaigns.length,
-      results: campaigns.map((c) => ({
-        campaignId: String(c.id),
-        success: false,
-        error: errorMessage,
-      })),
-    };
+      logger.debug(`Sub-batch ${i + 1}/${subBatches.length} done`, {
+        size: subBatch.length,
+        successful: updateResults.filter((r) => r.success).length,
+        failed: updateResults.filter((r) => !r.success).length,
+      });
+    } catch (error) {
+      // Sub-batch level failure: the AI call (or its parsing) blew up.
+      // Do NOT abort the whole job — record per-campaign failure and let the
+      // remaining sub-batches keep going. Job-level scheduler will retry the
+      // job; if it still fails after maxAttempts, BE-9 dead-letter-queues it.
+      const errorMessage = error instanceof Error ? error.message : 'Unknown error';
+      logger.error(`Sub-batch ${i + 1}/${subBatches.length} failed: ${errorMessage}`, {
+        size: subBatch.length,
+      });
+      for (const c of subBatch) {
+        allResults.push({
+          campaignId: String(c.id),
+          success: false,
+          error: errorMessage,
+        });
+      }
+    }
   }
+
+  const successful = allResults.filter((r) => r.success).length;
+  const failed = allResults.filter((r) => !r.success).length;
+
+  logger.info(`Batch AI analysis completed`, {
+    processed: campaigns.length,
+    successful,
+    failed,
+    subBatches: subBatches.length,
+  });
+
+  return {
+    processed: campaigns.length,
+    successful,
+    failed,
+    results: allResults,
+  };
 }
 
 async function fetchCampaignsForBatch(campaignIds: string[]): Promise<CampaignRow[]> {
