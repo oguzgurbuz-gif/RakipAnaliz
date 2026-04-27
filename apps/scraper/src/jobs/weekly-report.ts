@@ -3,6 +3,14 @@ import { getDb } from '../db';
 import * as queries from '../db/queries';
 import { callDeepSeek } from '../ai/client';
 import { createNotification } from './notifications';
+import {
+  validateExecutiveSummary,
+  computeDiff,
+  emptyDiffResult,
+  type ExecutiveSummary,
+  type DiffResult,
+  type WeeklyReportSnapshot,
+} from '@bitalih/shared/reports';
 
 export interface WeeklyReportPayload {
   weekStartDate: string;
@@ -65,7 +73,11 @@ export async function processWeeklyReportJob(
 
     // AI executive summary is best-effort. DeepSeek failures must NOT
     // mark the weekly report as failed nor break the recurring chain.
-    await enrichWeeklyReportWithAiSummary(reportId, report);
+    const aiSummary = await enrichWeeklyReportWithAiSummary(reportId, report);
+
+    // BE-11: Diff vs. previous week. Always runs, even when AI is skipped
+    // (still tracks volume/category swings). Best-effort; never throws.
+    await runWeeklyReportDiffCheck(reportId, report, aiSummary);
 
     return report;
   } finally {
@@ -342,7 +354,8 @@ async function generateAndStoreWeeklyReportNow(
     weekEndDate,
     totalCampaigns: report.summary.totalCampaigns,
   });
-  await enrichWeeklyReportWithAiSummary(reportId, report);
+  const aiSummary = await enrichWeeklyReportWithAiSummary(reportId, report);
+  await runWeeklyReportDiffCheck(reportId, report, aiSummary);
 }
 
 /**
@@ -448,12 +461,6 @@ export async function runWeeklyReportCatchUp(): Promise<void> {
 // AI executive summary (best-effort, non-blocking)
 // ---------------------------------------------------------------------------
 
-interface AiSummaryPayload {
-  executive_summary: string;
-  risks: string[];
-  recommendations: string[];
-}
-
 function buildAiSummaryPrompt(report: WeeklyReport): string {
   const topSites = report.bySite
     .slice()
@@ -485,46 +492,56 @@ function buildAiSummaryPrompt(report: WeeklyReport): string {
     '{',
     '  "executive_summary": string (Türkçe, tam 2 cümle),',
     '  "risks": string[] (Türkçe, tam 3 madde),',
-    '  "recommendations": string[] (Türkçe, tam 3 madde)',
+    '  "recommendations": string[] (Türkçe, tam 3 madde),',
+    '  "confidence": number (0..1, çıktıya olan güveniniz)',
     '}',
     'Markdown veya açıklama ekleme. Sadece JSON döndür.',
   ].join('\n');
 }
 
-function parseAiSummary(content: string | undefined): AiSummaryPayload | null {
-  if (!content) return null;
+/**
+ * BE-11: forward AI failures to the dead-letter queue (BE-9). Best-effort
+ * — DLQ insert errors must not block the original report write.
+ */
+async function pushAiFailureToDlq(args: {
+  reportId: string;
+  reason: string;
+  rawSnippet: string | null;
+  prompt: string;
+}): Promise<void> {
   try {
-    const parsed = JSON.parse(content) as Record<string, unknown>;
-    const summary = typeof parsed.executive_summary === 'string'
-      ? parsed.executive_summary.trim()
-      : '';
-    const risks = Array.isArray(parsed.risks)
-      ? parsed.risks.filter((r): r is string => typeof r === 'string' && r.trim().length > 0)
-      : [];
-    const recommendations = Array.isArray(parsed.recommendations)
-      ? parsed.recommendations.filter(
-          (r): r is string => typeof r === 'string' && r.trim().length > 0
-        )
-      : [];
-
-    if (!summary && risks.length === 0 && recommendations.length === 0) {
-      return null;
-    }
-
-    return { executive_summary: summary, risks, recommendations };
-  } catch {
-    return null;
+    const db = getDb();
+    await queries.insertFailedJob(db, {
+      // No queue job exists for the AI summary — it runs inline. We use 0
+      // as a sentinel "no original job id" so the failed_jobs row is still
+      // queryable by job_type + payload.
+      originalJobId: 0,
+      type: 'weekly-report-ai-summary',
+      payload: JSON.stringify({
+        reportId: args.reportId,
+        prompt: args.prompt,
+        rawSnippet: args.rawSnippet,
+      }),
+      error: args.reason,
+      attempts: 1,
+      maxAttempts: 1,
+    });
+  } catch (dlqError) {
+    logger.warn('Failed to record AI summary failure in DLQ', {
+      reportId: args.reportId,
+      error: dlqError instanceof Error ? dlqError.message : String(dlqError),
+    });
   }
 }
 
 async function enrichWeeklyReportWithAiSummary(
   reportId: string,
   report: WeeklyReport
-): Promise<void> {
+): Promise<ExecutiveSummary | null> {
   try {
     if (!process.env.DEEPSEEK_API_KEY) {
       logger.info('Skipping AI summary: DEEPSEEK_API_KEY not configured', { reportId });
-      return;
+      return null;
     }
 
     logger.info('Generating AI summary for weekly report', { reportId });
@@ -548,15 +565,28 @@ async function enrichWeeklyReportWithAiSummary(
     );
 
     const content = response.choices?.[0]?.message?.content;
-    const parsed = parseAiSummary(content);
+    const validation = validateExecutiveSummary(content);
 
-    if (!parsed) {
-      logger.warn('AI summary parse failed, leaving columns NULL', {
+    if (!validation.ok) {
+      // BE-11: schema validation failed. Do NOT touch the existing row's
+      // AI columns (we'd prefer last-known-good summary over corrupted
+      // overwrite). Push to dead-letter queue so it can be retried.
+      logger.warn('AI summary schema validation failed, leaving previous row untouched', {
         reportId,
-        snippet: content?.substring(0, 200),
+        reason: validation.reason,
+        issues: validation.issues,
+        snippet: validation.raw,
       });
-      return;
+      await pushAiFailureToDlq({
+        reportId,
+        reason: `weekly-report-ai-summary schema invalid: ${validation.reason}`,
+        rawSnippet: validation.raw,
+        prompt: userPrompt,
+      });
+      return null;
     }
+
+    const parsed = validation.data;
 
     const db = getDb();
     await db.query(
@@ -579,11 +609,153 @@ async function enrichWeeklyReportWithAiSummary(
       summaryChars: parsed.executive_summary.length,
       risks: parsed.risks.length,
       recommendations: parsed.recommendations.length,
+      confidence: parsed.confidence ?? null,
     });
+
+    return parsed;
   } catch (error) {
     logger.warn('AI summary generation failed (report still saved)', {
       reportId,
       error: error instanceof Error ? error.message : String(error),
     });
+    return null;
   }
+}
+
+// ---------------------------------------------------------------------------
+// BE-11 — Diff check vs. previous week
+// ---------------------------------------------------------------------------
+
+function snapshotFromCurrent(
+  report: WeeklyReport,
+  aiConfidence: number | null
+): WeeklyReportSnapshot {
+  const categories = Array.from(
+    new Set(
+      report.bySite
+        .map((s) => s.siteCode)
+        .filter((c): c is string => typeof c === 'string' && c.length > 0)
+    )
+  );
+  return {
+    totalCampaigns: report.summary.totalCampaigns,
+    // The job-based report doesn't carry campaign categories directly, so
+    // we use site_code as the proxy "category set". Disappearance of a
+    // site is a meaningful signal too (scrape gap or site shutdown).
+    categories,
+    aiConfidence,
+  };
+}
+
+function snapshotFromPreviousRow(
+  row: Record<string, unknown>
+): WeeklyReportSnapshot {
+  // report_payload may live on either `report_payload` (newer) or as
+  // separate columns. Be defensive — old rows from migrations 001/008
+  // may not have either populated.
+  const payload =
+    (row.report_payload as Record<string, unknown> | null | undefined) ?? {};
+  const summary = (payload.summary as Record<string, unknown> | undefined) ?? {};
+  const totalCampaigns =
+    (typeof summary.totalCampaigns === 'number' && summary.totalCampaigns) ||
+    (typeof row.campaign_count === 'number' && row.campaign_count) ||
+    0;
+
+  let categories: string[] = [];
+  const bySite = payload.by_site ?? payload.bySite;
+  if (Array.isArray(bySite)) {
+    categories = bySite
+      .map((s) => (s as Record<string, unknown>).siteCode)
+      .filter((c): c is string => typeof c === 'string' && c.length > 0);
+  } else if (typeof row.by_site === 'string') {
+    try {
+      const parsed = JSON.parse(row.by_site) as Array<Record<string, unknown>>;
+      if (Array.isArray(parsed)) {
+        categories = parsed
+          .map((s) => s.siteCode as string | undefined)
+          .filter((c): c is string => typeof c === 'string' && c.length > 0);
+      }
+    } catch {
+      categories = [];
+    }
+  }
+
+  // Previous AI confidence is read from diff_metadata.currentAiConfidence
+  // (we always persist whatever confidence we observed); fall back to null.
+  const prevDiff =
+    (row.diff_metadata as Record<string, unknown> | null | undefined) ?? {};
+  const prevDetails =
+    (prevDiff.details as Record<string, unknown> | undefined) ?? {};
+  const prevAiConfidence =
+    typeof prevDetails.currentAiConfidence === 'number'
+      ? prevDetails.currentAiConfidence
+      : null;
+
+  return {
+    totalCampaigns,
+    categories: Array.from(new Set(categories)),
+    aiConfidence: prevAiConfidence,
+  };
+}
+
+async function runWeeklyReportDiffCheck(
+  reportId: string,
+  report: WeeklyReport,
+  aiSummary: ExecutiveSummary | null
+): Promise<DiffResult> {
+  const db = getDb();
+  const aiConfidence =
+    aiSummary && typeof aiSummary.confidence === 'number'
+      ? aiSummary.confidence
+      : null;
+  const currentSnapshot = snapshotFromCurrent(report, aiConfidence);
+
+  let diff: DiffResult;
+  try {
+    const previousRow = await queries.getPreviousWeeklyReport(db, report.period.start);
+    if (!previousRow) {
+      diff = emptyDiffResult(currentSnapshot);
+    } else {
+      const previousSnapshot = snapshotFromPreviousRow(previousRow);
+      diff = computeDiff(currentSnapshot, previousSnapshot);
+    }
+  } catch (error) {
+    logger.warn('Diff check pre-computation failed; recording empty diff', {
+      reportId,
+      error: error instanceof Error ? error.message : String(error),
+    });
+    diff = emptyDiffResult(currentSnapshot);
+  }
+
+  try {
+    await queries.updateWeeklyReportDiffMetadata(db, reportId, {
+      anomalyFlagsJson: JSON.stringify(diff.flags),
+      diffMetadataJson: JSON.stringify(diff),
+    });
+  } catch (error) {
+    logger.warn('Failed to persist weekly report diff metadata', {
+      reportId,
+      error: error instanceof Error ? error.message : String(error),
+    });
+  }
+
+  if (diff.hasAnomaly) {
+    logger.warn('Weekly report diff flagged anomalies', {
+      reportId,
+      flags: diff.flags,
+      previousTotal: diff.details.previousTotal,
+      currentTotal: diff.details.currentTotal,
+      totalDeltaRatio: diff.details.totalDeltaRatio,
+      addedCategories: diff.details.addedCategories,
+      removedCategories: diff.details.removedCategories,
+      aiConfidenceDelta: diff.details.aiConfidenceDelta,
+    });
+  } else {
+    logger.info('Weekly report diff check completed (no anomalies)', {
+      reportId,
+      comparedAgainst: diff.comparedAgainst,
+    });
+  }
+
+  return diff;
 }

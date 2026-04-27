@@ -8,6 +8,13 @@ import {
   getCorsHeaders,
 } from '@/lib/response'
 import { callDashboardAi } from '@/lib/ai-client'
+import {
+  validateAutoAnalysis,
+  computeDiff,
+  emptyDiffResult,
+  type DiffResult,
+  type WeeklyReportSnapshot,
+} from '@bitalih/shared/reports'
 
 /**
  * D6 — Auto analysis
@@ -33,6 +40,9 @@ const querySchema = z.object({
   force: z.string().optional(),
 })
 
+// AnalysisSections is the persisted shape consumed by auto-analysis-card
+// (kept identical to the prior interface so the UI doesn't change). The
+// optional `confidence` field rides along but is not yet rendered.
 interface AnalysisSections {
   summary: string
   topMovers: string
@@ -40,6 +50,7 @@ interface AnalysisSections {
   categoryInsights: string
   riskFlags: string
   recommendations: string
+  confidence?: number
 }
 
 interface AutoAnalysisPayload {
@@ -49,6 +60,10 @@ interface AutoAnalysisPayload {
   hasExistingReport: boolean
   analysis: AnalysisSections | null
   notes: string[]
+  // BE-11: diff vs. previous week. Always present when the analysis ran;
+  // null when we couldn't run a comparison (no prior report). UI is not
+  // surfacing this yet — kept in the payload for log/debug visibility.
+  diff: DiffResult | null
   generatedAt: string
 }
 
@@ -337,47 +352,101 @@ ${JSON.stringify(metrics, null, 2)}
   "bonusInsights": "Bonus dağılımı (min/median/max), varsa artış/azalış trendi.",
   "categoryInsights": "En yoğun kategoriler, kategori bazlı bonus median yorumu.",
   "riskFlags": "Dikkat çeken anomaliler: sıra dışı bonus, yüksek versiyon trafiği vb.",
-  "recommendations": "2-3 somut aksiyon önerisi (Bitalih perspektifinden)."
+  "recommendations": "2-3 somut aksiyon önerisi (Bitalih perspektifinden).",
+  "confidence": 0.0..1.0 arası bir sayı (çıktıya olan güveniniz)
 }
 
 Sadece JSON döndür. Başka açıklama, markdown, kod bloğu ekleme.`
 }
 
-function pickString(value: unknown): string {
-  if (typeof value !== 'string') return ''
-  return value.trim()
+/**
+ * BE-11: build a snapshot of the just-computed period for diff comparison.
+ * Categories come from `topCategories` (the AI route already aggregates
+ * them); volume from `totals.totalCampaigns`.
+ */
+function snapshotFromMetrics(
+  metrics: PeriodMetrics,
+  aiConfidence: number | null
+): WeeklyReportSnapshot {
+  return {
+    totalCampaigns: metrics.totals.totalCampaigns,
+    categories: metrics.topCategories.map((c) => c.category),
+    aiConfidence,
+  }
 }
 
-function parseAnalysis(content: string): AnalysisSections | null {
-  // DeepSeek json_object modunda saf JSON döner ama kod bloğu sarılı gelme
-  // ihtimaline karşı defensive.
-  let raw = content.trim()
-  if (raw.startsWith('```')) {
-    raw = raw.replace(/^```(?:json)?/i, '').replace(/```$/, '').trim()
-  }
-  let parsed: Record<string, unknown>
+/**
+ * BE-11: previous-week comparison. Looks for the most recent stored
+ * weekly_report row whose period_end is strictly before this period's
+ * `from`. Falls back to an empty diff result when nothing is found or
+ * the lookup throws.
+ */
+async function loadPreviousSnapshot(
+  fromDate: string
+): Promise<WeeklyReportSnapshot | null> {
   try {
-    parsed = JSON.parse(raw)
+    const row = await queryOne<{
+      report_payload: unknown
+      by_site: string | null
+      campaign_count: string | number | null
+      diff_metadata: unknown
+    }>(
+      `
+      SELECT report_payload, by_site, campaign_count, diff_metadata
+      FROM weekly_reports
+      WHERE COALESCE(period_end, report_week_end) IS NOT NULL
+        AND COALESCE(period_end, report_week_end) < $1
+      ORDER BY COALESCE(period_end, report_week_end) DESC
+      LIMIT 1
+      `,
+      [fromDate]
+    )
+    if (!row) return null
+
+    const payload =
+      (row.report_payload as Record<string, unknown> | null | undefined) ?? {}
+    const summary =
+      (payload.summary as Record<string, unknown> | undefined) ?? {}
+    const totalCampaigns =
+      (typeof summary.totalCampaigns === 'number' && summary.totalCampaigns) ||
+      asInt(row.campaign_count) ||
+      0
+
+    let categories: string[] = []
+    const bySite = payload.by_site ?? payload.bySite
+    if (Array.isArray(bySite)) {
+      categories = bySite
+        .map((s) => (s as Record<string, unknown>).siteCode)
+        .filter((c): c is string => typeof c === 'string' && c.length > 0)
+    } else if (typeof row.by_site === 'string') {
+      try {
+        const parsed = JSON.parse(row.by_site) as Array<Record<string, unknown>>
+        if (Array.isArray(parsed)) {
+          categories = parsed
+            .map((s) => s.siteCode as string | undefined)
+            .filter((c): c is string => typeof c === 'string' && c.length > 0)
+        }
+      } catch {
+        categories = []
+      }
+    }
+
+    const prevDiff =
+      (row.diff_metadata as Record<string, unknown> | null | undefined) ?? {}
+    const prevDetails =
+      (prevDiff.details as Record<string, unknown> | undefined) ?? {}
+    const prevAiConfidence =
+      typeof prevDetails.currentAiConfidence === 'number'
+        ? prevDetails.currentAiConfidence
+        : null
+
+    return {
+      totalCampaigns,
+      categories: Array.from(new Set(categories)),
+      aiConfidence: prevAiConfidence,
+    }
   } catch {
     return null
-  }
-
-  const summary = pickString(parsed.summary)
-  const topMovers = pickString(parsed.topMovers)
-  const bonusInsights = pickString(parsed.bonusInsights)
-  const categoryInsights = pickString(parsed.categoryInsights)
-  const riskFlags = pickString(parsed.riskFlags)
-  const recommendations = pickString(parsed.recommendations)
-
-  if (!summary && !topMovers && !bonusInsights && !categoryInsights) return null
-
-  return {
-    summary: summary || 'Bu dönem için yeterli özet çıkarılamadı.',
-    topMovers: topMovers || 'Öne çıkan site değişimi tespit edilmedi.',
-    bonusInsights: bonusInsights || 'Bonus dağılımı için yeterli veri yok.',
-    categoryInsights: categoryInsights || 'Kategori dağılımı yorumlanamadı.',
-    riskFlags: riskFlags || 'Kayda değer anomali tespit edilmedi.',
-    recommendations: recommendations || 'Aksiyon önerisi için daha fazla veri gerekli.',
   }
 }
 
@@ -470,6 +539,7 @@ export async function GET(request: NextRequest) {
         hasExistingReport,
         analysis: null,
         notes,
+        diff: null,
         generatedAt: new Date().toISOString(),
       }
       // Bu cevabı cache'e koyMA — kullanıcı 5 dk sonra tekrar denerse scrape
@@ -491,6 +561,7 @@ export async function GET(request: NextRequest) {
         hasExistingReport,
         analysis: null,
         notes,
+        diff: null,
         generatedAt: new Date().toISOString(),
       }
       return successResponse(payload)
@@ -510,9 +581,31 @@ export async function GET(request: NextRequest) {
 
     let analysis: AnalysisSections | null = null
     if (aiResult.status === 'ok') {
-      analysis = parseAnalysis(aiResult.content)
-      if (!analysis) {
-        notes.push('AI yanıtı JSON olarak parse edilemedi.')
+      // BE-11: zod validation. On schema failure we log (server-side) and
+      // surface a precise reason to the user instead of the prior generic
+      // "JSON olarak parse edilemedi" message. No DLQ here — interactive
+      // endpoint, no retry queue; the UI's "tekrar dene" button is the
+      // human-driven retry path.
+      const validation = validateAutoAnalysis(aiResult.content)
+      if (validation.ok) {
+        analysis = {
+          summary: validation.data.summary,
+          topMovers: validation.data.topMovers,
+          bonusInsights: validation.data.bonusInsights,
+          categoryInsights: validation.data.categoryInsights,
+          riskFlags: validation.data.riskFlags,
+          recommendations: validation.data.recommendations,
+          confidence: validation.data.confidence,
+        }
+      } else {
+        // eslint-disable-next-line no-console -- intentional structured log
+        console.warn('[auto-analysis] AI schema validation failed', {
+          period: { from, to },
+          reason: validation.reason,
+          issues: validation.issues,
+          snippet: validation.raw,
+        })
+        notes.push(`AI yanıtı şema doğrulamasını geçemedi: ${validation.reason}`)
       }
     } else {
       switch (aiResult.status) {
@@ -532,6 +625,31 @@ export async function GET(request: NextRequest) {
       }
     }
 
+    // BE-11: diff vs. previous week. Always computed when metrics exist
+    // (analysis can be null — diff still tracks volume/category swings).
+    const currentSnapshot = snapshotFromMetrics(
+      metrics,
+      typeof analysis?.confidence === 'number' ? analysis.confidence : null
+    )
+    const prevSnapshot = await loadPreviousSnapshot(from)
+    const diff: DiffResult = prevSnapshot
+      ? computeDiff(currentSnapshot, prevSnapshot)
+      : emptyDiffResult(currentSnapshot)
+
+    if (diff.hasAnomaly) {
+      // eslint-disable-next-line no-console -- intentional structured log
+      console.warn('[auto-analysis] Diff flagged anomalies', {
+        period: { from, to },
+        flags: diff.flags,
+        previousTotal: diff.details.previousTotal,
+        currentTotal: diff.details.currentTotal,
+        totalDeltaRatio: diff.details.totalDeltaRatio,
+        addedCategories: diff.details.addedCategories,
+        removedCategories: diff.details.removedCategories,
+        aiConfidenceDelta: diff.details.aiConfidenceDelta,
+      })
+    }
+
     const payload: AutoAnalysisPayload = {
       period: { from, to },
       dataReady,
@@ -539,6 +657,7 @@ export async function GET(request: NextRequest) {
       hasExistingReport,
       analysis,
       notes,
+      diff,
       generatedAt: new Date().toISOString(),
     }
 
