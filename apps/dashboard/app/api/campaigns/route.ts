@@ -34,6 +34,14 @@ const querySchema = z.object({
   to: z.string().optional(),
   search: z.string().optional(),
   sort: z.string().optional(),
+  // FE-5 — Filtre uygulanmadan sonuç sayısı önizlemesi. true ise WHERE clause
+  // aynı çalıştırılır ama data SELECT'i, ORDER BY ve LIMIT atlanır; sadece
+  // `{ total }` döner. URL'de `?count_only=1` veya `?count_only=true` kabul
+  // edilir.
+  count_only: z
+    .union([z.literal('1'), z.literal('true'), z.literal('0'), z.literal('false')])
+    .optional()
+    .transform((v) => v === '1' || v === 'true'),
 });
 
 type CampaignRow = {
@@ -240,6 +248,25 @@ export async function GET(request: NextRequest) {
 
     const countResult = await query<{ total: string }>(countQuery, filterParams);
     const total = parseInt(countResult[0]?.total || '0', 10);
+
+    // FE-5 — Sonuç sayısı önizleme modu. WHERE clause aynı parametrelerle
+    // çalıştırıldı; veri SELECT'i, sıralama ve sayfalama gereksiz, hemen dön.
+    if (params.count_only) {
+      return NextResponse.json(
+        {
+          success: true,
+          data: [],
+          meta: {
+            page,
+            pageSize,
+            total,
+            totalPages: Math.ceil(total / pageSize),
+            countOnly: true,
+          },
+        },
+        { headers: getCorsHeaders(request) }
+      );
+    }
 
     // Migration 018 — pull the latest competitive_intent / confidence from
     // `campaign_ai_analyses` via a correlated subquery. We can't add this to

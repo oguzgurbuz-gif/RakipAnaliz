@@ -3,12 +3,17 @@
 /**
  * DateRangePickerHeader — sayfaların üstüne yerleştirilen küçük bar.
  *
- * - 5 preset chip: Bugün / Bu Hafta / Bu Ay / Son 7 Gün / Son 30 Gün
+ * - 4 hızlı tarih chip'i: Bu Hafta / Bu Ay / Son 7 Gün / Son 30 Gün
+ *   (FE-7 — `lib/date/quick-ranges.ts` üzerinden besleniyor)
  * - Sağda mevcut DateRangePicker (custom from/to seçimi)
  * - "Sıfırla" butonu (scope default'una döner)
  *
  * Kullanım:
  *   <DateRangePickerHeader scope="calendar" />
+ *
+ * Aktif chip highlight'ı `useDateRange().preset` ile karşılaştırma
+ * üzerinden yapılır; URL'deki ?preset= değeri DateRangeProvider tarafından
+ * okunur (Batch A'nın `lib/url/params.ts` short-form sözleşmesiyle uyumlu).
  */
 
 import { useCallback } from 'react'
@@ -16,11 +21,7 @@ import { CalendarRange, RotateCcw } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { DateRangePicker } from '@/components/ui/date-range-picker'
 import { useDateRange } from '@/lib/date-range/context'
-import {
-  PRESET_LABELS,
-  PRESET_ORDER,
-  type DateRangePresetKey,
-} from '@/lib/date-range/presets'
+import { QUICK_RANGE_CHIPS, type DateRangePresetKey } from '@/lib/date/quick-ranges'
 import { cn } from '@/lib/utils'
 
 export type DateRangePickerHeaderProps = {
@@ -60,7 +61,7 @@ export function DateRangePickerHeader({
       </div>
 
       <div className="flex flex-wrap items-center gap-1">
-        {PRESET_ORDER.map((key) => {
+        {QUICK_RANGE_CHIPS.map(({ key, label }) => {
           const isActive = preset === key
           return (
             <button
@@ -75,7 +76,7 @@ export function DateRangePickerHeader({
                   'border-primary/60 bg-primary/10 text-primary hover:bg-primary/15 hover:text-primary'
               )}
             >
-              {PRESET_LABELS[key]}
+              {label}
             </button>
           )
         })}

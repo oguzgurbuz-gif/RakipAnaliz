@@ -207,6 +207,64 @@ function parseJsonField(value: unknown): string[] | null {
   return null
 }
 
+/**
+ * FE-5 — Sadece sonuç sayısını döndüren lightweight çağrı. Backend
+ * `/api/campaigns?count_only=1` ile WHERE clause aynı kalır, data SELECT'i
+ * ve ORDER BY/pagination çalıştırılmaz. Filtre değişikliklerinden önce
+ * "X kampanya bulundu" badge'i için kullanılır.
+ */
+export async function fetchCampaignsCount(
+  filters: CampaignFilters = {}
+): Promise<{ total: number }> {
+  return withFallback({ total: 0 }, async () => {
+    const params = new URLSearchParams()
+    params.append('count_only', '1')
+    // Pagination param'ları gereksiz (backend skip ediyor) ama imza
+    // tutarlığı için yine de set ediyoruz.
+    params.append('page', '1')
+    params.append('pageSize', '1')
+
+    if (filters.site !== undefined && filters.site !== '') {
+      params.append('siteId', filters.site)
+    }
+    if (filters.status !== undefined && filters.status !== '') {
+      params.append('status', filters.status)
+    }
+    if (filters.category !== undefined && filters.category !== '') {
+      params.append('category', filters.category)
+    }
+    if (filters.campaign_type !== undefined && filters.campaign_type !== '') {
+      params.append('campaign_type', filters.campaign_type)
+    }
+    if (filters.sentiment !== undefined && filters.sentiment !== '') {
+      params.append('sentiment', filters.sentiment)
+    }
+    if (filters.intent !== undefined && filters.intent !== '') {
+      params.append('intent', filters.intent)
+    }
+    if (filters.dateMode !== undefined) {
+      params.append('dateMode', filters.dateMode)
+    }
+    if (filters.dateCompleteness !== undefined) {
+      params.append('dateCompleteness', filters.dateCompleteness)
+    }
+    if (filters.dateFrom !== undefined && filters.dateFrom !== '') {
+      params.append('from', filters.dateFrom)
+    }
+    if (filters.dateTo !== undefined && filters.dateTo !== '') {
+      params.append('to', filters.dateTo)
+    }
+    if (filters.search !== undefined && filters.search !== '') {
+      params.append('search', filters.search)
+    }
+
+    const response = await fetchApi<{ meta: { total: number } }>(
+      `/api/campaigns?${params.toString()}`
+    )
+    return { total: response.meta?.total ?? 0 }
+  })
+}
+
 export async function fetchCampaign(id: string): Promise<Campaign> {
   return fetchApi<Campaign>(`/api/campaigns/${id}`)
 }
