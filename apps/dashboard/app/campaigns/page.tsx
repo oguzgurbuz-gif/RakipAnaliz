@@ -18,6 +18,7 @@ import { getCampaignBonusInfo, getCampaignQualitySignals } from '@/lib/campaign-
 import { fetchCampaigns } from '@/lib/api'
 import { useSSE } from '@/hooks/useSSE'
 import { FILTER_FIELD_LABELS } from '@/lib/i18n/filters'
+import { readParam, writeParams } from '@/lib/url/params'
 import type { CampaignFilters as CampaignFiltersType, Campaign } from '@/types'
 import {
   ChevronLeft,
@@ -42,9 +43,11 @@ export default function CampaignsPage() {
   const pathname = usePathname()
   const queryClient = useQueryClient()
 
+  // FE-4 — `dateMode/campaignType/category` URL'de kısa form (`dm/ct/cat`)
+  // ile yazılır. Okuma katmanı her iki formu da kabul eder (geriye dönük).
   const getParam = (key: string, defaultValue: string = ''): string => {
     if (!searchParams) return defaultValue
-    return searchParams.get(key) || defaultValue
+    return readParam(searchParams, key) || defaultValue
   }
 
   // Tarih aralığı artık global DateRangeProvider'dan geliyor (URL ?from/?to/?preset).
@@ -85,14 +88,9 @@ export default function CampaignsPage() {
   }, [queryClient]))
 
   const updateUrl = useCallback((updates: Record<string, string | undefined | number | boolean>) => {
+    // FE-4 — kısa-form yazıcı; eski uzun formu da temizler (tek kanonik kaynak).
     const params = new URLSearchParams(searchParams?.toString() || '')
-    for (const [key, value] of Object.entries(updates)) {
-      if (value === undefined || value === '' || value === 1) {
-        params.delete(key)
-      } else {
-        params.set(key, String(value))
-      }
-    }
+    writeParams(params, updates)
     router.replace(`${pathname}?${params.toString()}`)
   }, [searchParams, router, pathname])
 
