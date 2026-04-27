@@ -33,6 +33,7 @@ import {
   getPressEventsForDay,
 } from '@/components/calendar/press-events-overlay'
 import { getSiteColor, getSiteColorEntries } from '@/lib/site-colors'
+import { CANONICAL_STATUS_OPTIONS } from '@/lib/i18n/status'
 import { buildCampaignsIcs, downloadIcs } from '@/lib/ics-export'
 import { DateRangePickerHeader } from '@/components/ui/date-range-picker-header'
 import { useDateRange } from '@/lib/date-range/context'
@@ -59,14 +60,10 @@ type CampaignResponse = {
 }
 
 // Wave 1 #1.4 — Kanonik 4 state (StatusBadge / scraper schema ile uyumlu).
-// Legacy 'ended'/'passive' artık dropdown'da gösterilmez; backend bu değerlerle
-// satır kaydetmiyor.
+// FE-1 — etiketler `lib/i18n/status.ts` tek noktasından besleniyor.
 const STATUS_OPTIONS: Array<{ value: string; label: string }> = [
   { value: '', label: 'Tüm durumlar' },
-  { value: 'active', label: 'Aktif' },
-  { value: 'expired', label: 'Bitmiş' },
-  { value: 'hidden', label: 'Pasif' },
-  { value: 'pending', label: 'Beklemede' },
+  ...CANONICAL_STATUS_OPTIONS,
 ]
 
 // Aligned with category-labels.ts. We expose the most common ones so the

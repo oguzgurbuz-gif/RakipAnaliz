@@ -8,6 +8,7 @@ import { Modal } from '@/components/ui/modal'
 import { PageHeader } from '@/components/ui/page-header'
 import { getCampaignTypeLabel } from '@/lib/campaign-presentation'
 import { getCategoryLabel } from '@/lib/category-labels'
+import { STATUS_LABELS } from '@/lib/i18n/status'
 import { GalleryActions } from '@/components/gallery/gallery-actions'
 import Link from 'next/link'
 import { ExternalLink, Image as ImageIcon, X, CheckSquare, Square } from 'lucide-react'
@@ -102,10 +103,11 @@ export default function GalleryPage() {
             onChange={(e) => setSelectedStatus(e.target.value)}
           >
             <option value="">Tüm Durumlar</option>
-            <option value="active">Aktif</option>
-            <option value="ended">Bitmiş</option>
-            <option value="changed">Değişmiş</option>
-            <option value="passive">Pasif</option>
+            {/* FE-1 — etiketler lib/i18n/status.ts'ten geliyor. */}
+            <option value="active">{STATUS_LABELS.active}</option>
+            <option value="ended">{STATUS_LABELS.ended}</option>
+            <option value="changed">{STATUS_LABELS.changed}</option>
+            <option value="passive">{STATUS_LABELS.passive}</option>
           </select>
         </div>
       </PageHeader>

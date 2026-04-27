@@ -6,6 +6,7 @@ import { Select } from '@/components/ui/select'
 import { Button } from '@/components/ui/button'
 import { Search, X } from 'lucide-react'
 import { COMPETITIVE_INTENT_OPTIONS } from '@/components/ui/intent-badge'
+import { CANONICAL_STATUS_OPTIONS } from '@/lib/i18n/status'
 import type { CampaignFilters } from '@/types'
 
 interface CampaignFiltersProps {
@@ -25,12 +26,8 @@ const DATE_MODE_OPTIONS = [
 
 // Wave 1 #1.4 — Kanonik 4 state. Backend yalnız active/expired/hidden/pending
 // yazıyor; legacy 'passive' / 'ended' opsiyonları kaldırıldı.
-const STATUS_OPTIONS = [
-  { value: 'active', label: 'Aktif' },
-  { value: 'expired', label: 'Bitmiş' },
-  { value: 'hidden', label: 'Pasif' },
-  { value: 'pending', label: 'Beklemede' },
-]
+// FE-1 — etiketler `lib/i18n/status.ts` üzerinden tek noktadan besleniyor.
+const STATUS_OPTIONS = CANONICAL_STATUS_OPTIONS
 
 // Migration 018 — `intent` filter (Amaç) replaces sentiment in the UI.
 // `COMPETITIVE_INTENT_OPTIONS` is the single source of truth for label/value.
