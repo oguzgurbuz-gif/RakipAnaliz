@@ -26,6 +26,7 @@ import { cn } from '@/lib/utils'
 import { fetchCompetition } from '@/lib/api'
 import { useDateRange } from '@/lib/date-range/context'
 import { PRESET_LABELS } from '@/lib/date-range/presets'
+import { METRIC_TOOLTIPS } from '@/lib/i18n/metric-tooltips'
 
 const COMPETITION_SCOPE = 'competition'
 
@@ -184,7 +185,13 @@ export default function CompetitionPage() {
                     <TableHead>Site</TableHead>
                     <TableHead className="text-right">Kampanya</TableHead>
                     <TableHead className="text-right">Aktif</TableHead>
-                    <TableHead className="text-right">Aktif %</TableHead>
+                    <TableHead
+                      className="text-right cursor-help"
+                      title={METRIC_TOOLTIPS['site.active_rate']}
+                    >
+                      {/* FE-9: % header'a "neyin yüzdesi" tooltip'i. */}
+                      Aktif %
+                    </TableHead>
                     <TableHead className="text-right">Ort. Bonus</TableHead>
                     <TableHead>Momentum</TableHead>
                     <TableHead>Tutum</TableHead>

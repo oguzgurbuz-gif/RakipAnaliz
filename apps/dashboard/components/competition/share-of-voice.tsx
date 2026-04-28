@@ -8,6 +8,7 @@ import { BarChart, Bar, XAxis, YAxis, Tooltip, Cell, ResponsiveContainer } from 
 import { Crown } from 'lucide-react'
 import { formatCurrency, formatCurrencyCompact, formatNumber } from '@/lib/format/currency'
 import { getSiteDisplayName } from '@/lib/i18n/site'
+import { METRIC_TOOLTIPS } from '@/lib/i18n/metric-tooltips'
 
 interface SiteData {
   site_id: string
@@ -114,7 +115,17 @@ function ShareView({ items, mode }: { items: ViewItem[]; mode: Mode }) {
           </div>
         </div>
         <div>
-          <div className="text-2xl font-bold">{items[0]?.percentage || '0'}%</div>
+          {/* FE-9: % "Lider Payı" → mode'a göre map'ten context tooltip. */}
+          <div
+            className="text-2xl font-bold cursor-help"
+            title={
+              mode === 'campaigns'
+                ? METRIC_TOOLTIPS['leader_share.campaigns']
+                : METRIC_TOOLTIPS['leader_share.bonus']
+            }
+          >
+            {items[0]?.percentage || '0'}%
+          </div>
           <div className="text-xs text-muted-foreground">Lider Payı</div>
         </div>
       </div>

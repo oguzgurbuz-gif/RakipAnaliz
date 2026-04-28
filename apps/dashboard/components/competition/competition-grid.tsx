@@ -7,6 +7,7 @@ import { cn } from '@/lib/utils'
 import { StanceBadge, formatStanceTooltip } from '@/components/ui/stance-badge'
 import { formatCurrency, formatNumber } from '@/lib/format/currency'
 import { getSiteDisplayName } from '@/lib/i18n/site'
+import { METRIC_TOOLTIPS } from '@/lib/i18n/metric-tooltips'
 
 type MomentumDirection = 'up' | 'down' | 'stable'
 
@@ -76,7 +77,15 @@ export function MomentumBadge({ direction, score }: { direction: MomentumDirecti
   const Icon = config.icon
 
   return (
-    <div className={cn('inline-flex items-center gap-1.5 px-2 py-1 rounded-full text-xs font-medium', config.bgColor, config.color)}>
+    <div
+      // FE-9: % momentum_score → "neyin yüzdesi" tooltip (cursor-help).
+      title={METRIC_TOOLTIPS['site.momentum_score']}
+      className={cn(
+        'inline-flex items-center gap-1.5 px-2 py-1 rounded-full text-xs font-medium cursor-help',
+        config.bgColor,
+        config.color
+      )}
+    >
       <span className={cn('w-2 h-2 rounded-full', config.dotColor)} />
       <Icon className="w-3 h-3" />
       <span>{config.label}</span>
@@ -178,7 +187,13 @@ export function SiteCard({ site, rank }: SiteCardProps) {
             <p className="text-sm font-mono font-semibold">{formatCurrency(Number(site.avg_bonus))}</p>
           </div>
           <div>
-            <p className="text-xs text-muted-foreground">Aktif %</p>
+            {/* FE-9: % "Aktif %" → metric-tooltips map'inden context. */}
+            <p
+              className="text-xs text-muted-foreground cursor-help"
+              title={METRIC_TOOLTIPS['site.active_rate']}
+            >
+              Aktif %
+            </p>
             <p className="text-sm font-semibold">
               {(Number(site.active_rate) * 100).toFixed(1)}%
             </p>
