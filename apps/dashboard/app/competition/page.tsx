@@ -23,9 +23,10 @@ import { PositioningMap } from '@/components/competition/positioning-map'
 import { getCategoryLabel } from '@/lib/category-labels'
 import { getSiteDisplayName } from '@/lib/i18n/site'
 import { cn } from '@/lib/utils'
-import { fetchCompetition } from '@/lib/api'
+import { fetchCompetition, fetchWowDeltas } from '@/lib/api'
 import { useDateRange } from '@/lib/date-range/context'
 import { PRESET_LABELS } from '@/lib/date-range/presets'
+import { METRIC_TOOLTIPS } from '@/lib/i18n/metric-tooltips'
 
 const COMPETITION_SCOPE = 'competition'
 
@@ -81,9 +82,34 @@ export default function CompetitionPage() {
     enabled: Boolean(dateFrom && dateTo),
   })
 
+  // FE-11: Hero stats (InsightCard'lar) için "geçen haftaya göre delta"
+  // benchmark'ı. Backend'de zaten /api/reports/wow-deltas (Wave 1 #1.2) var
+  // — current dönem vs. eşit uzunlukta geçmiş dönem kampanya sayısı diff'i.
+  // Endpoint çağırılamazsa (örn. henüz seed yok) `topChanges` boş döner ve
+  // InsightCard "—" gösterir; yalan benchmark üretmiyoruz.
+  const { data: wowData } = useQuery({
+    queryKey: ['wow-deltas', dateFrom, dateTo],
+    queryFn: () => fetchWowDeltas({ from: dateFrom, to: dateTo, limit: 50 }),
+    enabled: Boolean(dateFrom && dateTo),
+    staleTime: 15 * 60 * 1000,
+  })
+
   const siteRankings = data?.siteRankings || []
   const topCampaignSite = siteRankings[0]
   const topBonusSite = [...siteRankings].sort((a, b) => Number(b.avg_bonus) - Number(a.avg_bonus))[0]
+
+  // FE-11: Pazar liderinin önceki dönemden bu döneme delta'sı.
+  // wow-deltas top liste'sinde liderin satırını ara; yoksa null.
+  const leaderDelta =
+    topCampaignSite && wowData
+      ? wowData.topChanges.find((c) => c.siteId === topCampaignSite.site_id)?.diff ?? null
+      : null
+  const formatDelta = (d: number | null): string => {
+    if (d === null) return '—' // benchmark verisi yok — yalan gösterme
+    if (d === 0) return 'Geçen haftaya göre değişim yok'
+    const sign = d > 0 ? '+' : ''
+    return `Geçen haftaya göre ${sign}${d} kampanya`
+  }
 
   return (
     <div className="min-h-screen bg-background">
@@ -134,11 +160,13 @@ export default function CompetitionPage() {
           </div>
         ) : (
           <div className="grid gap-4 md:grid-cols-3">
+            {/* FE-11: Hero stats'a geçen haftaya göre delta benchmark'ı.
+                wowData yoksa "—" gösterilir, yalan benchmark üretilmez. */}
             <InsightCard
               icon={Crown}
               title="Pazar Lideri"
               value={topCampaignSite?.site_name || '-'}
-              description={`${topCampaignSite?.total_campaigns || 0} kampanya`}
+              description={`${topCampaignSite?.total_campaigns || 0} kampanya • ${formatDelta(leaderDelta)}`}
               tone="positive"
             />
             <InsightCard
@@ -184,7 +212,13 @@ export default function CompetitionPage() {
                     <TableHead>Site</TableHead>
                     <TableHead className="text-right">Kampanya</TableHead>
                     <TableHead className="text-right">Aktif</TableHead>
-                    <TableHead className="text-right">Aktif %</TableHead>
+                    <TableHead
+                      className="text-right cursor-help"
+                      title={METRIC_TOOLTIPS['site.active_rate']}
+                    >
+                      {/* FE-9: % header'a "neyin yüzdesi" tooltip'i. */}
+                      Aktif %
+                    </TableHead>
                     <TableHead className="text-right">Ort. Bonus</TableHead>
                     <TableHead>Momentum</TableHead>
                     <TableHead>Tutum</TableHead>

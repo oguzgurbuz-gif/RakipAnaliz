@@ -9,8 +9,11 @@ import {
   TooltipTrigger,
 } from '@/components/ui/tooltip'
 
-// FE-10: Tooltip content for suspicious badge
-const SUSPICIOUS_TOOLTIP = 'Junk veya düşük güvenilir scrape sonucu. Kampanya başlığı veya içeriği standart dışı olduğundan şüphelenilmektedir.'
+// FE-10: Tooltip content for suspicious badge — generic fallback. Concrete
+// reason (hangi heuristic tetiklendi) `signal.reason` ile gelir; varsa o
+// öncelikle gösterilir.
+const SUSPICIOUS_TOOLTIP =
+  'Junk veya düşük güvenilir scrape sonucu. Başlık boş, jenerik landing pattern\'i veya bot uyarı sayfası yakalanmış olabilir.'
 
 interface DataQualityBadgeProps {
   signal: QualitySignal
@@ -20,9 +23,13 @@ interface DataQualityBadgeProps {
 
 export function DataQualityBadge({ signal, compact = false, className }: DataQualityBadgeProps) {
   const Icon = signal.icon
-  
-  // FE-10: Add tooltip explanation for suspicious badge
+
+  // FE-10: Önce signal.reason (campaign-presentation tarafından yazılan
+  // somut sebep) tercih edilir — hangi heuristic'in tetiklendiğini söyler.
+  // Yoksa generic switch'e düş; orada da uyarının ne anlama geldiği özet
+  // halinde anlatılır.
   const getTooltipContent = (code: string): string => {
+    if (signal.reason) return signal.reason
     switch (code) {
       case 'suspicious':
         return SUSPICIOUS_TOOLTIP
