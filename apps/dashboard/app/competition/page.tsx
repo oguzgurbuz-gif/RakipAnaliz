@@ -373,12 +373,26 @@ export default function CompetitionPage() {
                         {(data?.sites || []).slice(0, 8).map(s => {
                           const cell = data?.siteMatrix?.[cat]?.[s.site_code]
                           const intensity = Math.min(1, (cell?.campaign_count || 0) / Math.max(1, Number(topCampaignSite?.total_campaigns || 1)))
+                          const siteDisplay = getSiteDisplayName(s.site_code, s.site_name)
                           return (
-                            <TableCell key={s.site_code} className="text-center">
+                            <TableCell key={s.site_code} className="text-center p-1">
                               {cell ? (
-                                <div
+                                // FE-15: Matrix hücresi tıklanabilir → ilgili
+                                // rakibin o kategoriye ait kampanyalarına yönlendir.
+                                // siteId (UUID) + category short-form (`cat`) URL'ye yazılır.
+                                <button
+                                  type="button"
+                                  onClick={() =>
+                                    router.push(
+                                      `/campaigns?siteId=${encodeURIComponent(s.site_id)}&cat=${encodeURIComponent(cat)}`
+                                    )
+                                  }
+                                  aria-label={`${siteDisplay} rakibinin ${getCategoryLabel(cat)} kampanyalarını göster (${cell.campaign_count} kampanya)`}
+                                  title={`${siteDisplay} — ${getCategoryLabel(cat)}: ${cell.campaign_count} kampanya. Listeyi göster.`}
                                   className={cn(
-                                    'inline-flex min-w-[50px] flex-col items-center gap-1 rounded-lg px-2 py-1',
+                                    'inline-flex min-w-[50px] flex-col items-center gap-1 rounded-lg px-2 py-1 cursor-pointer',
+                                    'hover:ring-2 hover:ring-primary/40 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/60',
+                                    'transition-all',
                                     cell.is_winner && 'ring-1 ring-yellow-300'
                                   )}
                                   style={{ backgroundColor: `rgba(37, 99, 235, ${0.12 + intensity * 0.25})` }}
@@ -388,7 +402,7 @@ export default function CompetitionPage() {
                                   </span>
                                   {/* Wave 1 #1.3 — düşük örneklemli hücreye rozet */}
                                   <SampleBadge n={cell.campaign_count} compact />
-                                </div>
+                                </button>
                               ) : (
                                 <span className="text-muted-foreground">-</span>
                               )}
