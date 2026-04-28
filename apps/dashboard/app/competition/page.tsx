@@ -10,6 +10,7 @@ import { Select } from '@/components/ui/select'
 import { InsightCard } from '@/components/ui/insight-card'
 import { PageHeader } from '@/components/ui/page-header'
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table'
+import { TableScroll } from '@/components/ui/table-scroll'
 import { DateRangePickerHeader } from '@/components/ui/date-range-picker-header'
 import { Crown, Target, TrendingUp, ChevronDown, ChevronUp, Calendar } from 'lucide-react'
 import { MomentumBadge } from '@/components/competition/competition-grid'
@@ -205,7 +206,10 @@ export default function CompetitionPage() {
                 </p>
               </div>
             ) : (
-              <Table>
+              // FE-12: Site Sıralaması tablosu — Momentum/Tutum chip'leri ile
+              // 8 kolon, dar viewport'ta yatay scroll devreye girsin.
+              <TableScroll minWidth={920} bordered={false}>
+                <Table>
                 <TableHeader>
                   <TableRow>
                     <TableHead>#</TableHead>
@@ -264,7 +268,8 @@ export default function CompetitionPage() {
                     </TableRow>
                   ))}
                 </TableBody>
-              </Table>
+                </Table>
+              </TableScroll>
             )}
           </CardContent>
         </Card>
@@ -279,7 +284,10 @@ export default function CompetitionPage() {
           </CardHeader>
           {showBonusTable && (
             <CardContent>
-              <Table>
+              {/* FE-12: 4 kolon ama "En İyi Site" + winner badge geniş yer
+                  alabiliyor — minimum 640px ile dar viewport'ta scroll. */}
+              <TableScroll minWidth={640} bordered={false}>
+                <Table>
                 <TableHeader>
                   <TableRow>
                     <TableHead>Tür</TableHead>
@@ -303,7 +311,8 @@ export default function CompetitionPage() {
                     </TableRow>
                   ))}
                 </TableBody>
-              </Table>
+                </Table>
+              </TableScroll>
             </CardContent>
           )}
         </Card>
@@ -318,7 +327,9 @@ export default function CompetitionPage() {
           </CardHeader>
           {showMatrix && (
             <CardContent>
-              <div className="overflow-x-auto">
+              {/* FE-12: 9 kolon (Tür + 8 site) + Türkçe site adları —
+                  matrix sticky left "Tür" kolonu ile yatay scroll. */}
+              <TableScroll minWidth={920} bordered={false}>
                 <Table>
                   <TableHeader>
                     <TableRow>
@@ -363,7 +374,7 @@ export default function CompetitionPage() {
                     ))}
                   </TableBody>
                 </Table>
-              </div>
+              </TableScroll>
             </CardContent>
           )}
         </Card>
