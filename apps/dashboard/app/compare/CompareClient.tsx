@@ -630,9 +630,18 @@ function CampaignCompareTab() {
       </div>
 
       {!isLoading && filteredCampaigns.length === 0 && (
+        // FE-14: Empty state + somut aksiyon — aramayı temizle.
         <EmptyState
           title="Karşılaştırılacak kampanya bulunamadı"
-          description="Arama ifadenizi veya filtre yaklaşımınızı değiştirin."
+          description="Arama ifadenizle eşleşen kampanya yok. Aramayı temizlemeyi veya farklı kelimelerle aramayı deneyin."
+          action={
+            search ? (
+              <Button variant="outline" size="sm" onClick={() => setSearch('')}>
+                <X className="h-4 w-4 mr-1" />
+                Aramayı temizle
+              </Button>
+            ) : null
+          }
         />
       )}
 

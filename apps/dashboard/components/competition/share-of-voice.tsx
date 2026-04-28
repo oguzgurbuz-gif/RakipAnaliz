@@ -1,6 +1,7 @@
 'use client'
 
 import { useMemo } from 'react'
+import { useRouter } from 'next/navigation'
 import * as Tabs from '@radix-ui/react-tabs'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { Badge } from '@/components/ui/badge'
@@ -39,6 +40,10 @@ interface ViewItem {
   percentage: string
   fill: string
   isLeader: boolean
+  /** FE-15: Tıklanınca campaigns?siteId=... için kullanılacak UUID. Diğerleri agregesinde null. */
+  siteId: string | null
+  /** Site adı (display) — aria-label için. */
+  displayName: string
 }
 
 function buildView(sites: SiteData[], mode: Mode): ViewItem[] {
@@ -55,10 +60,13 @@ function buildView(sites: SiteData[], mode: Mode): ViewItem[] {
 
   const items: ViewItem[] = top5.map((site, idx) => {
     const value = accessor(site)
+    const displayName = getSiteDisplayName(site.site_code, site.site_name)
     return {
       // FE-8: Site adında merkezi i18n helper kullan; DB'den gelen `name`
       // tercih edilir, fallback olarak code → Title Case.
-      name: getSiteDisplayName(site.site_code, site.site_name),
+      name: displayName,
+      displayName,
+      siteId: site.site_id,
       value,
       percentage: total > 0 ? ((value / total) * 100).toFixed(1) : '0',
       fill: COLORS[idx % COLORS.length],
@@ -69,6 +77,8 @@ function buildView(sites: SiteData[], mode: Mode): ViewItem[] {
   if (othersTotal > 0) {
     items.push({
       name: 'Diğerleri',
+      displayName: 'Diğerleri',
+      siteId: null,
       value: othersTotal,
       percentage: total > 0 ? ((othersTotal / total) * 100).toFixed(1) : '0',
       fill: COLORS[5],
@@ -79,7 +89,15 @@ function buildView(sites: SiteData[], mode: Mode): ViewItem[] {
   return items
 }
 
-function ShareView({ items, mode }: { items: ViewItem[]; mode: Mode }) {
+function ShareView({
+  items,
+  mode,
+  onSiteClick,
+}: {
+  items: ViewItem[]
+  mode: Mode
+  onSiteClick?: (siteId: string, displayName: string) => void
+}) {
   if (items.length === 0) {
     return (
       <p className="text-sm text-muted-foreground text-center py-8">
@@ -130,7 +148,9 @@ function ShareView({ items, mode }: { items: ViewItem[]; mode: Mode }) {
         </div>
       </div>
 
-      {/* Bar Chart */}
+      {/* FE-15: Bar Chart — bar tıklamasında o rakibin kampanyalarına yönlendir.
+          Recharts Bar onClick payload'ında data noktasını döner; siteId varsa
+          handler tetiklenir. Diğerleri agregesinde siteId null → no-op. */}
       <div className="h-48">
         <ResponsiveContainer width="100%" height="100%">
           <BarChart data={items} layout="vertical">
@@ -143,7 +163,16 @@ function ShareView({ items, mode }: { items: ViewItem[]; mode: Mode }) {
             />
             <YAxis type="category" dataKey="name" tick={{ fontSize: 10 }} width={80} />
             <Tooltip formatter={tooltipFormatter} contentStyle={{ fontSize: 12 }} />
-            <Bar dataKey="value" radius={[0, 4, 4, 0]}>
+            <Bar
+              dataKey="value"
+              radius={[0, 4, 4, 0]}
+              onClick={(data: unknown) => {
+                if (!onSiteClick) return
+                const entry = data as { siteId?: string | null; displayName?: string } | undefined
+                if (entry?.siteId) onSiteClick(entry.siteId, entry.displayName || '')
+              }}
+              style={onSiteClick ? { cursor: 'pointer' } : undefined}
+            >
               {items.map((entry, index) => (
                 <Cell key={`cell-${index}`} fill={entry.fill} />
               ))}
@@ -152,29 +181,62 @@ function ShareView({ items, mode }: { items: ViewItem[]; mode: Mode }) {
         </ResponsiveContainer>
       </div>
 
-      {/* Table */}
+      {/* FE-15: Tablo satırları — her rakip satırı tıklanabilir buton; klavye
+          ile fokuslanabilir, aria-label ile site adı duyurulur. "Diğerleri"
+          agregesi (siteId null) tıklanmaz. */}
       <div className="space-y-2">
-        {items.map((item, idx) => (
-          <div key={item.name} className="flex items-center gap-3 text-sm">
-            <span className="w-4 text-muted-foreground">{idx + 1}</span>
-            <span
-              className="w-3 h-3 rounded-full flex-shrink-0"
-              style={{ backgroundColor: item.fill }}
-            />
-            <span className="flex-1 font-medium truncate">{item.name}</span>
-            <span className="text-muted-foreground tabular-nums">{formatValue(item.value)}</span>
-            <span className="font-semibold tabular-nums w-14 text-right">{item.percentage}%</span>
-            {item.isLeader && <Crown className="h-4 w-4 text-yellow-500 flex-shrink-0" />}
-          </div>
-        ))}
+        {items.map((item, idx) => {
+          const clickable = Boolean(item.siteId && onSiteClick)
+          const content = (
+            <>
+              <span className="w-4 text-muted-foreground text-left">{idx + 1}</span>
+              <span
+                className="w-3 h-3 rounded-full flex-shrink-0"
+                style={{ backgroundColor: item.fill }}
+              />
+              <span className="flex-1 font-medium truncate text-left">{item.name}</span>
+              <span className="text-muted-foreground tabular-nums">{formatValue(item.value)}</span>
+              <span className="font-semibold tabular-nums w-14 text-right">{item.percentage}%</span>
+              {item.isLeader && <Crown className="h-4 w-4 text-yellow-500 flex-shrink-0" />}
+            </>
+          )
+          if (clickable) {
+            return (
+              <button
+                key={item.name}
+                type="button"
+                onClick={() => onSiteClick?.(item.siteId as string, item.displayName)}
+                aria-label={`${item.displayName} rakibinin kampanyalarını göster`}
+                className="flex items-center gap-3 text-sm w-full rounded-md px-2 py-1 -mx-2 cursor-pointer hover:bg-accent hover:ring-1 hover:ring-primary/30 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/60 transition-colors"
+              >
+                {content}
+              </button>
+            )
+          }
+          return (
+            <div key={item.name} className="flex items-center gap-3 text-sm px-2 py-1 -mx-2">
+              {content}
+            </div>
+          )
+        })}
       </div>
     </div>
   )
 }
 
 export function ShareOfVoice({ sites, isLoading }: ShareOfVoiceProps) {
+  const router = useRouter()
   const campaignsView = useMemo(() => buildView(sites, 'campaigns'), [sites])
   const bonusView = useMemo(() => buildView(sites, 'bonus'), [sites])
+
+  // FE-15: Tıklamada o rakibin kampanyalarına yönlendir. `siteId` canonical
+  // olarak `siteId` URL paramına yazılır (kısa form yok — params.ts haritasına
+  // göre `siteId` zaten kısa). Campaigns sayfası `readParam('siteId')` ile
+  // okur ve aktif filtre olarak gösterir.
+  const handleSiteClick = (siteId: string) => {
+    if (!siteId) return
+    router.push(`/campaigns?siteId=${encodeURIComponent(siteId)}`)
+  }
 
   if (isLoading) {
     return (
@@ -228,10 +290,10 @@ export function ShareOfVoice({ sites, isLoading }: ShareOfVoiceProps) {
             </Tabs.Trigger>
           </Tabs.List>
           <Tabs.Content value="campaigns" className="focus-visible:outline-none">
-            <ShareView items={campaignsView} mode="campaigns" />
+            <ShareView items={campaignsView} mode="campaigns" onSiteClick={handleSiteClick} />
           </Tabs.Content>
           <Tabs.Content value="bonus" className="focus-visible:outline-none">
-            <ShareView items={bonusView} mode="bonus" />
+            <ShareView items={bonusView} mode="bonus" onSiteClick={handleSiteClick} />
           </Tabs.Content>
         </Tabs.Root>
       </CardContent>

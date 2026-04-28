@@ -10,6 +10,7 @@ import {
   TableHeader,
   TableRow,
 } from '@/components/ui/table'
+import { TableScroll } from '@/components/ui/table-scroll'
 import { DataQualityBadge } from '@/components/ui/data-quality-badge'
 import { BonusChips } from '@/components/ui/bonus-chips'
 import { IntentBadge } from '@/components/ui/intent-badge'
@@ -33,8 +34,10 @@ interface CampaignTableProps {
 export function CampaignTable({ campaigns, isLoading, favorites = [], selectedIds, onToggleFavorite, onToggleSelect, onSelectAll }: CampaignTableProps) {
   if (isLoading) {
     return (
-      <div className="rounded-md border">
-        <Table className="min-w-[1180px]">
+      // FE-12: Loading state de aynı yatay scroll wrapper'ını kullansın —
+      // mobile'da skeleton genişliği viewport'u taşırsa içerik scroll olur.
+      <TableScroll minWidth={1180}>
+        <Table>
           <TableHeader>
             <TableRow>
               <TableHead className="w-10">
@@ -64,7 +67,7 @@ export function CampaignTable({ campaigns, isLoading, favorites = [], selectedId
             ))}
           </TableBody>
         </Table>
-      </div>
+      </TableScroll>
     )
   }
 
@@ -77,9 +80,10 @@ export function CampaignTable({ campaigns, isLoading, favorites = [], selectedId
   }
 
   return (
-    // FE-12: Table with responsive horizontal scroll
-    <div className="overflow-x-auto rounded-md border">
-      <Table className="min-w-[1100px] w-full">
+    // FE-12: Standart TableScroll wrapper — mobile'da yatay scroll, sticky
+    // header ile uzun listede başlık görünür kalır.
+    <TableScroll minWidth={1180} stickyHeader>
+      <Table>
           <TableHeader>
             <TableRow>
               <TableHead className="w-10">
@@ -224,6 +228,6 @@ export function CampaignTable({ campaigns, isLoading, favorites = [], selectedId
           })}
         </TableBody>
       </Table>
-    </div>
+    </TableScroll>
   )
 }
