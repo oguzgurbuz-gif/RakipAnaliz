@@ -2,9 +2,10 @@
 
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { Badge } from '@/components/ui/badge'
-import { TrendingUp, TrendingDown, Minus, AlertTriangle } from 'lucide-react'
+import { TrendingUp, TrendingDown, Minus, AlertTriangle, Activity } from 'lucide-react'
 import { cn } from '@/lib/utils'
 import { StanceBadge, formatStanceTooltip } from '@/components/ui/stance-badge'
+import { EmptyState } from '@/components/ui/empty-state'
 import { formatCurrency, formatNumber } from '@/lib/format/currency'
 import { getSiteDisplayName } from '@/lib/i18n/site'
 import { METRIC_TOOLTIPS } from '@/lib/i18n/metric-tooltips'
@@ -213,9 +214,11 @@ export function SiteCard({ site, rank }: SiteCardProps) {
 interface CompetitionGridProps {
   sites: SiteCardProps['site'][]
   isLoading?: boolean
+  /** FE-14: Tarih aralığını "Son 30 Gün"e genişleten opsiyonel callback. */
+  onWidenRange?: () => void
 }
 
-export function CompetitionGrid({ sites, isLoading }: CompetitionGridProps) {
+export function CompetitionGrid({ sites, isLoading, onWidenRange }: CompetitionGridProps) {
   if (isLoading) {
     return (
       <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
@@ -231,12 +234,25 @@ export function CompetitionGrid({ sites, isLoading }: CompetitionGridProps) {
   }
 
   if (sites.length === 0) {
+    // FE-14: Boş durum + somut aksiyon — tarih aralığını genişlet (Son 30 Gün)
+    // ya da rekabet sayfasına yönlendir. Empty state ortak component.
     return (
-      <Card>
-        <CardContent className="p-8 text-center text-muted-foreground">
-          Henüz rekabet verisi bulunamadı.
-        </CardContent>
-      </Card>
+      <EmptyState
+        icon={Activity}
+        title="Henüz rekabet verisi bulunamadı"
+        description="Seçili tarih aralığında veya filtrede hiçbir rakip site için kampanya kaydı yok. Tarih aralığını genişletmeyi deneyin."
+        action={
+          onWidenRange ? (
+            <button
+              type="button"
+              onClick={onWidenRange}
+              className="mt-2 inline-flex items-center gap-2 rounded-md border border-primary/30 bg-primary/5 px-3 py-1.5 text-sm font-medium text-primary hover:bg-primary/10"
+            >
+              Tarih aralığını genişlet (Son 30 Gün)
+            </button>
+          ) : null
+        }
+      />
     )
   }
 

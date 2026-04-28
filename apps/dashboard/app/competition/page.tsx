@@ -12,7 +12,9 @@ import { PageHeader } from '@/components/ui/page-header'
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table'
 import { TableScroll } from '@/components/ui/table-scroll'
 import { DateRangePickerHeader } from '@/components/ui/date-range-picker-header'
-import { Crown, Target, TrendingUp, ChevronDown, ChevronUp, Calendar } from 'lucide-react'
+import { EmptyState } from '@/components/ui/empty-state'
+import { Button } from '@/components/ui/button'
+import { Crown, Target, TrendingUp, ChevronDown, ChevronUp, Calendar, CalendarRange, Layers } from 'lucide-react'
 import { MomentumBadge } from '@/components/competition/competition-grid'
 import { StanceBadge, formatStanceTooltip } from '@/components/ui/stance-badge'
 import { SampleBadge } from '@/components/ui/sample-badge'
@@ -68,7 +70,20 @@ export default function CompetitionPage() {
 
   // Global tarih aralığı — `competition` scope'u, default 'thisMonth'.
   // Cookie + URL ile persist edilir.
-  const { from: dateFrom, to: dateTo, preset } = useDateRange(COMPETITION_SCOPE)
+  const { from: dateFrom, to: dateTo, preset, applyPreset } = useDateRange(COMPETITION_SCOPE)
+
+  // FE-14: Boş state aksiyonları için yardımcı — kategoriyi temizle veya
+  // tarih aralığını "Son 30 Gün"e genişlet (Batch B quick-range chip'i).
+  const widenRangeToLast30 = () => applyPreset('last30d')
+  const clearCategoryFilter = () => {
+    setSelectedCategory('')
+    if (searchParams) {
+      const params = new URLSearchParams(searchParams.toString())
+      params.delete('category')
+      params.delete('cat')
+      router.replace(`${pathname}?${params.toString()}`)
+    }
+  }
 
   const presetLabel =
     preset !== 'custom' ? PRESET_LABELS[preset] : 'Özel'
@@ -194,17 +209,27 @@ export default function CompetitionPage() {
           </CardHeader>
           <CardContent>
             {!isLoading && siteRankings.length === 0 ? (
-              <div className="flex flex-col items-center justify-center gap-2 py-12 text-center">
-                <Calendar className="h-8 w-8 text-muted-foreground/60" />
-                <p className="text-sm font-medium text-muted-foreground">
-                  Bu aralıkta veri yok
-                </p>
-                <p className="text-xs text-muted-foreground">
-                  Seçili tarih aralığında ({rangeLabel || 'tarih yok'}) hiçbir sitede
-                  kampanya bulunamadı. Üstteki preset&apos;lerle aralığı genişletmeyi
-                  deneyin.
-                </p>
-              </div>
+              // FE-14: Empty state + somut aksiyon — quick-range chip'lerinden
+              // "Son 30 Gün"e genişlet ve/veya kategori filtresini temizle.
+              <EmptyState
+                icon={Calendar}
+                title="Bu aralıkta veri yok"
+                description={`Seçili tarih aralığında (${rangeLabel || 'tarih yok'}) hiçbir sitede kampanya bulunamadı. Tarih aralığını genişletmeyi veya kategori filtresini temizlemeyi deneyin.`}
+                action={
+                  <div className="flex flex-wrap items-center justify-center gap-2 mt-2">
+                    <Button variant="default" size="sm" onClick={widenRangeToLast30}>
+                      <CalendarRange className="h-4 w-4 mr-1" />
+                      Tarih aralığını genişlet (Son 30 Gün)
+                    </Button>
+                    {selectedCategory && (
+                      <Button variant="outline" size="sm" onClick={clearCategoryFilter}>
+                        <Layers className="h-4 w-4 mr-1" />
+                        Tüm türleri göster
+                      </Button>
+                    )}
+                  </div>
+                }
+              />
             ) : (
               // FE-12: Site Sıralaması tablosu — Momentum/Tutum chip'leri ile
               // 8 kolon, dar viewport'ta yatay scroll devreye girsin.
@@ -465,7 +490,25 @@ export default function CompetitionPage() {
                 })}
               </div>
             ) : (
-              <p className="text-sm text-muted-foreground">Bonus verisi bulunamadı.</p>
+              // FE-14: "Bonus verisi yok" — quick-range chip aksiyonu önerisi.
+              <EmptyState
+                icon={Target}
+                title="Bonus fırsatı bulunamadı"
+                description="Seçili tarih aralığında listelenebilecek bonus kaydı yok. Aralığı genişletmeyi veya kategori filtresini temizlemeyi deneyin."
+                action={
+                  <div className="flex flex-wrap items-center justify-center gap-2 mt-2">
+                    <Button variant="default" size="sm" onClick={widenRangeToLast30}>
+                      <CalendarRange className="h-4 w-4 mr-1" />
+                      Son 30 Gün
+                    </Button>
+                    {selectedCategory && (
+                      <Button variant="outline" size="sm" onClick={clearCategoryFilter}>
+                        Tüm türleri göster
+                      </Button>
+                    )}
+                  </div>
+                }
+              />
             )}
           </CardContent>
         </Card>

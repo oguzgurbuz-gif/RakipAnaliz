@@ -128,9 +128,28 @@ export default function GalleryPage() {
             ))}
           </div>
         ) : campaignsWithImages.length === 0 ? (
-          <div className="text-center text-muted-foreground py-12">
-            Görsel bulunamadı
-          </div>
+          // FE-14: Empty state + somut aksiyon — tüm filtreleri temizle.
+          <EmptyState
+            icon={ImageIcon}
+            title="Görsel bulunamadı"
+            description="Seçili site / tür / durum kombinasyonu için görsel kaydı yok. Filtreleri temizlemeyi deneyin."
+            action={
+              (selectedSite || selectedCategory || selectedStatus) ? (
+                <button
+                  type="button"
+                  onClick={() => {
+                    setSelectedSite('')
+                    setSelectedCategory('')
+                    setSelectedStatus('')
+                  }}
+                  className="mt-2 inline-flex items-center gap-2 rounded-md border border-border bg-background px-3 py-1.5 text-sm font-medium hover:bg-accent"
+                >
+                  <X className="h-4 w-4" />
+                  Tüm filtreleri temizle
+                </button>
+              ) : null
+            }
+          />
         ) : (
           <div className="grid grid-cols-2 md:grid-cols-4 lg:grid-cols-6 gap-4">
             {campaignsWithImages.map((campaign) => (
