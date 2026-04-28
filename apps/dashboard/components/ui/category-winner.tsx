@@ -7,6 +7,8 @@ import { Badge } from '@/components/ui/badge'
 import { Crown, Trophy, Medal, Target, AlertTriangle } from 'lucide-react'
 import { getCategoryLabel } from '@/lib/category-labels'
 import { fetchCompetition, type CompetitionData } from '@/lib/api'
+import { formatCurrency, formatNumber } from '@/lib/format/currency'
+import { getSiteDisplayName } from '@/lib/i18n/site'
 
 interface CategoryWinnerEntry {
   category: string
@@ -104,9 +106,12 @@ function CategoryWinnerCard({ category, winner, runner_up, total_competitors }: 
               <Crown className="h-4 w-4" />
             </div>
             <div>
-              <p className="font-semibold text-sm">{winner.site_name}</p>
+              {/* FE-8: Site adı + ₺ format'ı merkezi helper'lardan. */}
+              <p className="font-semibold text-sm">
+                {getSiteDisplayName(winner.site_code, winner.site_name)}
+              </p>
               <p className="text-xs text-muted-foreground">
-                {winner.campaign_count} kampanya • ₺{Math.round(winner.avg_bonus).toLocaleString('tr-TR')} ortalama bonus
+                {formatNumber(winner.campaign_count)} kampanya • {formatCurrency(winner.avg_bonus)} ortalama bonus
               </p>
             </div>
           </div>
@@ -120,9 +125,11 @@ function CategoryWinnerCard({ category, winner, runner_up, total_competitors }: 
                 <Trophy className="h-4 w-4" />
               </div>
               <div>
-                <p className="font-semibold text-sm">{runner_up.site_name}</p>
+                <p className="font-semibold text-sm">
+                  {getSiteDisplayName(runner_up.site_code, runner_up.site_name)}
+                </p>
                 <p className="text-xs text-muted-foreground">
-                  {runner_up.campaign_count} kampanya • ₺{Math.round(runner_up.avg_bonus).toLocaleString('tr-TR')} ortalama bonus
+                  {formatNumber(runner_up.campaign_count)} kampanya • {formatCurrency(runner_up.avg_bonus)} ortalama bonus
                 </p>
               </div>
             </div>

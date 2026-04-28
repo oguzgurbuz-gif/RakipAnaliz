@@ -5,6 +5,8 @@ import { Badge } from '@/components/ui/badge'
 import { TrendingUp, TrendingDown, Minus, AlertTriangle } from 'lucide-react'
 import { cn } from '@/lib/utils'
 import { StanceBadge, formatStanceTooltip } from '@/components/ui/stance-badge'
+import { formatCurrency, formatNumber } from '@/lib/format/currency'
+import { getSiteDisplayName } from '@/lib/i18n/site'
 
 type MomentumDirection = 'up' | 'down' | 'stable'
 
@@ -129,7 +131,11 @@ export function SiteCard({ site, rank }: SiteCardProps) {
               </span>
             )}
             <div>
-              <CardTitle className="text-base">{site.site_name}</CardTitle>
+              {/* FE-8: Site adı merkezi `getSiteDisplayName` ile —
+                  payload'da `name` yoksa code → Title Case. */}
+              <CardTitle className="text-base">
+                {getSiteDisplayName(site.site_code, site.site_name)}
+              </CardTitle>
               <p className="text-xs text-muted-foreground">{site.site_code}</p>
             </div>
           </div>
@@ -158,19 +164,24 @@ export function SiteCard({ site, rank }: SiteCardProps) {
         <div className="grid grid-cols-2 gap-3">
           <div>
             <p className="text-xs text-muted-foreground">Toplam Kampanya</p>
-            <p className="text-lg font-semibold">{site.total_campaigns}</p>
+            <p className="text-lg font-semibold">{formatNumber(Number(site.total_campaigns))}</p>
           </div>
           <div>
             <p className="text-xs text-muted-foreground">Aktif</p>
-            <p className="text-lg font-semibold text-green-600">{site.active_campaigns}</p>
+            <p className="text-lg font-semibold text-green-600">
+              {formatNumber(Number(site.active_campaigns))}
+            </p>
           </div>
           <div>
             <p className="text-xs text-muted-foreground">Ort. Bonus</p>
-            <p className="text-sm font-mono font-semibold">₺{Number(site.avg_bonus).toFixed(0)}</p>
+            {/* FE-8: ₺ format'ı merkezi formatter — locale ve yuvarlama tutarlı. */}
+            <p className="text-sm font-mono font-semibold">{formatCurrency(Number(site.avg_bonus))}</p>
           </div>
           <div>
             <p className="text-xs text-muted-foreground">Aktif %</p>
-            <p className="text-sm font-semibold">{(Number(site.active_rate) * 100).toFixed(1)}%</p>
+            <p className="text-sm font-semibold">
+              {(Number(site.active_rate) * 100).toFixed(1)}%
+            </p>
           </div>
         </div>
         

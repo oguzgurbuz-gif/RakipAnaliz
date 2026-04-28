@@ -6,6 +6,8 @@ import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { Badge } from '@/components/ui/badge'
 import { BarChart, Bar, XAxis, YAxis, Tooltip, Cell, ResponsiveContainer } from 'recharts'
 import { Crown } from 'lucide-react'
+import { formatCurrency, formatCurrencyCompact, formatNumber } from '@/lib/format/currency'
+import { getSiteDisplayName } from '@/lib/i18n/site'
 
 interface SiteData {
   site_id: string
@@ -53,7 +55,9 @@ function buildView(sites: SiteData[], mode: Mode): ViewItem[] {
   const items: ViewItem[] = top5.map((site, idx) => {
     const value = accessor(site)
     return {
-      name: site.site_name,
+      // FE-8: Site adında merkezi i18n helper kullan; DB'den gelen `name`
+      // tercih edilir, fallback olarak code → Title Case.
+      name: getSiteDisplayName(site.site_code, site.site_name),
       value,
       percentage: total > 0 ? ((value / total) * 100).toFixed(1) : '0',
       fill: COLORS[idx % COLORS.length],
@@ -74,12 +78,6 @@ function buildView(sites: SiteData[], mode: Mode): ViewItem[] {
   return items
 }
 
-function formatBonus(value: number): string {
-  if (value >= 1_000_000) return `₺${(value / 1_000_000).toFixed(1)}M`
-  if (value >= 1_000) return `₺${(value / 1_000).toFixed(1)}K`
-  return `₺${Math.round(value).toLocaleString()}`
-}
-
 function ShareView({ items, mode }: { items: ViewItem[]; mode: Mode }) {
   if (items.length === 0) {
     return (
@@ -90,9 +88,10 @@ function ShareView({ items, mode }: { items: ViewItem[]; mode: Mode }) {
   }
 
   const totalValue = items.reduce((sum, i) => sum + i.value, 0)
-  const valueLabel = mode === 'campaigns' ? 'kampanya' : 'TL bonus'
+  // FE-8: ₺ format'ı merkezi `lib/format/currency` üzerinden — locale tutarlı,
+  // K/M kısaltması ortak helper'dan.
   const formatValue = (v: number) =>
-    mode === 'campaigns' ? `${v} kampanya` : formatBonus(v)
+    mode === 'campaigns' ? `${formatNumber(v)} kampanya` : formatCurrencyCompact(v)
   const tooltipFormatter = (value: unknown): [string, string] => {
     const v = typeof value === 'number' ? value : Number(value) || 0
     return [formatValue(v), mode === 'campaigns' ? 'Kampanya Sayısı' : 'Toplam Bonus']
@@ -108,7 +107,7 @@ function ShareView({ items, mode }: { items: ViewItem[]; mode: Mode }) {
         </div>
         <div>
           <div className="text-2xl font-bold">
-            {mode === 'campaigns' ? totalValue : formatBonus(totalValue)}
+            {mode === 'campaigns' ? formatNumber(totalValue) : formatCurrencyCompact(totalValue)}
           </div>
           <div className="text-xs text-muted-foreground">
             Toplam {mode === 'campaigns' ? 'Kampanya' : 'Bonus'}
@@ -127,7 +126,9 @@ function ShareView({ items, mode }: { items: ViewItem[]; mode: Mode }) {
             <XAxis
               type="number"
               tick={{ fontSize: 11 }}
-              tickFormatter={(v) => (mode === 'bonus' ? formatBonus(Number(v)) : String(v))}
+              tickFormatter={(v) =>
+                mode === 'bonus' ? formatCurrencyCompact(Number(v)) : formatNumber(Number(v))
+              }
             />
             <YAxis type="category" dataKey="name" tick={{ fontSize: 10 }} width={80} />
             <Tooltip formatter={tooltipFormatter} contentStyle={{ fontSize: 12 }} />
