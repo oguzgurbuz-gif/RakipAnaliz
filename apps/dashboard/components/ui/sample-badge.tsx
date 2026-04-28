@@ -31,7 +31,14 @@ export function SampleBadge({ n, className, compact = false }: SampleBadgeProps)
       ? 'bg-orange-100 text-orange-700 border border-orange-200'
       : 'bg-amber-50 text-amber-700 border border-amber-200'
 
-  const tooltipText = `n=${safeN} (${getSampleConfidenceLabel(level)})`
+  // FE-10: Tooltip — "n=X" özetinin yanında neden şüpheli olduğunu somut yaz.
+  // batch-d1 sample-size warning ile aynı dilbilim: "küçük örneklem,
+  // dikkatli yorumlayın." Eşikler `lib/sample-size.ts`'de.
+  const reason =
+    level === 'low'
+      ? `5 kayıttan az örneklemde tek bir aşırı kampanya bütün ortalama/sıralama'yı çevirebilir — sayıya temkinli yaklaşın.`
+      : `15 kayıttan az örneklem; trend tespiti için yeterli ama lider/kazanan ataması yanıltıcı olabilir.`
+  const tooltipText = `n=${safeN} (${getSampleConfidenceLabel(level)}) — ${reason}`
 
   return (
     <span

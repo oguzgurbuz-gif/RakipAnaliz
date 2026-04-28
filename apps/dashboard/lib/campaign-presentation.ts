@@ -23,6 +23,12 @@ export type QualitySignal = {
   label: string
   variant: 'warning' | 'info'
   icon: LucideIcon
+  /**
+   * FE-10 — Şüpheli kayıt veya düşük güven gibi badge'ler için somut sebep.
+   * `data-quality-badge.tsx` bunu öncelikle tooltip'te gösterir; yoksa
+   * generic switch metnine düşer.
+   */
+  reason?: string
 }
 
 export type CampaignBonusInfo = {
@@ -232,18 +238,27 @@ export function getCampaignQualitySignals(campaign: CampaignLike): QualitySignal
 
   const signals: QualitySignal[] = []
 
-  if (
-    !title ||
-    GENERIC_TITLES.has(title) ||
-    title.includes('tarayıcı sürümü') ||
-    body.includes('desteklenmemektedir') ||
-    body.includes('güncel kampanya bulunmamaktadır')
-  ) {
+  // FE-10: Şüpheli kayıt için spesifik sebebi tooltip'e taşı — kullanıcı
+  // hangi heuristic'in tetiklendiğini görsün.
+  let suspiciousReason: string | null = null
+  if (!title) {
+    suspiciousReason = 'Başlık alanı boş — scrape sırasında DOM beklenen yapıyı vermemiş olabilir.'
+  } else if (GENERIC_TITLES.has(title)) {
+    suspiciousReason = `Başlık jenerik bir landing pattern'i (“${title}”). Site tüm kampanyaları aynı genel başlık altında listelemiş olabilir.`
+  } else if (title.includes('tarayıcı sürümü')) {
+    suspiciousReason = 'Başlık “tarayıcı sürümü” içeriyor — scrape sırasında “desteklenmeyen tarayıcı” uyarı sayfası yakalanmış.'
+  } else if (body.includes('desteklenmemektedir')) {
+    suspiciousReason = 'Gövde “desteklenmemektedir” içeriyor — sayfa anti-bot / region block döndürmüş olabilir.'
+  } else if (body.includes('güncel kampanya bulunmamaktadır')) {
+    suspiciousReason = 'Gövde “güncel kampanya bulunmamaktadır” döndü — scrape sırasında kategoride aktif kampanya yoktu.'
+  }
+  if (suspiciousReason) {
     signals.push({
       code: 'suspicious',
       label: 'Şüpheli kayıt',
       variant: 'warning',
       icon: AlertTriangle,
+      reason: suspiciousReason,
     })
   }
 
@@ -282,11 +297,21 @@ export function getCampaignQualitySignals(campaign: CampaignLike): QualitySignal
   const lowFrom = fromConf !== null && fromConf < 0.5
   const lowTo = toConf !== null && toConf < 0.5
   if (lowFrom || lowTo) {
+    // FE-10: tarihlerin hangisinin / ne kadar düşük güvenle çıkarıldığını
+    // tooltip'e somut yaz.
+    const parts: string[] = []
+    if (lowFrom && fromConf !== null) {
+      parts.push(`başlangıç tarihi güveni %${Math.round(fromConf * 100)}`)
+    }
+    if (lowTo && toConf !== null) {
+      parts.push(`bitiş tarihi güveni %${Math.round(toConf * 100)}`)
+    }
     signals.push({
       code: 'low_confidence',
       label: 'Düşük güven',
       variant: 'warning',
       icon: GaugeCircle,
+      reason: parts.length > 0 ? `AI çıkarımında ${parts.join(', ')} — orijinal kaynaktan doğrulayın.` : undefined,
     })
   }
 
