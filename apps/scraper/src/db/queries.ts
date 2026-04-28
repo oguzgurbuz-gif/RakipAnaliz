@@ -1600,3 +1600,241 @@ export async function updateWeeklyReportDiffMetadata(
     [data.anomalyFlagsJson, data.diffMetadataJson, reportId]
   );
 }
+
+// ---------------------------------------------------------------------------
+// Marketing pipeline (Bi'Talih weekly intelligence) — Dalga 1 helpers
+// ---------------------------------------------------------------------------
+//
+// All helpers follow the same conventions as the rest of this file:
+//   - Use $1/$2/... pgsql-style placeholders (translated by compat-query).
+//   - Coerce DECIMAL/BIGINT columns to JS Number at the boundary so callers
+//     never have to deal with mysql2's "string for big numbers" surprise.
+//   - Map MySQL TINYINT(1) → boolean for the `resolved` flag.
+//
+// Mapped result types live in @bitalih/shared/marketing so dashboard routes
+// and scraper jobs share one shape.
+
+import type {
+  ChannelMapping,
+  FxRate,
+  MappableSourceSystem,
+  Property,
+  UnmappedSource,
+  UnmappedSourceSystem,
+} from '@bitalih/shared/marketing';
+
+function rowToProperty(row: Record<string, unknown>): Property {
+  return {
+    id: Number(row.id),
+    name: String(row.name),
+    timezone: String(row.timezone),
+    created_at: String(row.created_at),
+  };
+}
+
+function rowToFxRate(row: Record<string, unknown>): FxRate {
+  return {
+    id: Number(row.id),
+    from_currency: String(row.from_currency),
+    to_currency: String(row.to_currency),
+    rate: Number(row.rate),
+    effective_from: String(row.effective_from).slice(0, 10),
+    effective_to:
+      row.effective_to == null ? null : String(row.effective_to).slice(0, 10),
+    source: String(row.source ?? 'manual'),
+    notes: row.notes == null ? null : String(row.notes),
+    created_at: String(row.created_at),
+  };
+}
+
+function rowToChannelMapping(row: Record<string, unknown>): ChannelMapping {
+  return {
+    id: Number(row.id),
+    property_id: Number(row.property_id),
+    source_system: String(row.source_system) as MappableSourceSystem,
+    source_key: String(row.source_key),
+    segment: row.segment as ChannelMapping['segment'],
+    category: String(row.category),
+    notes: row.notes == null ? null : String(row.notes),
+    created_at: String(row.created_at),
+    updated_at: String(row.updated_at),
+  };
+}
+
+function rowToUnmappedSource(row: Record<string, unknown>): UnmappedSource {
+  return {
+    id: Number(row.id),
+    property_id: Number(row.property_id),
+    source_system: String(row.source_system) as UnmappedSourceSystem,
+    source_key: String(row.source_key),
+    first_seen: String(row.first_seen).slice(0, 10),
+    last_seen: String(row.last_seen).slice(0, 10),
+    occurrence_count: Number(row.occurrence_count),
+    resolved: Boolean(Number(row.resolved)),
+    resolved_at: row.resolved_at == null ? null : String(row.resolved_at),
+    resolved_to_mapping_id:
+      row.resolved_to_mapping_id == null
+        ? null
+        : Number(row.resolved_to_mapping_id),
+  };
+}
+
+/**
+ * Fetch a single property by id. Returns null if not found (e.g. wrong
+ * tenant id passed in). MVP only ever calls this with id=1.
+ */
+export async function getProperty(
+  db: DbExecutor,
+  id: number
+): Promise<Property | null> {
+  const result = await db.query(
+    `SELECT id, name, timezone, created_at
+       FROM properties
+      WHERE id = $1
+      LIMIT 1`,
+    [id]
+  );
+  return result.rows[0] ? rowToProperty(result.rows[0]) : null;
+}
+
+/**
+ * List channel mappings for a property, optionally narrowed to one
+ * source_system. Sorted by source_key for deterministic admin UI ordering.
+ */
+export async function listChannelMappings(
+  db: DbExecutor,
+  propertyId: number,
+  sourceSystem?: MappableSourceSystem
+): Promise<ChannelMapping[]> {
+  if (sourceSystem) {
+    const result = await db.query(
+      `SELECT id, property_id, source_system, source_key, segment, category,
+              notes, created_at, updated_at
+         FROM channel_mappings
+        WHERE property_id = $1 AND source_system = $2
+        ORDER BY source_key ASC`,
+      [propertyId, sourceSystem]
+    );
+    return result.rows.map(rowToChannelMapping);
+  }
+  const result = await db.query(
+    `SELECT id, property_id, source_system, source_key, segment, category,
+            notes, created_at, updated_at
+       FROM channel_mappings
+      WHERE property_id = $1
+      ORDER BY source_system ASC, source_key ASC`,
+    [propertyId]
+  );
+  return result.rows.map(rowToChannelMapping);
+}
+
+/**
+ * Insert a new mapping or update an existing one (segment + category +
+ * notes mutable, key triple immutable). Re-runnable; mapping engine'in
+ * "yeni source görünce admin queue'dan promote et" akışı bunu çağırır.
+ */
+export async function upsertChannelMapping(
+  db: DbExecutor,
+  input: {
+    propertyId: number;
+    sourceSystem: MappableSourceSystem;
+    sourceKey: string;
+    segment: ChannelMapping['segment'];
+    category: string;
+    notes?: string | null;
+  }
+): Promise<void> {
+  await db.query(
+    `INSERT INTO channel_mappings
+       (property_id, source_system, source_key, segment, category, notes)
+     VALUES ($1, $2, $3, $4, $5, $6)
+     ON DUPLICATE KEY UPDATE
+       segment = VALUES(segment),
+       category = VALUES(category),
+       notes = VALUES(notes),
+       updated_at = CURRENT_TIMESTAMP`,
+    [
+      input.propertyId,
+      input.sourceSystem,
+      input.sourceKey,
+      input.segment,
+      input.category,
+      input.notes ?? null,
+    ]
+  );
+}
+
+/**
+ * Mark a source key as unmapped (or bump its occurrence counter + last_seen
+ * if it was already flagged). Idempotent — mapping engine her ham source
+ * için günde bir kez çağırır; aynı gün içindeki tekrar çağrılar
+ * occurrence_count'u şişirmemeli mi sorusu açık (şu an her çağrı +1 yapar).
+ */
+export async function flagUnmappedSource(
+  db: DbExecutor,
+  input: {
+    propertyId: number;
+    sourceSystem: UnmappedSourceSystem;
+    sourceKey: string;
+    /** ISO date — typically the metric row's date. */
+    date: string;
+  }
+): Promise<void> {
+  await db.query(
+    `INSERT INTO unmapped_sources
+       (property_id, source_system, source_key, first_seen, last_seen, occurrence_count)
+     VALUES ($1, $2, $3, $4, $4, 1)
+     ON DUPLICATE KEY UPDATE
+       last_seen = GREATEST(last_seen, VALUES(last_seen)),
+       first_seen = LEAST(first_seen, VALUES(first_seen)),
+       occurrence_count = occurrence_count + 1`,
+    [input.propertyId, input.sourceSystem, input.sourceKey, input.date]
+  );
+}
+
+/**
+ * List unmapped sources for the admin queue. Default: only unresolved.
+ * Sorted last_seen DESC so the most recently-seen unknowns are at the top.
+ */
+export async function listUnmappedSources(
+  db: DbExecutor,
+  propertyId: number,
+  resolved = false
+): Promise<UnmappedSource[]> {
+  const result = await db.query(
+    `SELECT id, property_id, source_system, source_key, first_seen, last_seen,
+            occurrence_count, resolved, resolved_at, resolved_to_mapping_id
+       FROM unmapped_sources
+      WHERE property_id = $1 AND resolved = $2
+      ORDER BY last_seen DESC, occurrence_count DESC`,
+    [propertyId, resolved ? 1 : 0]
+  );
+  return result.rows.map(rowToUnmappedSource);
+}
+
+/**
+ * Look up the currently-effective FX rate for a (from, to) pair. asOf
+ * defaults to today (UTC) — caller should pass the snapshot's week_start
+ * for historical reproducibility once snapshots are frozen.
+ */
+export async function getCurrentFxRate(
+  db: DbExecutor,
+  from: string,
+  to: string,
+  asOf?: string
+): Promise<FxRate | null> {
+  const reference = (asOf ?? new Date().toISOString().slice(0, 10)).slice(0, 10);
+  const result = await db.query(
+    `SELECT id, from_currency, to_currency, rate, effective_from, effective_to,
+            source, notes, created_at
+       FROM fx_rates
+      WHERE from_currency = $1
+        AND to_currency = $2
+        AND effective_from <= $3
+        AND (effective_to IS NULL OR effective_to >= $3)
+      ORDER BY effective_from DESC
+      LIMIT 1`,
+    [from.toUpperCase(), to.toUpperCase(), reference]
+  );
+  return result.rows[0] ? rowToFxRate(result.rows[0]) : null;
+}
